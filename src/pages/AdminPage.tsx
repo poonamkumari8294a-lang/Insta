@@ -7,6 +7,7 @@ import {
   fetchAdminStats,
   fetchAdminOrders,
   fetchAdminContent,
+  fetchSiteSettings,
   createAdminContent,
   updateAdminContent,
   deleteAdminContent,
@@ -14,6 +15,7 @@ import {
   verifyAdminOrder,
   formatINR
 } from '../utils/api';
+import { HomepageControlTab } from '../components/HomepageControlTab';
 import {
   Lock,
   LayoutDashboard,
@@ -38,7 +40,20 @@ import {
   Copy,
   Check,
   KeyRound,
-  ShieldAlert
+  ShieldAlert,
+  Sliders,
+  Filter,
+  Image as ImageIcon,
+  Flame,
+  ArrowUpDown,
+  Tag,
+  CheckSquare,
+  Square,
+  TrendingUp,
+  Package,
+  Layers,
+  Calendar,
+  DollarSign
 } from 'lucide-react';
 
 interface AdminPageProps {
@@ -53,13 +68,21 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
   const [loading, setLoading] = useState(false);
 
   // Active Tab
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'content' | 'orders' | 'settings' | 'setup'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'content' | 'homepage' | 'orders' | 'settings' | 'setup'>('dashboard');
 
   // Data states
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [contentList, setContentList] = useState<MediaItem[]>([]);
   const [ordersList, setOrdersList] = useState<OrderItem[]>([]);
   const [siteSettings, setSiteSettings] = useState<SiteSettings | null>(null);
+
+  // Content Filtering, Search, Sorting, Bulk selection
+  const [contentSearch, setContentSearch] = useState('');
+  const [contentTypeFilter, setContentTypeFilter] = useState<'all' | 'video' | 'photo' | 'pack'>('all');
+  const [contentAccessFilter, setContentAccessFilter] = useState<'all' | 'premium' | 'free'>('all');
+  const [contentSort, setContentSort] = useState<'newest' | 'oldest' | 'views' | 'priceAsc' | 'priceDesc'>('newest');
+  const [selectedContentIds, setSelectedContentIds] = useState<string[]>([]);
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
 
   // Content form modal
   const [showContentModal, setShowContentModal] = useState(false);
@@ -110,14 +133,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
   const loadAdminData = async () => {
     setLoading(true);
     try {
-      const [statsData, ordersData, contentData] = await Promise.all([
+      const [statsData, ordersData, contentData, settingsData] = await Promise.all([
         fetchAdminStats(),
         fetchAdminOrders(),
-        fetchAdminContent()
+        fetchAdminContent(),
+        fetchSiteSettings()
       ]);
       setStats(statsData);
       setOrdersList(ordersData);
       setContentList(contentData);
+      setSiteSettings(settingsData);
     } catch (err: any) {
       console.error(err);
       if (err.message?.includes('Unauthorized')) {
@@ -181,6 +206,75 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
     }
   };
 
+  // Bulk Content Handlers
+  const handleToggleSelectAll = () => {
+    if (selectedContentIds.length === filteredContent.length) {
+      setSelectedContentIds([]);
+    } else {
+      setSelectedContentIds(filteredContent.map(c => c.id));
+    }
+  };
+
+  const handleToggleSelectOne = (id: string) => {
+    if (selectedContentIds.includes(id)) {
+      setSelectedContentIds(selectedContentIds.filter(i => i !== id));
+    } else {
+      setSelectedContentIds([...selectedContentIds, id]);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedContentIds.length === 0) return;
+    if (!confirm(`Are you sure you want to delete ${selectedContentIds.length} selected items?`)) return;
+    setBulkActionLoading(true);
+    try {
+      for (const id of selectedContentIds) {
+        await deleteAdminContent(id);
+      }
+      setSelectedContentIds([]);
+      await loadAdminData();
+      alert('Selected items deleted successfully!');
+    } catch (err: any) {
+      alert(err.message || 'Bulk delete failed');
+    } finally {
+      setBulkActionLoading(false);
+    }
+  };
+
+  const handleBulkPublish = async (publish: boolean) => {
+    if (selectedContentIds.length === 0) return;
+    setBulkActionLoading(true);
+    try {
+      for (const id of selectedContentIds) {
+        await updateAdminContent(id, { published: publish });
+      }
+      setSelectedContentIds([]);
+      await loadAdminData();
+      alert(`Selected items ${publish ? 'published' : 'unpublished'}!`);
+    } catch (err: any) {
+      alert(err.message || 'Bulk publish update failed');
+    } finally {
+      setBulkActionLoading(false);
+    }
+  };
+
+  const handleBulkFeatured = async (featured: boolean) => {
+    if (selectedContentIds.length === 0) return;
+    setBulkActionLoading(true);
+    try {
+      for (const id of selectedContentIds) {
+        await updateAdminContent(id, { featured });
+      }
+      setSelectedContentIds([]);
+      await loadAdminData();
+      alert(`Selected items ${featured ? 'featured on homepage' : 'removed from featured'}!`);
+    } catch (err: any) {
+      alert(err.message || 'Bulk feature update failed');
+    } finally {
+      setBulkActionLoading(false);
+    }
+  };
+
   const handleManualVerify = async (orderId: string) => {
     const txnRef = prompt('Enter Bank UTR / SMS Reference for confirmation:', `ADMIN_VERIFIED_${Date.now()}`);
     if (!txnRef) return;
@@ -192,6 +286,43 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
       alert(err.message || 'Failed to verify order');
     }
   };
+
+  // Filter & Sort Content Items
+  const filteredContent = contentList
+    .filter((c) => {
+      if (contentTypeFilter !== 'all' && c.type !== contentTypeFilter) return false;
+      if (contentAccessFilter !== 'all' && c.access !== contentAccessFilter) return false;
+      if (contentSearch.trim()) {
+        const q = contentSearch.toLowerCase();
+        const matchesTitle = c.title.toLowerCase().includes(q);
+        const matchesDesc = c.description?.toLowerCase().includes(q);
+        const matchesTags = c.tags?.some(t => t.toLowerCase().includes(q));
+        if (!matchesTitle && !matchesDesc && !matchesTags) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (contentSort === 'newest') return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      if (contentSort === 'oldest') return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      if (contentSort === 'views') return (b.views || 0) - (a.views || 0);
+      if (contentSort === 'priceAsc') return a.price - b.price;
+      if (contentSort === 'priceDesc') return b.price - a.price;
+      return 0;
+    });
+
+  // Filtered orders
+  const filteredOrders = ordersList.filter((o) => {
+    if (orderStatusFilter !== 'all' && o.status !== orderStatusFilter) return false;
+    if (orderSearch.trim()) {
+      const q = orderSearch.toLowerCase();
+      return (
+        o.orderId.toLowerCase().includes(q) ||
+        o.contentTitle.toLowerCase().includes(q) ||
+        (o.transactionRef && o.transactionRef.toLowerCase().includes(q))
+      );
+    }
+    return true;
+  });
 
   // If not authenticated, show secure login
   if (!isAuthenticated) {
@@ -282,20 +413,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
     );
   }
 
-  // Filtered orders
-  const filteredOrders = ordersList.filter((o) => {
-    if (orderStatusFilter !== 'all' && o.status !== orderStatusFilter) return false;
-    if (orderSearch.trim()) {
-      const q = orderSearch.toLowerCase();
-      return (
-        o.orderId.toLowerCase().includes(q) ||
-        o.contentTitle.toLowerCase().includes(q) ||
-        (o.transactionRef && o.transactionRef.toLowerCase().includes(q))
-      );
-    }
-    return true;
-  });
-
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10 space-y-8">
       
@@ -307,13 +424,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
           </div>
           <div>
             <h1 className="font-display font-black text-lg sm:text-xl text-purple-950 flex items-center gap-2">
-              Creator Control Center
+              Creator Complete Control Center
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-700 border border-emerald-200">
                 Live Admin
               </span>
             </h1>
             <p className="text-xs text-purple-900/70 font-medium">
-              UPI Payee: <strong className="text-pink-700">{stats?.paymentConfig?.upiId || 'ashokjee62022.wallet@phonepe'}</strong>
+              UPI Payee: <strong className="text-pink-700">{siteSettings?.upiId || 'ashokjee62022.wallet@phonepe'}</strong>
             </p>
           </div>
         </div>
@@ -357,7 +474,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
           }`}
         >
           <LayoutDashboard className="w-4 h-4" />
-          <span>Dashboard</span>
+          <span>Dashboard Analytics</span>
         </button>
 
         <button
@@ -373,6 +490,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
         </button>
 
         <button
+          onClick={() => setActiveTab('homepage')}
+          className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap ${
+            activeTab === 'homepage'
+              ? 'bg-pink-600 text-white shadow-md shadow-pink-500/25'
+              : 'text-purple-900/70 hover:text-purple-950 hover:bg-white/60'
+          }`}
+        >
+          <Sliders className="w-4 h-4" />
+          <span>Homepage Control</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('orders')}
           className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap ${
             activeTab === 'orders'
@@ -381,7 +510,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
           }`}
         >
           <ShoppingBag className="w-4 h-4" />
-          <span>UPI Orders ({ordersList.length})</span>
+          <span>Orders & Payments ({ordersList.length})</span>
         </button>
 
         <button
@@ -410,16 +539,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
       </div>
 
       {/* ---------------------------------------------------- */}
-      {/* TAB 1: DASHBOARD OVERVIEW */}
+      {/* TAB 1: DASHBOARD OVERVIEW (ALL 10+ DASHBOARD CARDS & INTERVALS) */}
       {/* ---------------------------------------------------- */}
       {activeTab === 'dashboard' && stats && (
         <div className="space-y-8 animate-in fade-in duration-200">
           
-          {/* Top Metric Cards */}
+          {/* Revenue Intervals Showcase */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            
-            <div className="glass-card rounded-3xl p-5 border border-white/80 shadow-md">
-              <div className="flex items-center justify-between text-purple-900/70 text-xs font-black uppercase">
+            <div className="glass-card rounded-3xl p-5 border border-white/80 shadow-md bg-gradient-to-br from-emerald-500/10 to-transparent">
+              <div className="flex items-center justify-between text-emerald-800 text-xs font-black uppercase">
                 <span>Total Revenue</span>
                 <IndianRupee className="w-4 h-4 text-emerald-600" />
               </div>
@@ -427,46 +555,185 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                 {formatINR(stats.totalRevenue)}
               </div>
               <div className="text-[11px] text-emerald-700 font-bold mt-1">
-                Verified Bank UPI Collections
+                Lifetime verified earnings
               </div>
             </div>
 
             <div className="glass-card rounded-3xl p-5 border border-white/80 shadow-md">
               <div className="flex items-center justify-between text-purple-900/70 text-xs font-black uppercase">
-                <span>Paid Orders</span>
-                <CheckCircle2 className="w-4 h-4 text-pink-600" />
+                <span>Today's Revenue</span>
+                <Calendar className="w-4 h-4 text-pink-600" />
               </div>
-              <div className="font-display text-2xl sm:text-3xl font-black text-purple-950 mt-2">
-                {stats.paidOrders}
+              <div className="font-display text-2xl sm:text-3xl font-black text-pink-700 mt-2">
+                {formatINR(stats.todayRevenue || 0)}
               </div>
-              <div className="text-[11px] text-purple-900/60 font-medium mt-1">
-                Out of {stats.totalOrders} total checkout sessions
+              <div className="text-[11px] text-pink-600 font-bold mt-1">
+                Live 24h collections
               </div>
             </div>
 
             <div className="glass-card rounded-3xl p-5 border border-white/80 shadow-md">
               <div className="flex items-center justify-between text-purple-900/70 text-xs font-black uppercase">
-                <span>VIP Content Items</span>
-                <Sparkles className="w-4 h-4 text-yellow-500" />
+                <span>This Week's Revenue</span>
+                <TrendingUp className="w-4 h-4 text-purple-600" />
               </div>
               <div className="font-display text-2xl sm:text-3xl font-black text-purple-950 mt-2">
+                {formatINR(stats.thisWeekRevenue || 0)}
+              </div>
+              <div className="text-[11px] text-purple-700 font-bold mt-1">
+                Past 7 days earnings
+              </div>
+            </div>
+
+            <div className="glass-card rounded-3xl p-5 border border-white/80 shadow-md">
+              <div className="flex items-center justify-between text-purple-900/70 text-xs font-black uppercase">
+                <span>This Month's Revenue</span>
+                <DollarSign className="w-4 h-4 text-blue-600" />
+              </div>
+              <div className="font-display text-2xl sm:text-3xl font-black text-purple-950 mt-2">
+                {formatINR(stats.thisMonthRevenue || 0)}
+              </div>
+              <div className="text-[11px] text-blue-700 font-bold mt-1">
+                Current month total
+              </div>
+            </div>
+          </div>
+
+          {/* Detailed Metric Cards (Total Views, Photos, Videos, Free, Premium, Orders, Paid, Pending, Failed) */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+            
+            <div className="glass-card rounded-2xl p-4 border border-white/80 shadow-xs">
+              <div className="flex items-center justify-between text-purple-900/70 text-[10px] font-black uppercase">
+                <span>Total Views</span>
+                <Eye className="w-3.5 h-3.5 text-blue-600" />
+              </div>
+              <div className="font-display text-xl font-black text-purple-950 mt-1">
+                {stats.totalViews ? stats.totalViews.toLocaleString() : siteSettings?.viewsCount || '346.0K'}
+              </div>
+              <div className="text-[10px] text-purple-900/60 font-semibold mt-0.5">Impressions</div>
+            </div>
+
+            <div className="glass-card rounded-2xl p-4 border border-white/80 shadow-xs">
+              <div className="flex items-center justify-between text-purple-900/70 text-[10px] font-black uppercase">
+                <span>Total Photos</span>
+                <ImageIcon className="w-3.5 h-3.5 text-pink-600" />
+              </div>
+              <div className="font-display text-xl font-black text-purple-950 mt-1">
+                {stats.totalPhotos ?? contentList.filter(c => c.type === 'photo').length}
+              </div>
+              <div className="text-[10px] text-purple-900/60 font-semibold mt-0.5">Photo Sets</div>
+            </div>
+
+            <div className="glass-card rounded-2xl p-4 border border-white/80 shadow-xs">
+              <div className="flex items-center justify-between text-purple-900/70 text-[10px] font-black uppercase">
+                <span>Total Videos</span>
+                <Film className="w-3.5 h-3.5 text-purple-600" />
+              </div>
+              <div className="font-display text-xl font-black text-purple-950 mt-1">
+                {stats.totalVideos ?? contentList.filter(c => c.type === 'video').length}
+              </div>
+              <div className="text-[10px] text-purple-900/60 font-semibold mt-0.5">Master Reels</div>
+            </div>
+
+            <div className="glass-card rounded-2xl p-4 border border-white/80 shadow-xs">
+              <div className="flex items-center justify-between text-purple-900/70 text-[10px] font-black uppercase">
+                <span>Free Content</span>
+                <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+              </div>
+              <div className="font-display text-xl font-black text-emerald-700 mt-1">
+                {stats.freeContent}
+              </div>
+              <div className="text-[10px] text-purple-900/60 font-semibold mt-0.5">Zero-cost samples</div>
+            </div>
+
+            <div className="glass-card rounded-2xl p-4 border border-white/80 shadow-xs">
+              <div className="flex items-center justify-between text-purple-900/70 text-[10px] font-black uppercase">
+                <span>Premium Content</span>
+                <Flame className="w-3.5 h-3.5 text-yellow-500" />
+              </div>
+              <div className="font-display text-xl font-black text-pink-700 mt-1">
                 {stats.premiumContent}
               </div>
-              <div className="text-[11px] text-purple-900/60 font-medium mt-1">
-                Plus {stats.freeContent} free preview samples
+              <div className="text-[10px] text-purple-900/60 font-semibold mt-0.5">VIP Paywalled</div>
+            </div>
+
+            <div className="glass-card rounded-2xl p-4 border border-white/80 shadow-xs">
+              <div className="flex items-center justify-between text-purple-900/70 text-[10px] font-black uppercase">
+                <span>Total Orders</span>
+                <ShoppingBag className="w-3.5 h-3.5 text-indigo-600" />
+              </div>
+              <div className="font-display text-xl font-black text-purple-950 mt-1">
+                {stats.totalOrders}
+              </div>
+              <div className="text-[10px] text-purple-900/60 font-semibold mt-0.5">
+                {stats.paidOrders} paid • {stats.pendingOrders} pend
               </div>
             </div>
 
-            <div className="glass-card rounded-3xl p-5 border border-white/80 shadow-md">
-              <div className="flex items-center justify-between text-purple-900/70 text-xs font-black uppercase">
-                <span>Pending Verification</span>
-                <Clock className="w-4 h-4 text-amber-500" />
+          </div>
+
+          {/* Popular & Recent Content Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            {/* Popular Content */}
+            <div className="glass-card rounded-3xl p-5 border border-white/80 shadow-md space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-display font-black text-sm text-purple-950 flex items-center gap-1.5">
+                  <Flame className="w-4 h-4 text-pink-600" />
+                  Popular Content (Most Viewed & Liked)
+                </h3>
+                <span className="text-[10px] text-purple-900/60 font-semibold">Top Performers</span>
               </div>
-              <div className="font-display text-2xl sm:text-3xl font-black text-amber-700 mt-2">
-                {stats.pendingOrders}
+
+              <div className="space-y-2">
+                {(stats.popularContent || contentList.slice(0, 5)).map((item) => (
+                  <div key={item.id} className="flex items-center justify-between p-2.5 rounded-2xl bg-white/70 border border-purple-100">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <img src={item.thumbnailUrl} alt={item.title} className="w-10 h-10 rounded-xl object-cover" referrerPolicy="no-referrer" />
+                      <div className="min-w-0">
+                        <h4 className="text-xs font-black text-purple-950 truncate">{item.title}</h4>
+                        <span className="text-[10px] text-purple-900/60 font-medium">
+                          {item.type.toUpperCase()} • {item.access === 'free' ? 'FREE' : formatINR(item.price)}
+                        </span>
+                      </div>
+                    </div>
+                    <span className="text-xs font-black text-pink-700 shrink-0">
+                      {item.views} views
+                    </span>
+                  </div>
+                ))}
               </div>
-              <div className="text-[11px] text-amber-800 font-semibold mt-1">
-                Awaiting bank webhook
+            </div>
+
+            {/* Recent Content */}
+            <div className="glass-card rounded-3xl p-5 border border-white/80 shadow-md space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-display font-black text-sm text-purple-950 flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-purple-600" />
+                  Recently Added Content
+                </h3>
+                <button onClick={() => setActiveTab('content')} className="text-[10px] text-pink-600 font-bold hover:underline">
+                  Manage All →
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {(stats.recentContent || [...contentList].reverse().slice(0, 5)).map((item) => (
+                  <div key={item.id} className="flex items-center justify-between p-2.5 rounded-2xl bg-white/70 border border-purple-100">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <img src={item.thumbnailUrl} alt={item.title} className="w-10 h-10 rounded-xl object-cover" referrerPolicy="no-referrer" />
+                      <div className="min-w-0">
+                        <h4 className="text-xs font-black text-purple-950 truncate">{item.title}</h4>
+                        <span className="text-[10px] text-purple-900/60 font-medium">
+                          {new Date(item.createdAt).toLocaleDateString()} • {item.access === 'free' ? 'FREE' : formatINR(item.price)}
+                        </span>
+                      </div>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${item.published ? 'bg-emerald-100 text-emerald-700' : 'bg-zinc-100 text-zinc-600'}`}>
+                      {item.published ? 'Live' : 'Draft'}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -476,13 +743,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
           <div className="glass-card rounded-3xl p-6 border border-white/80 shadow-lg space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-display font-black text-base text-purple-950">
-                Recent Payment Orders
+                Recent Payment Orders & Audit Log
               </h3>
               <button
                 onClick={() => setActiveTab('orders')}
                 className="text-xs text-pink-600 hover:underline font-bold"
               >
-                View All Orders →
+                View All Orders ({ordersList.length}) →
               </button>
             </div>
 
@@ -555,15 +822,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
       )}
 
       {/* ---------------------------------------------------- */}
-      {/* TAB 2: CONTENT MANAGEMENT */}
+      {/* TAB 2: CONTENT MANAGEMENT WITH FULL CRUD, BULK ACTIONS & SEARCH */}
       {/* ---------------------------------------------------- */}
       {activeTab === 'content' && (
         <div className="space-y-6 animate-in fade-in duration-200">
           
-          <div className="flex items-center justify-between">
+          {/* Header & New Content Button */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h2 className="font-display font-black text-xl text-purple-950">Content Library</h2>
-              <p className="text-xs text-purple-900/70 font-medium">Upload photos, videos, and configure pricing.</p>
+              <h2 className="font-display font-black text-xl text-purple-950">Content Management & Library</h2>
+              <p className="text-xs text-purple-900/70 font-medium">
+                Add, edit, delete, publish/unpublish, feature, price, tag, and bulk control your VIP media catalog.
+              </p>
             </div>
 
             <button
@@ -585,88 +855,248 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                 });
                 setShowContentModal(true);
               }}
-              className="glow-pink-btn px-4 py-2.5 rounded-2xl text-xs font-black text-white flex items-center gap-1.5 shadow-md shadow-pink-500/20"
+              className="glow-pink-btn px-5 py-2.5 rounded-2xl text-xs font-black text-white flex items-center gap-1.5 shadow-md shadow-pink-500/20 active:scale-95 transition-transform"
             >
               <Plus className="w-4 h-4" />
-              <span>Add New Content</span>
+              <span>Add New Content Item</span>
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {contentList.map((item) => (
-              <div
-                key={item.id}
-                className="glass-card rounded-3xl p-4 border border-white/80 shadow-md flex flex-col justify-between space-y-3"
-              >
-                <div className="flex gap-3">
-                  <img
-                    src={item.thumbnailUrl}
-                    alt={item.title}
-                    className="w-20 h-24 rounded-2xl object-cover border border-purple-100 shrink-0"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-pink-100 text-pink-700 border border-pink-200">
-                        {item.type}
-                      </span>
-                      <span className="text-xs font-black text-emerald-700">
-                        {item.access === 'free' ? 'FREE' : formatINR(item.price)}
-                      </span>
-                    </div>
-                    <h4 className="text-xs sm:text-sm font-black text-purple-950 truncate mt-1">
-                      {item.title}
-                    </h4>
-                    <p className="text-[11px] text-purple-900/70 line-clamp-2 mt-1 font-medium">
-                      {item.description}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between pt-2 border-t border-purple-100 text-xs">
-                  <span className="text-[11px] text-purple-900/60 font-semibold">
-                    {item.views} views • {item.likes} likes
-                  </span>
-
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => setAdminPreviewItem(item)}
-                      className="p-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 shadow-sm"
-                      title="Preview Media"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setEditingItem(item);
-                        setContentFormData({ ...item });
-                        setShowContentModal(true);
-                      }}
-                      className="p-2 rounded-xl bg-white hover:bg-pink-50 text-purple-900 border border-purple-100 shadow-sm"
-                      title="Edit"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-
-                    <button
-                      onClick={() => handleDeleteContent(item.id)}
-                      className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 shadow-sm"
-                      title="Delete"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
+          {/* Search, Filter & Sort Controls Toolbar */}
+          <div className="p-4 rounded-3xl bg-white/80 backdrop-blur-xl border border-white/90 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-purple-900/40 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={contentSearch}
+                  onChange={(e) => setContentSearch(e.target.value)}
+                  placeholder="Search by title, tag, or description..."
+                  className="w-full bg-white border border-purple-200 rounded-2xl pl-9 pr-3 py-2 text-xs text-purple-950 placeholder-purple-900/40 shadow-xs font-medium"
+                />
               </div>
-            ))}
+
+              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                <select
+                  value={contentTypeFilter}
+                  onChange={(e) => setContentTypeFilter(e.target.value as any)}
+                  className="bg-white border border-purple-200 rounded-2xl px-3 py-2 text-xs text-purple-950 shadow-xs font-semibold"
+                >
+                  <option value="all">All Media Types</option>
+                  <option value="video">Videos Only</option>
+                  <option value="photo">Photos Only</option>
+                  <option value="pack">Packs Only</option>
+                </select>
+
+                <select
+                  value={contentAccessFilter}
+                  onChange={(e) => setContentAccessFilter(e.target.value as any)}
+                  className="bg-white border border-purple-200 rounded-2xl px-3 py-2 text-xs text-purple-950 shadow-xs font-semibold"
+                >
+                  <option value="all">All Access</option>
+                  <option value="premium">VIP Premium</option>
+                  <option value="free">Free Preview</option>
+                </select>
+
+                <select
+                  value={contentSort}
+                  onChange={(e) => setContentSort(e.target.value as any)}
+                  className="bg-white border border-purple-200 rounded-2xl px-3 py-2 text-xs text-purple-950 shadow-xs font-semibold"
+                >
+                  <option value="newest">Sort: Newest First</option>
+                  <option value="oldest">Sort: Oldest First</option>
+                  <option value="views">Sort: Most Views</option>
+                  <option value="priceDesc">Sort: Price High to Low</option>
+                  <option value="priceAsc">Sort: Price Low to High</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Bulk Action Toolbar */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-2">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleToggleSelectAll}
+                className="flex items-center gap-1.5 text-xs font-black text-purple-950 hover:text-pink-600 transition-colors"
+              >
+                {selectedContentIds.length === filteredContent.length && filteredContent.length > 0 ? (
+                  <CheckSquare className="w-4 h-4 text-pink-600" />
+                ) : (
+                  <Square className="w-4 h-4 text-purple-400" />
+                )}
+                <span>Select All ({filteredContent.length})</span>
+              </button>
+
+              {selectedContentIds.length > 0 && (
+                <span className="text-xs font-bold text-pink-700 bg-pink-100 px-2 py-0.5 rounded-full">
+                  {selectedContentIds.length} Selected
+                </span>
+              )}
+            </div>
+
+            {selectedContentIds.length > 0 && (
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  type="button"
+                  disabled={bulkActionLoading}
+                  onClick={() => handleBulkPublish(true)}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-100 hover:bg-emerald-200 text-emerald-800 text-[11px] font-black border border-emerald-200 shadow-xs transition-all"
+                >
+                  Publish Selected
+                </button>
+                <button
+                  type="button"
+                  disabled={bulkActionLoading}
+                  onClick={() => handleBulkPublish(false)}
+                  className="px-3 py-1.5 rounded-xl bg-zinc-200 hover:bg-zinc-300 text-zinc-800 text-[11px] font-black shadow-xs transition-all"
+                >
+                  Unpublish
+                </button>
+                <button
+                  type="button"
+                  disabled={bulkActionLoading}
+                  onClick={() => handleBulkFeatured(true)}
+                  className="px-3 py-1.5 rounded-xl bg-pink-100 hover:bg-pink-200 text-pink-700 text-[11px] font-black border border-pink-200 shadow-xs transition-all"
+                >
+                  Feature on Home
+                </button>
+                <button
+                  type="button"
+                  disabled={bulkActionLoading}
+                  onClick={handleBulkDelete}
+                  className="px-3 py-1.5 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-800 text-[11px] font-black border border-rose-200 shadow-xs transition-all flex items-center gap-1"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>Bulk Delete</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Content Cards Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {filteredContent.map((item) => {
+              const isSelected = selectedContentIds.includes(item.id);
+              return (
+                <div
+                  key={item.id}
+                  className={`glass-card rounded-3xl p-4 border transition-all flex flex-col justify-between space-y-3 ${
+                    isSelected ? 'border-pink-500 ring-2 ring-pink-400/30 bg-pink-50/40' : 'border-white/80 shadow-md'
+                  }`}
+                >
+                  <div className="flex gap-3">
+                    {/* Checkbox selector */}
+                    <div className="pt-1">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => handleToggleSelectOne(item.id)}
+                        className="rounded text-pink-600 w-4 h-4 cursor-pointer"
+                      />
+                    </div>
+
+                    <img
+                      src={item.thumbnailUrl}
+                      alt={item.title}
+                      className="w-20 h-24 rounded-2xl object-cover border border-purple-100 shrink-0"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-1 flex-wrap">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-pink-100 text-pink-700 border border-pink-200">
+                          {item.type}
+                        </span>
+                        <span className="text-xs font-black text-emerald-700">
+                          {item.access === 'free' ? 'FREE' : formatINR(item.price)}
+                        </span>
+                      </div>
+                      <h4 className="text-xs sm:text-sm font-black text-purple-950 truncate mt-1">
+                        {item.title}
+                      </h4>
+                      <p className="text-[11px] text-purple-900/70 line-clamp-2 mt-1 font-medium">
+                        {item.description}
+                      </p>
+
+                      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                        {item.featured && (
+                          <span className="px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 text-[9px] font-black">
+                            ★ Featured
+                          </span>
+                        )}
+                        {!item.published && (
+                          <span className="px-1.5 py-0.5 rounded-md bg-zinc-200 text-zinc-700 text-[9px] font-bold">
+                            Draft
+                          </span>
+                        )}
+                        {item.tags?.slice(0, 2).map((t, idx) => (
+                          <span key={idx} className="px-1.5 py-0.5 rounded-md bg-purple-50 text-purple-800 text-[9px] font-bold">
+                            #{t}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-purple-100 text-xs">
+                    <span className="text-[11px] text-purple-900/60 font-semibold">
+                      {item.views} views • {item.likes} likes
+                    </span>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setAdminPreviewItem(item)}
+                        className="p-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 shadow-sm"
+                        title="Preview Media"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setEditingItem(item);
+                          setContentFormData({ ...item });
+                          setShowContentModal(true);
+                        }}
+                        className="p-2 rounded-xl bg-white hover:bg-pink-50 text-purple-900 border border-purple-100 shadow-sm"
+                        title="Edit"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        onClick={() => handleDeleteContent(item.id)}
+                        className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 shadow-sm"
+                        title="Delete"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
         </div>
       )}
 
       {/* ---------------------------------------------------- */}
-      {/* TAB 3: ORDERS MANAGEMENT */}
+      {/* TAB 3: HOMEPAGE CONTROL (NO-CODE SECTION REORDER & TOGGLE) */}
+      {/* ---------------------------------------------------- */}
+      {activeTab === 'homepage' && siteSettings && (
+        <HomepageControlTab
+          settings={siteSettings}
+          onSettingsUpdated={(updated) => {
+            setSiteSettings(updated);
+            onSettingsUpdated(updated);
+          }}
+        />
+      )}
+
+      {/* ---------------------------------------------------- */}
+      {/* TAB 4: ORDERS MANAGEMENT */}
       {/* ---------------------------------------------------- */}
       {activeTab === 'orders' && (
         <div className="space-y-6 animate-in fade-in duration-200">
@@ -777,13 +1207,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
       )}
 
       {/* ---------------------------------------------------- */}
-      {/* TAB 4: SETTINGS */}
+      {/* TAB 5: PROFILE & PAYMENT SETTINGS */}
       {/* ---------------------------------------------------- */}
       {activeTab === 'settings' && (
         <div className="glass-card rounded-3xl p-6 sm:p-8 border border-white/80 space-y-6 max-w-3xl animate-in fade-in duration-200 shadow-lg">
           <div>
-            <h2 className="font-display font-black text-xl text-purple-950">Creator & Payment Settings</h2>
-            <p className="text-xs text-purple-900/70 font-medium">Update your creator branding, bio, and UPI payment destination.</p>
+            <h2 className="font-display font-black text-xl text-purple-950">Creator Profile, Branding & Payment Settings</h2>
+            <p className="text-xs text-purple-900/70 font-medium">Update your profile photo, cover banner, bio, stats, and UPI payment destination.</p>
           </div>
 
           <form
@@ -794,97 +1224,223 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
               const updates: Partial<SiteSettings> = {
                 creatorName: formData.get('creatorName') as string,
                 username: formData.get('username') as string,
+                profilePicUrl: formData.get('profilePicUrl') as string,
+                bannerUrl: formData.get('bannerUrl') as string,
                 bio: formData.get('bio') as string,
                 tagline: formData.get('tagline') as string,
                 instagramUrl: formData.get('instagramUrl') as string,
+                instagramHandle: formData.get('instagramHandle') as string,
+                badgeText: formData.get('badgeText') as string || 'VIP Creator',
+                followersCount: Number(formData.get('followersCount')) || 3358,
+                postsCount: Number(formData.get('postsCount')) || 135,
+                viewsCount: formData.get('viewsCount') as string || '346.0K',
                 upiId: formData.get('upiId') as string,
                 announcement: formData.get('announcement') as string,
+                announcementEnabled: formData.get('announcementEnabled') === 'on',
                 supportEmail: formData.get('supportEmail') as string,
                 supportTelegram: formData.get('supportTelegram') as string
               };
               try {
                 const res = await updateAdminSettings(updates);
+                setSiteSettings(res);
                 onSettingsUpdated(res);
-                alert('Settings updated successfully!');
+                alert('Settings and Profile Photo updated successfully!');
               } catch (err: any) {
                 alert(err.message || 'Failed to update settings');
               }
             }}
-            className="space-y-4"
+            className="space-y-5"
           >
+            {/* Live Profile Picture & Banner Preview Section */}
+            <div className="p-4 bg-purple-50/70 border border-purple-200/80 rounded-2xl space-y-3">
+              <span className="text-xs font-black text-purple-950 uppercase tracking-wider block">📸 Profile & Cover Images</span>
+              
+              <div className="flex flex-col sm:flex-row items-center gap-4">
+                <div className="w-20 h-20 rounded-full border-3 border-pink-500 overflow-hidden shrink-0 shadow-md bg-zinc-900">
+                  <img
+                    src={siteSettings?.profilePicUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80'}
+                    alt="Preview"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="flex-1 w-full space-y-2">
+                  <div>
+                    <label className="text-[11px] font-bold text-purple-950 block mb-0.5">Profile Photo Direct Image URL</label>
+                    <input
+                      name="profilePicUrl"
+                      defaultValue={siteSettings?.profilePicUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80'}
+                      placeholder="https://... image link or direct URL"
+                      required
+                      className="w-full bg-white border border-purple-200 rounded-xl px-3 py-2 text-xs text-purple-950 shadow-sm font-medium"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-purple-950 block mb-0.5">Cover Banner Background URL</label>
+                    <input
+                      name="bannerUrl"
+                      defaultValue={siteSettings?.bannerUrl || 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=1200&auto=format&fit=crop&q=80'}
+                      placeholder="https://... banner image link"
+                      className="w-full bg-white border border-purple-200 rounded-xl px-3 py-2 text-xs text-purple-950 shadow-sm font-medium"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="text-xs font-bold text-purple-950 block mb-1">Creator Name</label>
+                <label className="text-xs font-bold text-purple-950 block mb-1">Creator Display Name</label>
                 <input
                   name="creatorName"
-                  defaultValue="Ruma Kumari"
+                  defaultValue={siteSettings?.creatorName || 'Ruma Kumari'}
                   required
                   className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2.5 text-xs text-purple-950 shadow-sm font-medium"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-bold text-purple-950 block mb-1">UPI ID (Payment Destination)</label>
+                <label className="text-xs font-bold text-purple-950 block mb-1">UPI ID (All Payments Go Here)</label>
                 <input
                   name="upiId"
-                  defaultValue="ashokjee62022.wallet@phonepe"
+                  defaultValue={siteSettings?.upiId || 'ashokjee62022.wallet@phonepe'}
                   required
                   className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2.5 text-xs text-emerald-700 font-mono font-bold shadow-sm"
                 />
               </div>
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs font-bold text-purple-950 block mb-1">Profile Badge Text</label>
+                <input
+                  name="badgeText"
+                  defaultValue={siteSettings?.badgeText || 'VIP Creator'}
+                  className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2 text-xs text-purple-950 shadow-sm font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-purple-950 block mb-1">Tagline (Under Name on Home)</label>
+                <input
+                  name="tagline"
+                  defaultValue={siteSettings?.tagline || 'Unlock my private, uncut HD photos, backstage reels & VIP stories instantly.'}
+                  className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2 text-xs text-purple-950 shadow-sm font-medium"
+                />
+              </div>
+            </div>
+
             <div>
-              <label className="text-xs font-bold text-purple-950 block mb-1">Bio / Tagline</label>
+              <label className="text-xs font-bold text-purple-950 block mb-1">Bio / Profile Description</label>
               <textarea
                 name="bio"
                 rows={2}
-                defaultValue="Pretty mood always 💋 | Fitness, Lifestyle & Exclusive VIP Content"
+                defaultValue={siteSettings?.bio || 'Pretty mood always 💋 | Fitness, Lifestyle & Exclusive VIP Content'}
                 className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2 text-xs text-purple-950 shadow-sm font-medium"
               />
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs font-bold text-purple-950 block mb-1">Posts Count</label>
+                <input
+                  name="postsCount"
+                  type="number"
+                  defaultValue={siteSettings?.postsCount || 135}
+                  className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2 text-xs text-purple-950 shadow-sm font-medium"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-purple-950 block mb-1">Followers Count</label>
+                <input
+                  name="followersCount"
+                  type="number"
+                  defaultValue={siteSettings?.followersCount || 3358}
+                  className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2 text-xs text-purple-950 shadow-sm font-medium"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-purple-950 block mb-1">Monthly Views Count</label>
+                <input
+                  name="viewsCount"
+                  defaultValue={siteSettings?.viewsCount || '346.0K'}
+                  className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2 text-xs text-purple-950 shadow-sm font-medium"
+                />
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="text-xs font-bold text-purple-950 block mb-1">Instagram URL</label>
+                <label className="text-xs font-bold text-purple-950 block mb-1">Instagram Profile URL</label>
                 <input
                   name="instagramUrl"
-                  defaultValue="https://instagram.com/ruma__cutegirl"
+                  defaultValue={siteSettings?.instagramUrl || 'https://instagram.com/ruma__cutegirl'}
                   className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2.5 text-xs text-purple-950 shadow-sm font-medium"
                 />
               </div>
 
               <div>
+                <label className="text-xs font-bold text-purple-950 block mb-1">Instagram Handle Label</label>
+                <input
+                  name="instagramHandle"
+                  defaultValue={siteSettings?.instagramHandle || '@ruma__cutegirl'}
+                  className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2.5 text-xs text-purple-950 shadow-sm font-medium"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
                 <label className="text-xs font-bold text-purple-950 block mb-1">Support Email</label>
                 <input
                   name="supportEmail"
-                  defaultValue="contact.rumakumari@gmail.com"
+                  defaultValue={siteSettings?.supportEmail || 'contact.rumakumari@gmail.com'}
+                  className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2.5 text-xs text-purple-950 shadow-sm font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-purple-950 block mb-1">Support Telegram Link</label>
+                <input
+                  name="supportTelegram"
+                  defaultValue={siteSettings?.supportTelegram || 'https://t.me/rumakumari_vip'}
                   className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2.5 text-xs text-purple-950 shadow-sm font-medium"
                 />
               </div>
             </div>
 
             <div>
-              <label className="text-xs font-bold text-purple-950 block mb-1">Top Announcement Banner</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-bold text-purple-950">Top Announcement Banner</label>
+                <label className="flex items-center gap-1.5 text-[11px] font-bold text-pink-600 cursor-pointer">
+                  <input
+                    name="announcementEnabled"
+                    type="checkbox"
+                    defaultChecked={siteSettings?.announcementEnabled ?? true}
+                    className="rounded text-pink-600 focus:ring-pink-500"
+                  />
+                  <span>Show Banner</span>
+                </label>
+              </div>
               <input
                 name="announcement"
-                defaultValue="✨ New VIP Backstage Reel is LIVE! Get 50% off this week only with instant UPI scan!"
+                defaultValue={siteSettings?.announcement || '✨ New VIP Backstage Reel is LIVE! Get 50% off this week only with instant UPI scan!'}
                 className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2.5 text-xs text-purple-950 shadow-sm font-medium"
               />
             </div>
 
             <button
               type="submit"
-              className="glow-pink-btn px-6 py-3 rounded-2xl text-xs font-black text-white shadow-md shadow-pink-500/20"
+              className="glow-pink-btn px-7 py-3.5 rounded-2xl text-xs font-black text-white shadow-lg shadow-pink-500/25 flex items-center gap-2 hover:scale-[1.02] transition-transform"
             >
-              Save Settings
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Save & Publish All Changes</span>
             </button>
           </form>
         </div>
       )}
 
       {/* ---------------------------------------------------- */}
-      {/* TAB 5: GATEWAY & WEBHOOK SETUP DOCS */}
+      {/* TAB 6: GATEWAY & WEBHOOK SETUP DOCS */}
       {/* ---------------------------------------------------- */}
       {activeTab === 'setup' && (
         <div className="glass-card rounded-3xl p-6 sm:p-8 border border-purple-200 space-y-6 text-xs text-purple-900/80 leading-relaxed max-w-4xl animate-in fade-in duration-200 shadow-lg">
@@ -1009,7 +1565,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
       )}
 
       {/* ---------------------------------------------------- */}
-      {/* CONTENT ADD / EDIT MODAL */}
+      {/* CONTENT ADD / EDIT MODAL WITH CATEGORY, TAGS, PRICING & UPLOAD PREVIEW */}
       {/* ---------------------------------------------------- */}
       {showContentModal && (
         <div className="fixed inset-0 z-50 bg-purple-950/40 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
@@ -1017,7 +1573,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
             
             <div className="flex items-center justify-between border-b border-purple-100 pb-4">
               <h3 className="font-display font-black text-lg text-purple-950">
-                {editingItem ? 'Edit Content Item' : 'Add New Content'}
+                {editingItem ? 'Edit Content Item' : 'Add New Content Item'}
               </h3>
               <button
                 onClick={() => setShowContentModal(false)}
@@ -1053,7 +1609,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
 
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="font-bold text-purple-950 block mb-1">Content Type</label>
+                  <label className="font-bold text-purple-950 block mb-1">Category / Type</label>
                   <select
                     value={contentFormData.type}
                     onChange={(e) => setContentFormData({ ...contentFormData, type: e.target.value as any })}
@@ -1089,6 +1645,20 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
               </div>
 
               <div>
+                <label className="font-bold text-purple-950 block mb-1">Tags (Comma separated)</label>
+                <input
+                  type="text"
+                  value={contentFormData.tags?.join(', ') || ''}
+                  onChange={(e) => setContentFormData({
+                    ...contentFormData,
+                    tags: e.target.value.split(',').map(t => t.trim()).filter(Boolean)
+                  })}
+                  placeholder="Exclusive, VIP, Gym, Backstage"
+                  className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2.5 text-purple-950 shadow-sm font-medium"
+                />
+              </div>
+
+              <div>
                 <label className="font-bold text-purple-950 block mb-1">Thumbnail Image URL</label>
                 <input
                   type="text"
@@ -1101,7 +1671,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
               </div>
 
               <div>
-                <label className="font-bold text-purple-950 block mb-1">Protected Media URL (Private Video/Photo)</label>
+                <label className="font-bold text-purple-950 block mb-1">Protected Media URL (Private Video/Photo link)</label>
                 <input
                   type="text"
                   required
@@ -1130,7 +1700,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                     onChange={(e) => setContentFormData({ ...contentFormData, featured: e.target.checked })}
                     className="w-4 h-4 rounded text-pink-600 border-purple-300"
                   />
-                  <span className="font-bold text-purple-950">Feature on Home</span>
+                  <span className="font-bold text-purple-950">Feature on Homepage</span>
                 </label>
               </div>
 

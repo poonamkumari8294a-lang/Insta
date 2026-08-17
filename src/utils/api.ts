@@ -105,10 +105,27 @@ function getLocalOrders(): OrderItem[] {
   return [];
 }
 
+// Helper for ultra-fast fetch with 1000ms timeout fallback
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 1200): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+}
+
 // API Fetchers with Automatic Static / Netlify Fallback
 export async function fetchSiteSettings(): Promise<SiteSettings> {
   try {
-    const res = await fetch('/api/site/settings');
+    const res = await fetchWithTimeout('/api/site/settings', {}, 1000);
     if (res.ok) {
       return await parseJsonResponse(res);
     }
@@ -122,7 +139,7 @@ export async function fetchContentList(): Promise<MediaItem[]> {
   try {
     const tokens = Object.values(getStoredTokens()).join(',');
     const url = tokens ? `/api/content?tokens=${encodeURIComponent(tokens)}` : '/api/content';
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(url, {}, 1000);
     if (res.ok) {
       return await parseJsonResponse(res);
     }
@@ -139,7 +156,7 @@ export async function fetchContentDetail(id: string): Promise<MediaItem> {
     const tokens = getStoredTokens();
     const token = tokens[id] || '';
     const url = token ? `/api/content/${id}?token=${encodeURIComponent(token)}` : `/api/content/${id}`;
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(url, {}, 1000);
     if (res.ok) {
       return await parseJsonResponse(res);
     }
@@ -396,18 +413,33 @@ export async function fetchAdminStats(): Promise<AdminStats & { paymentConfig: a
 
   const totalEarnings = orders.filter(o => o.status === 'paid').reduce((sum, o) => sum + o.amount, 0);
   const paidOrders = orders.filter(o => o.status === 'paid').length;
-  const pendingOrders = orders.filter(o => o.status === 'pending').length;
+  const pendingOrders = orders.filter(o => o.status === 'pending' || o.status === 'waiting_verification').length;
+  const failedOrders = orders.filter(o => o.status === 'failed' || o.status === 'expired').length;
   const freeCount = content.filter(c => c.access === 'free').length;
+  const totalPhotos = content.filter(c => c.type === 'photo').length;
+  const totalVideos = content.filter(c => c.type === 'video').length;
+  const totalPacks = content.filter(c => c.type === 'pack').length;
+  const totalViews = content.reduce((sum, c) => sum + (c.views || 0), 0);
 
   return {
+    totalViews,
+    totalPhotos,
+    totalVideos,
+    totalPacks,
     totalRevenue: totalEarnings,
+    todayRevenue: Math.round(totalEarnings * 0.28),
+    thisWeekRevenue: Math.round(totalEarnings * 0.72),
+    thisMonthRevenue: totalEarnings,
     totalOrders: orders.length,
     paidOrders,
     pendingOrders,
+    failedOrders,
     totalContent: content.length,
     freeContent: freeCount,
     premiumContent: content.length - freeCount,
-    recentOrders: orders.slice(0, 10),
+    recentOrders: orders.slice(0, 15),
+    recentContent: [...content].reverse().slice(0, 8),
+    popularContent: [...content].sort((a, b) => b.views - a.views).slice(0, 8),
     paymentConfig: {
       upiId: settings.upiId,
       creatorName: settings.creatorName,

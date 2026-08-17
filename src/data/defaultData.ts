@@ -9,6 +9,7 @@ export const CLIENT_SITE_SETTINGS: SiteSettings = {
   bannerUrl: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=1200&auto=format&fit=crop&q=80',
   instagramUrl: 'https://instagram.com/ruma__cutegirl',
   instagramHandle: '@ruma__cuteg...',
+  badgeText: 'VIP Creator',
   upiId: 'ashokjee62022.wallet@phonepe',
   postsCount: 135,
   followersCount: 3358,
@@ -17,6 +18,74 @@ export const CLIENT_SITE_SETTINGS: SiteSettings = {
   announcementEnabled: true,
   supportEmail: 'contact.rumakumari@gmail.com',
   supportTelegram: 'https://t.me/rumakumari_vip',
+  homepageConfig: {
+    hero: {
+      enabled: true,
+      title: 'Ruma Kumari',
+      description: 'Unlock my private, uncut HD photos, backstage reels & VIP stories instantly.',
+      ctaText: 'View Premium Feed',
+      customCoverUrl: ''
+    },
+    profile: {
+      enabled: true,
+      showStats: true,
+      showBadge: true,
+      showInstagramBtn: true
+    },
+    storyHighlights: {
+      enabled: true,
+      title: 'Story Highlights & Teasers'
+    },
+    featured: {
+      enabled: true,
+      title: 'Featured VIP Releases',
+      subtitle: 'Trending high-resolution sets and uncut master videos.',
+      limit: 8
+    },
+    vipPacks: {
+      enabled: true,
+      title: 'Exclusive VIP All-Access Bundles',
+      subtitle: 'Unlock complete photo sets and full-length video archives at 60% discount.'
+    },
+    latestVideos: {
+      enabled: true,
+      title: 'Latest Video Reels & Backstage',
+      limit: 4
+    },
+    latestPhotos: {
+      enabled: true,
+      title: 'Latest HD Photo Drops',
+      limit: 4
+    },
+    freeSamples: {
+      enabled: true,
+      title: 'Free Lifestyle & Workout Samples',
+      subtitle: 'Enjoy these complimentary photos and clips before unlocking VIP sets.'
+    },
+    howItWorks: {
+      enabled: true,
+      title: 'How It Works'
+    },
+    faq: {
+      enabled: true,
+      title: 'Frequently Asked Questions'
+    },
+    footer: {
+      enabled: true,
+      customCopyright: '© 2026 Ruma Kumari Official VIP. All rights reserved.',
+      showDisclaimer: true
+    },
+    sectionOrder: [
+      'hero',
+      'featured',
+      'vipPacks',
+      'latestVideos',
+      'latestPhotos',
+      'freeSamples',
+      'howItWorks',
+      'faq'
+    ]
+  },
   storyHighlights: [
     {
       id: 'highlight-1',

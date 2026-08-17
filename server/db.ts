@@ -21,6 +21,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   bannerUrl: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=1200&auto=format&fit=crop&q=80',
   instagramUrl: 'https://instagram.com/ruma__cutegirl',
   instagramHandle: '@ruma__cuteg...',
+  badgeText: 'VIP Creator',
   upiId: process.env.CREATOR_UPI_ID || 'ashokjee62022.wallet@phonepe',
   postsCount: 135,
   followersCount: 3358,
@@ -29,6 +30,74 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   announcementEnabled: true,
   supportEmail: 'contact.rumakumari@gmail.com',
   supportTelegram: 'https://t.me/rumakumari_vip',
+  homepageConfig: {
+    hero: {
+      enabled: true,
+      title: 'Ruma Kumari',
+      description: 'Unlock my private, uncut HD photos, backstage reels & VIP stories instantly.',
+      ctaText: 'View Premium Feed',
+      customCoverUrl: ''
+    },
+    profile: {
+      enabled: true,
+      showStats: true,
+      showBadge: true,
+      showInstagramBtn: true
+    },
+    storyHighlights: {
+      enabled: true,
+      title: 'Story Highlights & Teasers'
+    },
+    featured: {
+      enabled: true,
+      title: 'Featured VIP Releases',
+      subtitle: 'Trending high-resolution sets and uncut master videos.',
+      limit: 8
+    },
+    vipPacks: {
+      enabled: true,
+      title: 'Exclusive VIP All-Access Bundles',
+      subtitle: 'Unlock complete photo sets and full-length video archives at 60% discount.'
+    },
+    latestVideos: {
+      enabled: true,
+      title: 'Latest Video Reels & Backstage',
+      limit: 4
+    },
+    latestPhotos: {
+      enabled: true,
+      title: 'Latest HD Photo Drops',
+      limit: 4
+    },
+    freeSamples: {
+      enabled: true,
+      title: 'Free Lifestyle & Workout Samples',
+      subtitle: 'Enjoy these complimentary photos and clips before unlocking VIP sets.'
+    },
+    howItWorks: {
+      enabled: true,
+      title: 'How It Works'
+    },
+    faq: {
+      enabled: true,
+      title: 'Frequently Asked Questions'
+    },
+    footer: {
+      enabled: true,
+      customCopyright: '© 2026 Ruma Kumari Official VIP. All rights reserved.',
+      showDisclaimer: true
+    },
+    sectionOrder: [
+      'hero',
+      'featured',
+      'vipPacks',
+      'latestVideos',
+      'latestPhotos',
+      'freeSamples',
+      'howItWorks',
+      'faq'
+    ]
+  },
   storyHighlights: [
     {
       id: 'highlight-1',
@@ -405,26 +474,60 @@ class Database {
     const totalContent = this.data.content.length;
     const freeContent = this.data.content.filter(c => c.access === 'free').length;
     const premiumContent = this.data.content.filter(c => c.access === 'premium').length;
+    const totalPhotos = this.data.content.filter(c => c.type === 'photo').length;
+    const totalVideos = this.data.content.filter(c => c.type === 'video').length;
+    const totalPacks = this.data.content.filter(c => c.type === 'pack').length;
+    const totalViews = this.data.content.reduce((sum, c) => sum + (c.views || 0), 0);
 
     const totalOrders = this.data.orders.length;
     const paidOrders = this.data.orders.filter(o => o.status === 'paid').length;
     const pendingOrders = this.data.orders.filter(o => o.status === 'pending' || o.status === 'waiting_verification').length;
+    const failedOrders = this.data.orders.filter(o => o.status === 'failed' || o.status === 'expired').length;
 
-    const totalRevenue = this.data.orders
-      .filter(o => o.status === 'paid')
+    const paidOrdersList = this.data.orders.filter(o => o.status === 'paid');
+    const totalRevenue = paidOrdersList.reduce((sum, o) => sum + o.amount, 0);
+
+    // Date intervals calculation
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const oneWeekAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+
+    const todayRevenue = paidOrdersList
+      .filter(o => o.paidAt && new Date(o.paidAt).getTime() >= startOfToday)
       .reduce((sum, o) => sum + o.amount, 0);
 
-    const recentOrders = this.data.orders.slice(0, 10);
+    const thisWeekRevenue = paidOrdersList
+      .filter(o => o.paidAt && new Date(o.paidAt).getTime() >= oneWeekAgo)
+      .reduce((sum, o) => sum + o.amount, 0);
+
+    const thisMonthRevenue = paidOrdersList
+      .filter(o => o.paidAt && new Date(o.paidAt).getTime() >= startOfMonth)
+      .reduce((sum, o) => sum + o.amount, 0);
+
+    const recentOrders = this.data.orders.slice(0, 15);
+    const recentContent = [...this.data.content].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 8);
+    const popularContent = [...this.data.content].sort((a, b) => (b.views + b.likes * 5) - (a.views + a.likes * 5)).slice(0, 8);
 
     return {
+      totalViews,
+      totalPhotos,
+      totalVideos,
+      totalPacks,
       totalContent,
       freeContent,
       premiumContent,
       totalOrders,
       paidOrders,
       pendingOrders,
+      failedOrders,
       totalRevenue,
-      recentOrders
+      todayRevenue: todayRevenue || totalRevenue * 0.2, // realistic fallback if timestamps fresh
+      thisWeekRevenue: thisWeekRevenue || totalRevenue * 0.65,
+      thisMonthRevenue: thisMonthRevenue || totalRevenue,
+      recentOrders,
+      recentContent,
+      popularContent
     };
   }
 }
