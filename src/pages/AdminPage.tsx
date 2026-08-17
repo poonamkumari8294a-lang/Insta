@@ -16,6 +16,7 @@ import {
   formatINR
 } from '../utils/api';
 import { HomepageControlTab } from '../components/HomepageControlTab';
+import { StoryHighlightsManager } from '../components/StoryHighlightsManager';
 import { MediaUploadZone } from '../components/MediaUploadZone';
 import {
   Lock,
@@ -70,7 +71,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
   const [loading, setLoading] = useState(false);
 
   // Active Tab
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'content' | 'homepage' | 'orders' | 'settings' | 'setup'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'content' | 'highlights' | 'homepage' | 'orders' | 'settings' | 'setup'>('dashboard');
 
   // Data states
   const [stats, setStats] = useState<AdminStats | null>(null);
@@ -501,6 +502,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
         >
           <Film className="w-4 h-4" />
           <span>Content Manager ({contentList.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('highlights')}
+          className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap ${
+            activeTab === 'highlights'
+              ? 'bg-pink-600 text-white shadow-md shadow-pink-500/25'
+              : 'text-purple-900/70 hover:text-purple-950 hover:bg-white/60'
+          }`}
+        >
+          <Sparkles className="w-4 h-4 text-yellow-300" />
+          <span>Story Highlights ({siteSettings?.storyHighlights?.length || 0})</span>
         </button>
 
         <button
@@ -1094,6 +1107,19 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
           </div>
 
         </div>
+      )}
+
+      {/* ---------------------------------------------------- */}
+      {/* TAB 2.5: STORY HIGHLIGHTS & TEASERS MANAGER */}
+      {/* ---------------------------------------------------- */}
+      {activeTab === 'highlights' && siteSettings && (
+        <StoryHighlightsManager
+          settings={siteSettings}
+          onSettingsUpdated={(updated) => {
+            setSiteSettings(updated);
+            onSettingsUpdated(updated);
+          }}
+        />
       )}
 
       {/* ---------------------------------------------------- */}

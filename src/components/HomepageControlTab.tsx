@@ -451,6 +451,44 @@ export const HomepageControlTab: React.FC<HomepageControlTabProps> = ({
           </div>
         </div>
 
+        {/* Story Highlights & Teasers Config */}
+        <div className="glass-card rounded-3xl p-5 border border-white/80 shadow-md space-y-4">
+          <div className="flex items-center gap-2 border-b border-purple-100 pb-3">
+            <Sparkles className="w-4 h-4 text-pink-600" />
+            <h3 className="font-display font-black text-sm text-purple-950">Story Highlights & Teasers Row</h3>
+          </div>
+
+          <div className="space-y-3 text-xs">
+            <div>
+              <label className="font-bold text-purple-950 block mb-1">Row Title on Homepage</label>
+              <input
+                type="text"
+                value={cfg.storyHighlights?.title || 'Story Highlights & Teasers'}
+                onChange={(e) =>
+                  setCfg({
+                    ...cfg,
+                    storyHighlights: {
+                      ...cfg.storyHighlights,
+                      title: e.target.value
+                    }
+                  })
+                }
+                className="w-full bg-white border border-purple-200 rounded-xl px-3 py-2 text-purple-950 font-medium"
+              />
+            </div>
+
+            <div className="p-3 rounded-2xl bg-pink-50/70 border border-pink-200/60 text-purple-950 space-y-1.5">
+              <p className="font-bold text-[11px] text-pink-700 flex items-center gap-1">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Active Highlight Circles: {settings.storyHighlights?.length || 0}</span>
+              </p>
+              <p className="text-[11px] text-purple-900/70 leading-relaxed font-medium">
+                To upload new story slides, teaser videos, change circular covers, or reorder circles, visit the <strong>"Story Highlights"</strong> tab in the admin navigation bar!
+              </p>
+            </div>
+          </div>
+        </div>
+
       </div>
 
     </div>
