@@ -16,6 +16,7 @@ import {
   formatINR
 } from '../utils/api';
 import { HomepageControlTab } from '../components/HomepageControlTab';
+import { MediaUploadZone } from '../components/MediaUploadZone';
 import {
   Lock,
   LayoutDashboard,
@@ -53,7 +54,8 @@ import {
   Package,
   Layers,
   Calendar,
-  DollarSign
+  DollarSign,
+  Upload
 } from 'lucide-react';
 
 interface AdminPageProps {
@@ -91,6 +93,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
   const [webhookSimOrderId, setWebhookSimOrderId] = useState('');
   const [webhookSimLoading, setWebhookSimLoading] = useState(false);
   const [webhookSimResult, setWebhookSimResult] = useState<string | null>(null);
+
+  // Profile and Banner state for Settings
+  const [settingsProfilePic, setSettingsProfilePic] = useState<string>('');
+  const [settingsBannerUrl, setSettingsBannerUrl] = useState<string>('');
+
   const [contentFormData, setContentFormData] = useState<Partial<MediaItem>>({
     title: '',
     description: '',
@@ -159,6 +166,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
       loadAdminData();
     }
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (siteSettings) {
+      setSettingsProfilePic(siteSettings.profilePicUrl || '');
+      setSettingsBannerUrl(siteSettings.bannerUrl || '');
+    }
+  }, [siteSettings]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1224,8 +1238,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
               const updates: Partial<SiteSettings> = {
                 creatorName: formData.get('creatorName') as string,
                 username: formData.get('username') as string,
-                profilePicUrl: formData.get('profilePicUrl') as string,
-                bannerUrl: formData.get('bannerUrl') as string,
+                profilePicUrl: settingsProfilePic || (formData.get('profilePicUrl') as string) || siteSettings?.profilePicUrl,
+                bannerUrl: settingsBannerUrl || (formData.get('bannerUrl') as string) || siteSettings?.bannerUrl,
                 bio: formData.get('bio') as string,
                 tagline: formData.get('tagline') as string,
                 instagramUrl: formData.get('instagramUrl') as string,
@@ -1251,38 +1265,43 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
             }}
             className="space-y-5"
           >
-            {/* Live Profile Picture & Banner Preview Section */}
-            <div className="p-4 bg-purple-50/70 border border-purple-200/80 rounded-2xl space-y-3">
-              <span className="text-xs font-black text-purple-950 uppercase tracking-wider block">📸 Profile & Cover Images</span>
+            {/* Live Profile Picture & Banner Direct Gallery Upload Section */}
+            <div className="p-4 sm:p-5 bg-gradient-to-br from-pink-500/5 via-purple-50/60 to-purple-100/40 border border-purple-200/90 rounded-3xl space-y-4 shadow-xs">
+              <div className="flex items-center justify-between border-b border-purple-200/60 pb-2">
+                <span className="text-xs font-black text-purple-950 uppercase tracking-wider flex items-center gap-1.5">
+                  <ImageIcon className="w-4 h-4 text-pink-600" />
+                  Profile Photo & Cover Banner Upload (गैलरी से फोटो बदलें)
+                </span>
+                <span className="text-[10px] font-bold text-pink-600 bg-pink-100/80 px-2 py-0.5 rounded-lg">
+                  Direct Gallery & Camera Support
+                </span>
+              </div>
               
-              <div className="flex flex-col sm:flex-row items-center gap-4">
-                <div className="w-20 h-20 rounded-full border-3 border-pink-500 overflow-hidden shrink-0 shadow-md bg-zinc-900">
-                  <img
-                    src={siteSettings?.profilePicUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80'}
-                    alt="Preview"
-                    className="w-full h-full object-cover"
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* 1. Profile Photo Zone */}
+                <div>
+                  <MediaUploadZone
+                    label="Profile Photo (प्रोफाइल फोटो)"
+                    value={settingsProfilePic}
+                    onChange={(url) => setSettingsProfilePic(url)}
+                    accept="image"
+                    aspectRatio="square"
+                    helperText="Upload circular avatar photo directly from gallery or paste link."
                   />
+                  <input type="hidden" name="profilePicUrl" value={settingsProfilePic} />
                 </div>
-                <div className="flex-1 w-full space-y-2">
-                  <div>
-                    <label className="text-[11px] font-bold text-purple-950 block mb-0.5">Profile Photo Direct Image URL</label>
-                    <input
-                      name="profilePicUrl"
-                      defaultValue={siteSettings?.profilePicUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80'}
-                      placeholder="https://... image link or direct URL"
-                      required
-                      className="w-full bg-white border border-purple-200 rounded-xl px-3 py-2 text-xs text-purple-950 shadow-sm font-medium"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-bold text-purple-950 block mb-0.5">Cover Banner Background URL</label>
-                    <input
-                      name="bannerUrl"
-                      defaultValue={siteSettings?.bannerUrl || 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=1200&auto=format&fit=crop&q=80'}
-                      placeholder="https://... banner image link"
-                      className="w-full bg-white border border-purple-200 rounded-xl px-3 py-2 text-xs text-purple-950 shadow-sm font-medium"
-                    />
-                  </div>
+
+                {/* 2. Cover Banner Zone */}
+                <div>
+                  <MediaUploadZone
+                    label="Cover Banner (कवर बैनर बैकग्राउंड)"
+                    value={settingsBannerUrl}
+                    onChange={(url) => setSettingsBannerUrl(url)}
+                    accept="image"
+                    aspectRatio="banner"
+                    helperText="Upload wide cover banner directly from gallery or paste link."
+                  />
+                  <input type="hidden" name="bannerUrl" value={settingsBannerUrl} />
                 </div>
               </div>
             </div>
@@ -1658,29 +1677,83 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                 />
               </div>
 
-              <div>
-                <label className="font-bold text-purple-950 block mb-1">Thumbnail Image URL</label>
-                <input
-                  type="text"
+              {/* 1. Main Media File Upload (Video or Photo directly from Gallery or Web URL) */}
+              <div className="pt-1">
+                <MediaUploadZone
+                  label={
+                    contentFormData.type === 'video'
+                      ? 'VIP Protected Video Reel (गैलरी से वीडियो चुनें)'
+                      : contentFormData.type === 'photo'
+                      ? 'VIP Protected HD Photo (गैलरी से फोटो चुनें)'
+                      : 'VIP Combo Master File / Preview (गैलरी से मीडिया चुनें)'
+                  }
+                  value={contentFormData.mediaUrl || ''}
+                  onChange={(url) => {
+                    setContentFormData(prev => ({
+                      ...prev,
+                      mediaUrl: url,
+                      previewUrl: prev.previewUrl || url
+                    }));
+                  }}
+                  accept={contentFormData.type === 'video' ? 'video' : contentFormData.type === 'photo' ? 'image' : 'any'}
                   required
-                  value={contentFormData.thumbnailUrl}
-                  onChange={(e) => setContentFormData({ ...contentFormData, thumbnailUrl: e.target.value })}
-                  placeholder="https://..."
-                  className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2.5 text-purple-950 font-mono shadow-sm"
+                  onThumbnailExtracted={(thumbUrl) => {
+                    setContentFormData(prev => {
+                      if (!prev.thumbnailUrl) {
+                        return { ...prev, thumbnailUrl: thumbUrl };
+                      }
+                      return prev;
+                    });
+                  }}
+                  onDurationExtracted={(dur) => {
+                    setContentFormData(prev => ({ ...prev, duration: dur }));
+                  }}
+                  helperText={
+                    contentFormData.type === 'video'
+                      ? 'Select video directly from gallery. Video length and frame thumbnail are generated automatically!'
+                      : 'Select high-resolution photo directly from gallery or camera.'
+                  }
                 />
               </div>
 
+              {/* 2. Thumbnail / Cover Poster Upload */}
               <div>
-                <label className="font-bold text-purple-950 block mb-1">Protected Media URL (Private Video/Photo link)</label>
-                <input
-                  type="text"
+                <MediaUploadZone
+                  label="Card Cover / Poster Thumbnail (कवर फोटो)"
+                  value={contentFormData.thumbnailUrl || ''}
+                  onChange={(url) => setContentFormData(prev => ({ ...prev, thumbnailUrl: url }))}
+                  accept="image"
+                  aspectRatio="video"
                   required
-                  value={contentFormData.mediaUrl}
-                  onChange={(e) => setContentFormData({ ...contentFormData, mediaUrl: e.target.value })}
-                  placeholder="https://..."
-                  className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2.5 text-purple-950 font-mono shadow-sm"
+                  helperText="Shown on public cards. Auto-extracted if you upload a video reel above."
                 />
               </div>
+
+              {/* Optional Video Duration & Teaser */}
+              {contentFormData.type === 'video' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-bold text-purple-950 block mb-1">Duration / Time Length</label>
+                    <input
+                      type="text"
+                      value={contentFormData.duration || '1:30'}
+                      onChange={(e) => setContentFormData({ ...contentFormData, duration: e.target.value })}
+                      placeholder="e.g. 2:45"
+                      className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2 text-purple-950 font-medium shadow-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-bold text-purple-950 block mb-1">Preview Video URL (Optional Teaser)</label>
+                    <input
+                      type="text"
+                      value={contentFormData.previewUrl || ''}
+                      onChange={(e) => setContentFormData({ ...contentFormData, previewUrl: e.target.value })}
+                      placeholder="Same as media or short teaser"
+                      className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2 text-purple-950 font-medium shadow-xs"
+                    />
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-center gap-6 pt-2">
                 <label className="flex items-center gap-2 cursor-pointer">

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { SiteSettings, HomepageSectionConfig } from '../types';
 import { updateAdminSettings } from '../utils/api';
+import { MediaUploadZone } from './MediaUploadZone';
 import {
   Layout,
   Eye,
@@ -309,6 +310,18 @@ export const HomepageControlTab: React.FC<HomepageControlTabProps> = ({
                 value={cfg.hero.ctaText || 'View Premium Feed'}
                 onChange={(e) => setCfg({ ...cfg, hero: { ...cfg.hero, ctaText: e.target.value } })}
                 className="w-full bg-white border border-purple-200 rounded-xl px-3 py-2 text-purple-950 font-medium"
+              />
+            </div>
+
+            {/* Custom Hero Cover Image Upload */}
+            <div className="pt-1">
+              <MediaUploadZone
+                label="Custom Hero Cover Photo (गैलरी से हीरो फोटो बदलें - ऐच्छिक)"
+                value={cfg.hero.customCoverUrl || ''}
+                onChange={(url) => setCfg({ ...cfg, hero: { ...cfg.hero, customCoverUrl: url } })}
+                accept="image"
+                aspectRatio="banner"
+                helperText="Optional custom hero background. If left empty, default creator banner is used."
               />
             </div>
 
