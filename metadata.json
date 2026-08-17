@@ -1,0 +1,6 @@
+{
+  "name": "Ruma Kumari — Premium Creator Hub",
+  "description": "Exclusive premium photo and video content hub with instant UPI dynamic QR checkout, zero-login access, and secure token delivery.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
