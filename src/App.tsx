@@ -88,8 +88,8 @@ export default function App() {
   };
 
   // Initial Data Load
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       refreshTokens();
@@ -101,25 +101,32 @@ export default function App() {
       setContent(contentData);
     } catch (err: any) {
       console.error('App init error:', err);
-      setError(err.message || 'Failed to connect to backend service');
+      if (!silent) setError(err.message || 'Failed to connect to backend service');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     loadData();
 
+    // Periodic silent refresh to pick up live admin changes across all devices
+    const interval = setInterval(() => {
+      loadData(true);
+    }, 15000);
+
     // Listen for hash & URL changes (e.g. typing #admin in URL bar)
     const handleUrlChange = () => {
       const { route, mediaId } = getRouteFromUrl();
       setCurrentRoute(route);
       if (mediaId) setSelectedMediaId(mediaId);
+      loadData(true);
     };
 
     window.addEventListener('hashchange', handleUrlChange);
     window.addEventListener('popstate', handleUrlChange);
     return () => {
+      clearInterval(interval);
       window.removeEventListener('hashchange', handleUrlChange);
       window.removeEventListener('popstate', handleUrlChange);
     };
@@ -302,8 +309,14 @@ export default function App() {
 
         {currentRoute === 'admin' && (
           <AdminPage
-            onBackToSite={() => navigateTo('home')}
-            onSettingsUpdated={(newSettings) => setSettings(newSettings)}
+            onBackToSite={() => {
+              loadData(true);
+              navigateTo('home');
+            }}
+            onSettingsUpdated={(newSettings) => {
+              setSettings(newSettings);
+              loadData(true);
+            }}
           />
         )}
       </main>

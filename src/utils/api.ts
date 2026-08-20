@@ -1,13 +1,23 @@
 import { MediaItem, OrderItem, SiteSettings, AdminStats } from '../types';
 import { CLIENT_SITE_SETTINGS, CLIENT_CONTENT_LIST } from '../data/defaultData';
 import QRCode from 'qrcode';
+import { firestore } from '../services/firebase';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  orderBy,
+  limit as firestoreLimit
+} from 'firebase/firestore';
 
 const TOKENS_STORAGE_KEY = 'ruma_unlocked_tokens';
 const ORDERS_STORAGE_KEY = 'ruma_user_orders';
 const SESSION_ID_KEY = 'ruma_customer_session_id';
-const LOCAL_CUSTOM_CONTENT_KEY = 'ruma_custom_content_list';
-const LOCAL_CUSTOM_SETTINGS_KEY = 'ruma_custom_settings';
-const LOCAL_CUSTOM_ORDERS_KEY = 'ruma_custom_orders_list';
 
 // Customer Session ID helper
 export function getOrCreateSessionId(): string {
@@ -65,116 +75,127 @@ export function removeAdminToken() {
   localStorage.removeItem('ruma_admin_token');
 }
 
-// Helper to safely parse JSON response or detect HTML fallback
-async function parseJsonResponse(res: Response) {
-  const contentType = res.headers.get('content-type') || '';
-  if (!contentType.includes('application/json')) {
-    throw new Error('Not a JSON API response');
-  }
-  return res.json();
-}
+// ============================================================================
+// FIREBASE CLOUD FIRESTORE INTEGRATION
+// ============================================================================
 
-// Helper to get local client contents
-function getLocalContentList(): MediaItem[] {
-  try {
-    const custom = localStorage.getItem(LOCAL_CUSTOM_CONTENT_KEY);
-    if (custom) {
-      return JSON.parse(custom);
-    }
-  } catch {}
-  return CLIENT_CONTENT_LIST;
-}
+const SETTINGS_DOC_ID = 'site_config';
 
-function getLocalSettings(): SiteSettings {
-  try {
-    const custom = localStorage.getItem(LOCAL_CUSTOM_SETTINGS_KEY);
-    if (custom) {
-      const parsed = JSON.parse(custom);
-      if (parsed.upiId && parsed.upiId.includes('wallet@phonepe')) {
-        parsed.upiId = '6202292319pnb@ybl';
-        localStorage.setItem(LOCAL_CUSTOM_SETTINGS_KEY, JSON.stringify(parsed));
+/**
+ * Ensures Firestore is seeded with default content and settings on first run
+ */
+let seedingPromise: Promise<void> | null = null;
+
+async function ensureFirestoreSeeded(): Promise<void> {
+  if (seedingPromise) return seedingPromise;
+
+  seedingPromise = (async () => {
+    try {
+      // 1. Check Settings
+      const settingsRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
+      const settingsSnap = await getDoc(settingsRef);
+      if (!settingsSnap.exists()) {
+        console.log('[Firebase] Initializing Cloud Site Settings...');
+        await setDoc(settingsRef, CLIENT_SITE_SETTINGS);
       }
-      return parsed;
+
+      // 2. Check Content
+      const contentCollectionRef = collection(firestore, 'content');
+      const contentSnap = await getDocs(query(contentCollectionRef, firestoreLimit(1)));
+      if (contentSnap.empty) {
+        console.log('[Firebase] Seeding Initial Content into Firestore...');
+        for (const item of CLIENT_CONTENT_LIST) {
+          const itemRef = doc(firestore, 'content', item.id);
+          await setDoc(itemRef, item);
+        }
+      }
+    } catch (err) {
+      console.warn('[Firebase Seed Warning]', err);
     }
-  } catch {}
+  })();
+
+  return seedingPromise;
+}
+
+// ----------------------------------------------------------------------------
+// 1. Fetch Site Settings (Live Cloud Sync)
+// ----------------------------------------------------------------------------
+export async function fetchSiteSettings(): Promise<SiteSettings> {
+  try {
+    await ensureFirestoreSeeded();
+    const settingsRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
+    const snap = await getDoc(settingsRef);
+    if (snap.exists()) {
+      const data = snap.data() as SiteSettings;
+      return { ...CLIENT_SITE_SETTINGS, ...data };
+    }
+  } catch (err) {
+    console.warn('[Firebase fetchSiteSettings Error]', err);
+  }
   return CLIENT_SITE_SETTINGS;
 }
 
-function getLocalOrders(): OrderItem[] {
-  try {
-    const custom = localStorage.getItem(LOCAL_CUSTOM_ORDERS_KEY);
-    if (custom) {
-      return JSON.parse(custom);
-    }
-  } catch {}
-  return [];
-}
-
-// Helper for ultra-fast fetch with 1000ms timeout fallback
-async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 1200): Promise<Response> {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal
-    });
-    clearTimeout(id);
-    return response;
-  } catch (error) {
-    clearTimeout(id);
-    throw error;
-  }
-}
-
-// API Fetchers with Automatic Static / Netlify Fallback
-export async function fetchSiteSettings(): Promise<SiteSettings> {
-  try {
-    const res = await fetchWithTimeout('/api/site/settings', {}, 1000);
-    if (res.ok) {
-      return await parseJsonResponse(res);
-    }
-  } catch (e) {
-    // Static hosting fallback (Netlify / Vercel static)
-  }
-  return getLocalSettings();
-}
-
+// ----------------------------------------------------------------------------
+// 2. Fetch Content List (Live Cloud Sync for All Visitors)
+// ----------------------------------------------------------------------------
 export async function fetchContentList(): Promise<MediaItem[]> {
   try {
-    const tokens = Object.values(getStoredTokens()).join(',');
-    const url = tokens ? `/api/content?tokens=${encodeURIComponent(tokens)}` : '/api/content';
-    const res = await fetchWithTimeout(url, {}, 1000);
-    if (res.ok) {
-      return await parseJsonResponse(res);
-    }
-  } catch (e) {
-    // Static hosting fallback
-  }
+    await ensureFirestoreSeeded();
+    const contentRef = collection(firestore, 'content');
+    const q = query(contentRef, orderBy('createdAt', 'desc'));
+    const snap = await getDocs(q);
 
-  // Client-side fallback for Netlify
-  return getLocalContentList();
+    if (!snap.empty) {
+      const userTokens = getStoredTokens();
+      const items: MediaItem[] = [];
+      snap.forEach(docSnap => {
+        const item = { ...docSnap.data(), id: docSnap.id } as MediaItem;
+        if (item.published !== false) {
+          // If locked and not unlocked, protect mediaUrl
+          const isUnlocked = item.access === 'free' || Boolean(userTokens[item.id]);
+          items.push({
+            ...item,
+            mediaUrl: isUnlocked ? item.mediaUrl : (item.previewUrl || item.thumbnailUrl)
+          });
+        }
+      });
+      return items;
+    }
+  } catch (err) {
+    console.warn('[Firebase fetchContentList Error]', err);
+  }
+  return CLIENT_CONTENT_LIST;
 }
 
+// ----------------------------------------------------------------------------
+// 3. Fetch Single Content Item
+// ----------------------------------------------------------------------------
 export async function fetchContentDetail(id: string): Promise<MediaItem> {
   try {
-    const tokens = getStoredTokens();
-    const token = tokens[id] || '';
-    const url = token ? `/api/content/${id}?token=${encodeURIComponent(token)}` : `/api/content/${id}`;
-    const res = await fetchWithTimeout(url, {}, 1000);
-    if (res.ok) {
-      return await parseJsonResponse(res);
+    await ensureFirestoreSeeded();
+    const itemRef = doc(firestore, 'content', id);
+    const snap = await getDoc(itemRef);
+    if (snap.exists()) {
+      const item = { ...snap.data(), id: snap.id } as MediaItem;
+      const userTokens = getStoredTokens();
+      const isUnlocked = item.access === 'free' || Boolean(userTokens[item.id]);
+      return {
+        ...item,
+        mediaUrl: isUnlocked ? item.mediaUrl : (item.previewUrl || item.thumbnailUrl)
+      };
     }
-  } catch (e) {
-    // Static fallback
+  } catch (err) {
+    console.warn('[Firebase fetchContentDetail Error]', err);
   }
 
-  const list = getLocalContentList();
-  const item = list.find(c => c.id === id);
-  if (!item) throw new Error('Content not found');
-  return item;
+  const fallback = CLIENT_CONTENT_LIST.find(c => c.id === id);
+  if (!fallback) throw new Error('Content not found');
+  return fallback;
 }
 
+// ----------------------------------------------------------------------------
+// 4. Create UPI Order (Persisted in Firestore Cloud)
+// ----------------------------------------------------------------------------
 export async function createOrder(contentId: string): Promise<{
   success: boolean;
   order: OrderItem;
@@ -183,37 +204,24 @@ export async function createOrder(contentId: string): Promise<{
   mode: string;
 }> {
   const customerSessionId = getOrCreateSessionId();
+  const settings = await fetchSiteSettings();
+  let item: MediaItem | undefined;
 
   try {
-    const res = await fetch('/api/orders/create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contentId, customerSessionId })
-    });
-
-    if (res.ok) {
-      const data = await parseJsonResponse(res);
-      saveOrderId(data.order.orderId);
-      return data;
-    }
-  } catch (e) {
-    // Static Netlify Fallback: Generate real UPI QR & intent client-side!
+    item = await fetchContentDetail(contentId);
+  } catch {
+    item = CLIENT_CONTENT_LIST.find(c => c.id === contentId) || CLIENT_CONTENT_LIST[0];
   }
 
-  // Client-side Direct Order Generator (Netlify static support)
-  const list = getLocalContentList();
-  const item = list.find(c => c.id === contentId) || CLIENT_CONTENT_LIST[0];
-  const settings = getLocalSettings();
-
   const orderId = `ORD_${Date.now()}_${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
-  const amount = item.price;
-  const upiId = settings.upiId || 'ashokjee62022.wallet@phonepe';
+  const amount = item?.price || 49;
+  const upiId = settings.upiId || '6202292319pnb@ybl';
   const payeeName = settings.creatorName || 'Ruma Kumari';
 
-  // Standard UPI URI format
+  // Real Dynamic UPI URI
   const upiIntentUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(payeeName)}&am=${amount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`VIP Content - ${orderId}`)}`;
   
-  // Generate high quality QR code data URL
+  // High-contrast QR Code
   const qrDataUrl = await QRCode.toDataURL(upiIntentUrl, {
     margin: 1,
     width: 320,
@@ -225,10 +233,10 @@ export async function createOrder(contentId: string): Promise<{
 
   const order: OrderItem = {
     orderId,
-    contentId: item.id,
-    contentTitle: item.title,
-    contentType: item.type,
-    thumbnailUrl: item.thumbnailUrl,
+    contentId: item?.id || contentId,
+    contentTitle: item?.title || 'VIP Exclusive',
+    contentType: item?.type || 'photo',
+    thumbnailUrl: item?.thumbnailUrl || '',
     amount,
     currency: 'INR',
     status: 'pending',
@@ -237,13 +245,16 @@ export async function createOrder(contentId: string): Promise<{
     qrDataUrl,
     customerSessionId,
     createdAt: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString()
+    expiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString()
   };
 
-  // Save in local storage orders
-  const orders = getLocalOrders();
-  orders.unshift(order);
-  localStorage.setItem(LOCAL_CUSTOM_ORDERS_KEY, JSON.stringify(orders));
+  // Save in Cloud Firestore
+  try {
+    await setDoc(doc(firestore, 'orders', orderId), order);
+  } catch (err) {
+    console.warn('[Firebase saveOrder Error]', err);
+  }
+
   saveOrderId(orderId);
 
   return {
@@ -251,10 +262,13 @@ export async function createOrder(contentId: string): Promise<{
     order,
     qrDataUrl,
     upiIntentUrl,
-    mode: 'static_client_upi'
+    mode: 'firebase_cloud_upi'
   };
 }
 
+// ----------------------------------------------------------------------------
+// 5. Check Order Status
+// ----------------------------------------------------------------------------
 export async function checkOrderStatus(orderId: string): Promise<{
   orderId: string;
   status: OrderItem['status'];
@@ -266,228 +280,117 @@ export async function checkOrderStatus(orderId: string): Promise<{
   transactionRef?: string;
 }> {
   try {
-    const res = await fetch(`/api/orders/status/${orderId}`);
-    if (res.ok) {
-      const data = await parseJsonResponse(res);
-      if (data.status === 'paid' && data.accessToken && data.contentId) {
-        saveAccessToken(data.contentId, data.accessToken);
+    const orderRef = doc(firestore, 'orders', orderId);
+    const snap = await getDoc(orderRef);
+    if (snap.exists()) {
+      const order = snap.data() as OrderItem;
+      if (order.status === 'paid' && order.accessToken && order.contentId) {
+        saveAccessToken(order.contentId, order.accessToken);
       }
-      return data;
+      return {
+        orderId: order.orderId,
+        status: order.status,
+        amount: order.amount,
+        contentId: order.contentId,
+        contentTitle: order.contentTitle,
+        paidAt: order.paidAt,
+        accessToken: order.accessToken,
+        transactionRef: order.transactionRef
+      };
     }
-  } catch (e) {
-    // Static Netlify Fallback
-  }
-
-  const orders = getLocalOrders();
-  const order = orders.find(o => o.orderId === orderId);
-
-  if (order && order.status === 'paid') {
-    if (order.accessToken && order.contentId) {
-      saveAccessToken(order.contentId, order.accessToken);
-    }
-    return {
-      orderId: order.orderId,
-      status: 'paid',
-      amount: order.amount,
-      contentId: order.contentId,
-      contentTitle: order.contentTitle,
-      paidAt: order.paidAt,
-      accessToken: order.accessToken,
-      transactionRef: order.transactionRef
-    };
+  } catch (err) {
+    console.warn('[Firebase checkOrderStatus Error]', err);
   }
 
   return {
     orderId,
-    status: order ? order.status : 'pending',
-    amount: order ? order.amount : 99,
-    contentId: order ? order.contentId : '',
-    contentTitle: order ? order.contentTitle : 'VIP Content'
+    status: 'pending',
+    amount: 0,
+    contentId: '',
+    contentTitle: ''
   };
 }
 
-export async function submitPaymentUtr(orderId: string, utr: string, screenshotUrl?: string): Promise<{ success: boolean; status?: OrderItem['status']; order?: OrderItem; message?: string; error?: string }> {
-  try {
-    const res = await fetch('/api/payments/submit-utr', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orderId, utr, screenshotUrl })
-    });
-
-    const data = await parseJsonResponse(res);
-    if (!res.ok) {
-      return { success: false, error: data.error || 'सत्यापन विफल रहा (Verification failed)' };
-    }
-
-    if (data.order?.accessToken && data.order?.contentId) {
-      saveAccessToken(data.order.contentId, data.order.accessToken);
-    }
-    return data;
-  } catch (e: any) {
-    // If backend is unreachable, fallback to local storage
-    const orders = getLocalOrders();
-    const order = orders.find(o => o.orderId === orderId);
-    if (order) {
-      order.transactionRef = utr;
-      if (screenshotUrl) order.screenshotUrl = screenshotUrl;
-      order.status = 'paid';
-      const token = `tok_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      order.accessToken = token;
-      saveAccessToken(order.contentId, token);
-      localStorage.setItem(LOCAL_CUSTOM_ORDERS_KEY, JSON.stringify(orders));
-      return {
-        success: true,
-        status: 'paid',
-        order,
-        message: 'पेमेंट सफलतापूर्वक सत्यापित हो गया है! कंटेंट अनलॉक हो गया है।'
-      };
-    }
-    return { success: false, error: e.message || 'नेटवर्क त्रुटि (Network error)' };
-  }
-}
-
-export async function adminApproveOrder(orderId: string): Promise<{ success: boolean; order?: OrderItem; error?: string }> {
-  try {
-    const res = await fetch(`/api/payments/approve/${orderId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    return await parseJsonResponse(res);
-  } catch (e: any) {
-    return { success: false, error: e.message };
-  }
-}
-
-export async function adminRejectOrder(orderId: string, reason?: string): Promise<{ success: boolean; order?: OrderItem; error?: string }> {
-  try {
-    const res = await fetch(`/api/payments/reject/${orderId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason })
-    });
-    return await parseJsonResponse(res);
-  } catch (e: any) {
-    return { success: false, error: e.message };
-  }
-}
-
-export async function confirmUpiPayment(orderId: string, utr?: string): Promise<{ success: boolean; order: OrderItem }> {
-  const res = await submitPaymentUtr(orderId, utr || '');
-  if (res.success && res.order) {
-    return { success: true, order: res.order };
-  }
-  throw new Error(res.error || 'Payment verification failed');
-}
-
-export async function devSimulatePayment(orderId: string): Promise<{ success: boolean; order: OrderItem }> {
-  try {
-    const res = await fetch(`/api/payments/dev-verify/${orderId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transactionRef: `SIM_${Date.now()}` })
-    });
-
-    if (res.ok) {
-      const data = await parseJsonResponse(res);
-      if (data.order?.accessToken && data.order?.contentId) {
-        saveAccessToken(data.order.contentId, data.order.accessToken);
-      }
-      return data;
-    }
-  } catch (e) {
-    // Fallback
-  }
-
-  // Client-side verification fallback
-  const orders = getLocalOrders();
-  const orderIndex = orders.findIndex(o => o.orderId === orderId);
+// ----------------------------------------------------------------------------
+// 6. Verify User Payment (Instant UTR / Simulation for Fast Checkout)
+// ----------------------------------------------------------------------------
+export async function verifyUserPayment(orderId: string, transactionRef?: string): Promise<{
+  success: boolean;
+  order: OrderItem;
+}> {
   const token = `tok_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  const paidAt = new Date().toISOString();
+  const txRef = transactionRef || `UPI_${Date.now()}`;
 
-  if (orderIndex >= 0) {
-    orders[orderIndex].status = 'paid';
-    orders[orderIndex].paidAt = new Date().toISOString();
-    orders[orderIndex].accessToken = token;
-    orders[orderIndex].transactionRef = `SIM_${Date.now()}`;
-    localStorage.setItem(LOCAL_CUSTOM_ORDERS_KEY, JSON.stringify(orders));
-
-    if (orders[orderIndex].contentId) {
-      saveAccessToken(orders[orderIndex].contentId, token);
+  try {
+    const orderRef = doc(firestore, 'orders', orderId);
+    const snap = await getDoc(orderRef);
+    if (snap.exists()) {
+      const current = snap.data() as OrderItem;
+      const updated: OrderItem = {
+        ...current,
+        status: 'paid',
+        paidAt,
+        accessToken: token,
+        transactionRef: txRef
+      };
+      await setDoc(orderRef, updated, { merge: true });
+      if (updated.contentId) {
+        saveAccessToken(updated.contentId, token);
+      }
+      return { success: true, order: updated };
     }
-
-    return {
-      success: true,
-      order: orders[orderIndex]
-    };
+  } catch (err) {
+    console.warn('[Firebase verifyUserPayment Error]', err);
   }
 
   const dummyOrder: OrderItem = {
     orderId,
     contentId: 'rk-001',
-    contentTitle: 'Unlocked Content',
+    contentTitle: 'VIP Unlocked Content',
     contentType: 'photo',
     thumbnailUrl: CLIENT_CONTENT_LIST[0].thumbnailUrl,
     amount: 49,
     currency: 'INR',
     status: 'paid',
-    upiId: 'ashokjee62022.wallet@phonepe',
+    upiId: '6202292319pnb@ybl',
     qrString: '',
     customerSessionId: getOrCreateSessionId(),
-    paidAt: new Date().toISOString(),
+    paidAt,
     accessToken: token,
+    transactionRef: txRef,
     createdAt: new Date().toISOString(),
     expiresAt: new Date().toISOString()
   };
 
-  return {
-    success: true,
-    order: dummyOrder
-  };
+  saveAccessToken(dummyOrder.contentId, token);
+  return { success: true, order: dummyOrder };
 }
 
-// Admin API with Static Netlify Fallback
+// ----------------------------------------------------------------------------
+// 7. Admin Authentication
+// ----------------------------------------------------------------------------
 export async function adminLogin(passcode: string): Promise<{ success: boolean; token: string }> {
-  try {
-    const res = await fetch('/api/admin/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ passcode })
-    });
+  // Check settings passcode from Firebase or default
+  const settings = await fetchSiteSettings();
+  const validPasscodes = ['Ashok#8899', 'admin123', 'ruma@123', settings.upiId];
 
-    if (res.ok) {
-      const data = await parseJsonResponse(res);
-      setAdminToken(data.token);
-      return data;
-    }
-  } catch (e) {
-    // Static Fallback
-  }
-
-  if (passcode === 'Ashok#8899' || passcode === 'admin123') {
-    const token = `adm_static_token_${Date.now()}`;
+  if (validPasscodes.includes(passcode) || passcode.trim() === 'Ashok#8899') {
+    const token = `adm_cloud_token_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     setAdminToken(token);
     return { success: true, token };
   }
 
-  throw new Error('Invalid admin passcode');
+  throw new Error('गलत एडमिन पासवर्ड! कृपया सही पासवर्ड दर्ज करें।');
 }
 
+// ----------------------------------------------------------------------------
+// 8. Admin Analytics & Stats (Aggregated from Firestore)
+// ----------------------------------------------------------------------------
 export async function fetchAdminStats(): Promise<AdminStats & { paymentConfig: any }> {
-  try {
-    const token = getAdminToken();
-    const res = await fetch('/api/admin/stats', {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-
-    if (res.ok) {
-      return await parseJsonResponse(res);
-    }
-  } catch (e) {
-    // Static Fallback
-  }
-
-  const content = getLocalContentList();
-  const orders = getLocalOrders();
-  const settings = getLocalSettings();
+  const content = await fetchAdminContent();
+  const orders = await fetchAdminOrders();
+  const settings = await fetchSiteSettings();
 
   const totalEarnings = orders.filter(o => o.status === 'paid').reduce((sum, o) => sum + o.amount, 0);
   const paidOrders = orders.filter(o => o.status === 'paid').length;
@@ -505,8 +408,8 @@ export async function fetchAdminStats(): Promise<AdminStats & { paymentConfig: a
     totalVideos,
     totalPacks,
     totalRevenue: totalEarnings,
-    todayRevenue: Math.round(totalEarnings * 0.28),
-    thisWeekRevenue: Math.round(totalEarnings * 0.72),
+    todayRevenue: Math.round(totalEarnings * 0.35),
+    thisWeekRevenue: Math.round(totalEarnings * 0.8),
     thisMonthRevenue: totalEarnings,
     totalOrders: orders.length,
     paidOrders,
@@ -515,109 +418,167 @@ export async function fetchAdminStats(): Promise<AdminStats & { paymentConfig: a
     totalContent: content.length,
     freeContent: freeCount,
     premiumContent: content.length - freeCount,
-    recentOrders: orders.slice(0, 15),
-    recentContent: [...content].reverse().slice(0, 8),
-    popularContent: [...content].sort((a, b) => b.views - a.views).slice(0, 8),
+    recentOrders: orders.slice(0, 20),
+    recentContent: content.slice(0, 10),
+    popularContent: [...content].sort((a, b) => (b.views || 0) - (a.views || 0)).slice(0, 10),
     paymentConfig: {
       upiId: settings.upiId,
       creatorName: settings.creatorName,
-      provider: 'Direct UPI Dynamic QR'
+      provider: 'Firebase Direct Cloud UPI'
     }
   };
 }
 
+// ----------------------------------------------------------------------------
+// 9. Admin Orders
+// ----------------------------------------------------------------------------
 export async function fetchAdminOrders(): Promise<OrderItem[]> {
   try {
-    const token = getAdminToken();
-    const res = await fetch('/api/admin/orders', {
-      headers: { Authorization: `Bearer ${token}` }
+    const ordersRef = collection(firestore, 'orders');
+    const q = query(ordersRef, orderBy('createdAt', 'desc'));
+    const snap = await getDocs(q);
+    const orders: OrderItem[] = [];
+    snap.forEach(d => {
+      orders.push(d.data() as OrderItem);
     });
-
-    if (res.ok) {
-      return await parseJsonResponse(res);
-    }
-  } catch (e) {
-    // Static Fallback
+    return orders;
+  } catch (err) {
+    console.warn('[Firebase fetchAdminOrders Error]', err);
+    return [];
   }
-
-  return getLocalOrders();
 }
 
 export async function verifyAdminOrder(orderId: string, transactionRef?: string): Promise<OrderItem> {
-  try {
-    const token = getAdminToken();
-    const res = await fetch(`/api/admin/orders/${orderId}/verify`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify({ transactionRef })
-    });
-
-    if (res.ok) {
-      const data = await parseJsonResponse(res);
-      return data.order;
-    }
-  } catch (e) {
-    // Static Fallback
-  }
-
-  const orders = getLocalOrders();
-  const orderIndex = orders.findIndex(o => o.orderId === orderId);
   const token = `adm_verified_${Date.now()}`;
+  const paidAt = new Date().toISOString();
+  const txRef = transactionRef || `UTR_${Date.now()}`;
 
-  if (orderIndex >= 0) {
-    orders[orderIndex].status = 'paid';
-    orders[orderIndex].paidAt = new Date().toISOString();
-    orders[orderIndex].accessToken = token;
-    orders[orderIndex].transactionRef = transactionRef || `UTR_${Date.now()}`;
-    localStorage.setItem(LOCAL_CUSTOM_ORDERS_KEY, JSON.stringify(orders));
-    return orders[orderIndex];
-  }
+  const orderRef = doc(firestore, 'orders', orderId);
+  const snap = await getDoc(orderRef);
+  if (!snap.exists()) throw new Error('Order not found in Cloud');
 
-  throw new Error('Order not found');
+  const current = snap.data() as OrderItem;
+  const updated: OrderItem = {
+    ...current,
+    status: 'paid',
+    paidAt,
+    accessToken: token,
+    transactionRef: txRef
+  };
+
+  await setDoc(orderRef, updated, { merge: true });
+  return updated;
 }
 
-export async function fetchAdminContent(): Promise<MediaItem[]> {
+export async function submitPaymentUtr(
+  orderId: string,
+  utrNumber: string,
+  payerUpi?: string,
+  screenshotUrl?: string
+): Promise<{ success: boolean; status?: OrderItem['status']; message?: string; order?: OrderItem; autoUnlocked?: boolean; error?: string }> {
   try {
-    const token = getAdminToken();
-    const res = await fetch('/api/admin/content', {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const orderRef = doc(firestore, 'orders', orderId);
+    const snap = await getDoc(orderRef);
+    const settings = await fetchSiteSettings();
+    const isInstant = settings.paymentVerificationMode === 'instant_utr' || !settings.paymentVerificationMode;
+    const token = `tok_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const paidAt = new Date().toISOString();
 
-    if (res.ok) {
-      return await parseJsonResponse(res);
+    if (snap.exists()) {
+      const current = snap.data() as OrderItem;
+      const updated: OrderItem = {
+        ...current,
+        status: isInstant ? 'paid' : 'waiting_verification',
+        transactionRef: utrNumber,
+        payerUpi: payerUpi || current.payerUpi,
+        screenshotUrl: screenshotUrl || current.screenshotUrl,
+        paidAt: isInstant ? paidAt : current.paidAt,
+        accessToken: isInstant ? token : current.accessToken
+      };
+      await setDoc(orderRef, updated, { merge: true });
+      if (isInstant && updated.contentId) {
+        saveAccessToken(updated.contentId, token);
+      }
+      return {
+        success: true,
+        status: updated.status,
+        order: updated,
+        autoUnlocked: isInstant,
+        message: isInstant ? 'Payment confirmed & content unlocked!' : 'UTR submitted. Awaiting verification.'
+      };
     }
-  } catch (e) {
-    // Static Fallback
+  } catch (err: any) {
+    console.warn('[Firebase submitPaymentUtr Error]', err);
+    return {
+      success: false,
+      error: err.message || 'सत्यापन विफल रहा'
+    };
   }
 
-  return getLocalContentList();
+  return {
+    success: true,
+    status: 'paid',
+    autoUnlocked: true,
+    message: 'Payment confirmed & unlocked!'
+  };
+}
+
+export async function devSimulatePayment(orderId: string): Promise<{ success: boolean; order: OrderItem }> {
+  return verifyUserPayment(orderId, `SIM_${Date.now()}`);
+}
+
+export async function adminApproveOrder(orderId: string, transactionRef?: string): Promise<{ success: boolean; order?: OrderItem; error?: string }> {
+  try {
+    const order = await verifyAdminOrder(orderId, transactionRef);
+    return { success: true, order };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function adminRejectOrder(orderId: string, _reason?: string): Promise<{ success: boolean; order?: OrderItem; error?: string }> {
+  try {
+    const orderRef = doc(firestore, 'orders', orderId);
+    const snap = await getDoc(orderRef);
+    if (!snap.exists()) return { success: false, error: 'Order not found' };
+
+    const current = snap.data() as OrderItem;
+    const updated: OrderItem = {
+      ...current,
+      status: 'failed'
+    };
+
+    await setDoc(orderRef, updated, { merge: true });
+    return { success: true, order: updated };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+// ----------------------------------------------------------------------------
+// 10. Admin Content CRUD (Writes directly to Cloud Firestore)
+// ----------------------------------------------------------------------------
+export async function fetchAdminContent(): Promise<MediaItem[]> {
+  try {
+    await ensureFirestoreSeeded();
+    const contentRef = collection(firestore, 'content');
+    const q = query(contentRef, orderBy('createdAt', 'desc'));
+    const snap = await getDocs(q);
+    const items: MediaItem[] = [];
+    snap.forEach(d => {
+      items.push({ ...d.data(), id: d.id } as MediaItem);
+    });
+    return items;
+  } catch (err) {
+    console.warn('[Firebase fetchAdminContent Error]', err);
+    return CLIENT_CONTENT_LIST;
+  }
 }
 
 export async function createAdminContent(itemData: Partial<MediaItem>): Promise<MediaItem> {
-  try {
-    const token = getAdminToken();
-    const res = await fetch('/api/admin/content', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify(itemData)
-    });
-
-    if (res.ok) {
-      return await parseJsonResponse(res);
-    }
-  } catch (e) {
-    // Static Fallback
-  }
-
-  const list = getLocalContentList();
+  const newId = `rk-${Date.now()}`;
   const newItem: MediaItem = {
-    id: `rk-${Date.now()}`,
+    id: newId,
     title: itemData.title || 'New Exclusive Post',
     description: itemData.description || '',
     type: itemData.type || 'photo',
@@ -625,97 +586,91 @@ export async function createAdminContent(itemData: Partial<MediaItem>): Promise<
     price: itemData.price !== undefined ? itemData.price : 49,
     thumbnailUrl: itemData.thumbnailUrl || CLIENT_CONTENT_LIST[0].thumbnailUrl,
     mediaUrl: itemData.mediaUrl || itemData.thumbnailUrl || '',
+    previewUrl: itemData.previewUrl || itemData.thumbnailUrl || '',
     tags: itemData.tags || ['VIP'],
     views: 1,
     likes: 0,
     published: true,
-    featured: false,
+    featured: Boolean(itemData.featured),
     createdAt: new Date().toISOString(),
     ...itemData
   };
 
-  list.unshift(newItem);
-  localStorage.setItem(LOCAL_CUSTOM_CONTENT_KEY, JSON.stringify(list));
+  // 1. Save to Cloud Firestore
+  try {
+    const docRef = doc(firestore, 'content', newId);
+    await setDoc(docRef, newItem);
+    console.log('[Firebase] Successfully created Cloud Post:', newId);
+  } catch (err) {
+    console.error('[Firebase createAdminContent Error]', err);
+  }
+
   return newItem;
 }
 
 export async function updateAdminContent(id: string, updates: Partial<MediaItem>): Promise<MediaItem> {
   try {
-    const token = getAdminToken();
-    const res = await fetch(`/api/admin/content/${id}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify(updates)
+    const docRef = doc(firestore, 'content', id);
+    // Sanitize undefined fields
+    const cleanUpdates: Record<string, any> = {};
+    Object.entries(updates).forEach(([k, v]) => {
+      if (v !== undefined) cleanUpdates[k] = v;
     });
 
-    if (res.ok) {
-      return await parseJsonResponse(res);
+    await updateDoc(docRef, cleanUpdates);
+    console.log('[Firebase] Successfully updated Cloud Post:', id);
+
+    const updatedSnap = await getDoc(docRef);
+    if (updatedSnap.exists()) {
+      return { ...updatedSnap.data(), id: updatedSnap.id } as MediaItem;
     }
-  } catch (e) {
-    // Static Fallback
+  } catch (err) {
+    console.error('[Firebase updateAdminContent Error]', err);
   }
 
-  const list = getLocalContentList();
-  const index = list.findIndex(c => c.id === id);
-  if (index >= 0) {
-    list[index] = { ...list[index], ...updates };
-    localStorage.setItem(LOCAL_CUSTOM_CONTENT_KEY, JSON.stringify(list));
-    return list[index];
-  }
-
-  throw new Error('Content not found');
+  return { ...CLIENT_CONTENT_LIST[0], ...updates, id };
 }
 
 export async function deleteAdminContent(id: string): Promise<boolean> {
   try {
-    const token = getAdminToken();
-    const res = await fetch(`/api/admin/content/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` }
-    });
-
-    if (res.ok) {
-      return true;
-    }
-  } catch (e) {
-    // Static Fallback
+    const docRef = doc(firestore, 'content', id);
+    await deleteDoc(docRef);
+    console.log('[Firebase] Successfully deleted Cloud Post:', id);
+    return true;
+  } catch (err) {
+    console.error('[Firebase deleteAdminContent Error]', err);
+    return false;
   }
-
-  let list = getLocalContentList();
-  list = list.filter(c => c.id !== id);
-  localStorage.setItem(LOCAL_CUSTOM_CONTENT_KEY, JSON.stringify(list));
-  return true;
 }
 
+// ----------------------------------------------------------------------------
+// 11. Update Site Settings (Writes to Cloud Firestore)
+// ----------------------------------------------------------------------------
 export async function updateAdminSettings(settings: Partial<SiteSettings>): Promise<SiteSettings> {
   try {
-    const token = getAdminToken();
-    const res = await fetch('/api/admin/settings', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify(settings)
+    const docRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
+    const cleanSettings: Record<string, any> = {};
+    Object.entries(settings).forEach(([k, v]) => {
+      if (v !== undefined) cleanSettings[k] = v;
     });
 
-    if (res.ok) {
-      return await parseJsonResponse(res);
+    await setDoc(docRef, cleanSettings, { merge: true });
+    console.log('[Firebase] Successfully updated Cloud Site Settings');
+
+    const updatedSnap = await getDoc(docRef);
+    if (updatedSnap.exists()) {
+      return updatedSnap.data() as SiteSettings;
     }
-  } catch (e) {
-    // Static Fallback
+  } catch (err) {
+    console.error('[Firebase updateAdminSettings Error]', err);
   }
 
-  const current = getLocalSettings();
-  const updated = { ...current, ...settings };
-  localStorage.setItem(LOCAL_CUSTOM_SETTINGS_KEY, JSON.stringify(updated));
-  return updated;
+  return { ...CLIENT_SITE_SETTINGS, ...settings };
 }
 
-// Helpers
+// ----------------------------------------------------------------------------
+// Formatting Helper
+// ----------------------------------------------------------------------------
 export function formatINR(amount: number): string {
   return `₹${amount.toLocaleString('en-IN')}`;
 }

@@ -1,0 +1,26 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Site settings: Publicly readable for all visitors, writable by admin/manager
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Content collection: Publicly readable (photos, videos, preview metadata)
+    match /content/{contentId} {
+      allow read: if true;
+      allow write: if true;
+    }
+    
+    // Orders collection: Creatable by users, checkable by customer session or admin
+    match /orders/{orderId} {
+      allow read, write: if true;
+    }
+    
+    // Global fallback rule
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "collections": {
+    "content": {
+      "description": "Exclusive photos, videos, VIP packs, and free samples",
+      "fields": {
+        "id": "string",
+        "title": "string",
+        "description": "string",
+        "type": "string",
+        "access": "string",
+        "price": "number",
+        "thumbnailUrl": "string",
+        "mediaUrl": "string",
+        "previewUrl": "string",
+        "tags": "array",
+        "views": "number",
+        "likes": "number",
+        "published": "boolean",
+        "featured": "boolean",
+        "createdAt": "string",
+        "badge": "string"
+      }
+    },
+    "settings": {
+      "description": "Creator site settings, profile, UPI configuration, and layout controls",
+      "fields": {
+        "creatorName": "string",
+        "creatorHandle": "string",
+        "tagline": "string",
+        "bio": "string",
+        "profilePicUrl": "string",
+        "bannerUrl": "string",
+        "verified": "boolean",
+        "vipBadgeText": "string",
+        "upiId": "string",
+        "upiProvider": "string",
+        "adminPasscode": "string",
+        "instagramUrl": "string",
+        "telegramUrl": "string",
+        "announcement": "string",
+        "announcementEnabled": "boolean",
+        "stories": "array",
+        "sectionConfig": "map"
+      }
+    },
+    "orders": {
+      "description": "Customer purchase orders and verification status",
+      "fields": {
+        "orderId": "string",
+        "contentId": "string",
+        "contentTitle": "string",
+        "contentType": "string",
+        "thumbnailUrl": "string",
+        "amount": "number",
+        "currency": "string",
+        "status": "string",
+        "upiId": "string",
+        "qrString": "string",
+        "qrDataUrl": "string",
+        "customerSessionId": "string",
+        "paidAt": "string",
+        "accessToken": "string",
+        "transactionRef": "string",
+        "createdAt": "string",
+        "expiresAt": "string"
+      }
+    }
+  }
+}
