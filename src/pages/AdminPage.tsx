@@ -58,7 +58,8 @@ import {
   Layers,
   Calendar,
   DollarSign,
-  Upload
+  Upload,
+  Download
 } from 'lucide-react';
 
 interface AdminPageProps {
@@ -119,6 +120,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
   // Orders search & filter
   const [orderSearch, setOrderSearch] = useState('');
   const [orderStatusFilter, setOrderStatusFilter] = useState('all');
+  const [viewingReceiptOrder, setViewingReceiptOrder] = useState<OrderItem | null>(null);
   const [copiedSecretLink, setCopiedSecretLink] = useState(false);
 
   const getSecretUrl = () => {
@@ -1241,15 +1243,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                     <th className="py-3 px-4">Content</th>
                     <th className="py-3 px-4">Amount</th>
                     <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-4">Created</th>
+                    <th className="py-3 px-4">📸 Receipt / Screenshot</th>
                     <th className="py-3 px-4">Submitted UTR / Ref</th>
+                    <th className="py-3 px-4">Created</th>
                     <th className="py-3 px-4 text-right">Verification Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-purple-100">
                   {filteredOrders.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="text-center py-8 text-purple-900/40 font-medium">
+                      <td colSpan={8} className="text-center py-8 text-purple-900/40 font-medium">
                         No orders matching filters.
                       </td>
                     </tr>
@@ -1289,8 +1292,24 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                             {o.status === 'waiting_verification' ? '⏳ Review UTR' : o.status}
                           </span>
                         </td>
-                        <td className="py-3.5 px-4 text-purple-900/60 font-medium text-[11px]">
-                          {new Date(o.createdAt).toLocaleString()}
+                        <td className="py-3.5 px-4">
+                          {o.screenshotUrl ? (
+                            <button
+                              type="button"
+                              onClick={() => setViewingReceiptOrder(o)}
+                              className="group inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-pink-50 hover:bg-pink-100 border border-pink-200 text-pink-800 text-[11px] font-bold shadow-2xs transition-all cursor-pointer"
+                              title="क्लिक करके पेमेंट स्क्रीनशॉट देखें"
+                            >
+                              <img
+                                src={o.screenshotUrl}
+                                alt="Receipt"
+                                className="w-5 h-5 rounded-md object-cover border border-pink-300"
+                              />
+                              <span>रसीद देखें (View)</span>
+                            </button>
+                          ) : (
+                            <span className="text-purple-900/40 text-[11px] font-medium">—</span>
+                          )}
                         </td>
                         <td className="py-3.5 px-4">
                           {o.transactionRef ? (
@@ -1300,6 +1319,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                           ) : (
                             <span className="text-purple-900/40 font-mono text-[11px]">—</span>
                           )}
+                        </td>
+                        <td className="py-3.5 px-4 text-purple-900/60 font-medium text-[11px]">
+                          {new Date(o.createdAt).toLocaleString()}
                         </td>
                         <td className="py-3.5 px-4 text-right">
                           {o.status === 'waiting_verification' ? (
@@ -2009,6 +2031,119 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
             <div className="flex items-center justify-between text-xs text-purple-900/70 font-semibold pt-1">
               <span>Price: <strong>{adminPreviewItem.access === 'free' ? 'FREE' : formatINR(adminPreviewItem.price)}</strong></span>
               <span>Duration/Size: <strong>{adminPreviewItem.duration || 'Full HD'}</strong></span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------- */}
+      {/* ADMIN PAYMENT RECEIPT / SCREENSHOT VIEWER MODAL */}
+      {/* ---------------------------------------------------- */}
+      {viewingReceiptOrder && (
+        <div className="fixed inset-0 z-50 bg-purple-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="relative w-full max-w-2xl bg-white rounded-3xl overflow-hidden border border-white shadow-2xl space-y-4 p-5 sm:p-6 max-h-[92vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-purple-100 pb-3 shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="p-2 rounded-xl bg-pink-100 text-pink-700">
+                  <ImageIcon className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="font-display font-black text-base sm:text-lg text-purple-950">
+                    पेमेंट रसीद / स्क्रीनशॉट (Payment Receipt)
+                  </h3>
+                  <p className="text-xs text-purple-900/60 font-medium">
+                    Order ID: <strong className="font-mono text-pink-700">{viewingReceiptOrder.orderId}</strong>
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setViewingReceiptOrder(null)}
+                className="p-2 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 font-bold transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Receipt Image Display */}
+            <div className="rounded-2xl overflow-hidden bg-zinc-950/95 border border-zinc-800 flex-1 min-h-[250px] max-h-[55vh] flex items-center justify-center p-2">
+              {viewingReceiptOrder.screenshotUrl ? (
+                <img
+                  src={viewingReceiptOrder.screenshotUrl}
+                  alt="Customer Payment Receipt"
+                  className="w-full h-full object-contain rounded-lg"
+                />
+              ) : (
+                <div className="text-zinc-500 text-sm">No screenshot uploaded</div>
+              )}
+            </div>
+
+            {/* Order info details */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs bg-purple-50/70 p-3 rounded-2xl border border-purple-100 shrink-0">
+              <div>
+                <span className="text-purple-900/60 font-semibold block text-[10px]">Content</span>
+                <span className="font-bold text-purple-950 truncate block">{viewingReceiptOrder.contentTitle}</span>
+              </div>
+              <div>
+                <span className="text-purple-900/60 font-semibold block text-[10px]">Amount</span>
+                <span className="font-black text-emerald-700">{formatINR(viewingReceiptOrder.amount)}</span>
+              </div>
+              <div>
+                <span className="text-purple-900/60 font-semibold block text-[10px]">Submitted UTR</span>
+                <span className="font-mono font-bold text-purple-950">{viewingReceiptOrder.transactionRef || 'None'}</span>
+              </div>
+              <div>
+                <span className="text-purple-900/60 font-semibold block text-[10px]">Status</span>
+                <span className="font-bold uppercase text-[10px] text-pink-700">{viewingReceiptOrder.status}</span>
+              </div>
+            </div>
+
+            {/* Action Buttons in Receipt Modal */}
+            <div className="flex items-center justify-between gap-3 pt-2 border-t border-purple-100 shrink-0">
+              {viewingReceiptOrder.screenshotUrl && (
+                <a
+                  href={viewingReceiptOrder.screenshotUrl}
+                  download={`Receipt-${viewingReceiptOrder.orderId}.jpg`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3.5 py-2 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 text-xs font-bold flex items-center gap-1.5 transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download Image</span>
+                </a>
+              )}
+
+              <div className="flex items-center gap-2 ml-auto">
+                {viewingReceiptOrder.status === 'waiting_verification' && (
+                  <>
+                    <button
+                      onClick={async () => {
+                        await handleRejectOrder(viewingReceiptOrder.orderId);
+                        setViewingReceiptOrder(null);
+                      }}
+                      className="px-4 py-2 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-700 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                      <span>Reject Fake Claim</span>
+                    </button>
+                    <button
+                      onClick={async () => {
+                        await handleApproveOrder(viewingReceiptOrder.orderId);
+                        setViewingReceiptOrder(null);
+                      }}
+                      className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black shadow-md shadow-emerald-600/30 transition-transform active:scale-95 cursor-pointer flex items-center gap-1.5"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Approve & Unlock Content</span>
+                    </button>
+                  </>
+                )}
+                <button
+                  onClick={() => setViewingReceiptOrder(null)}
+                  className="px-4 py-2 rounded-xl bg-purple-900 hover:bg-purple-950 text-white text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>

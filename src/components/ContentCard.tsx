@@ -1,13 +1,27 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { MediaItem } from '../types';
 import { formatINR } from '../utils/api';
-import { Lock, Play, Eye, Heart, Sparkles, CheckCircle2, Film, Image as ImageIcon, Layers } from 'lucide-react';
+import {
+  Lock,
+  Play,
+  Eye,
+  Heart,
+  Sparkles,
+  CheckCircle2,
+  Film,
+  Image as ImageIcon,
+  Layers,
+  Share2,
+  Instagram,
+  Check
+} from 'lucide-react';
 
 interface ContentCardProps {
   item: MediaItem;
   isUnlocked: boolean;
   onOpen: (item: MediaItem) => void;
   onBuy: (item: MediaItem) => void;
+  onOpenShare?: (item: MediaItem) => void;
 }
 
 export const ContentCard: React.FC<ContentCardProps> = ({
@@ -15,9 +29,39 @@ export const ContentCard: React.FC<ContentCardProps> = ({
   isUnlocked,
   onOpen,
   onBuy,
+  onOpenShare,
 }) => {
+  const [copied, setCopied] = useState(false);
   const isFree = item.access === 'free';
   const canAccess = isFree || isUnlocked;
+
+  const postUrl = `${window.location.origin}${window.location.pathname}#media/${item.id}`;
+  const shareText = `🔥 Check out "${item.title}" VIP Content:`;
+
+  const handleShareClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onOpenShare) {
+      onOpenShare(item);
+      return;
+    }
+
+    if (navigator.share) {
+      navigator.share({
+        title: item.title,
+        text: shareText,
+        url: postUrl,
+      }).catch(() => {});
+      return;
+    }
+
+    try {
+      navigator.clipboard.writeText(`${shareText}\n${postUrl}`);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (_) {
+      prompt('Copy post link:', postUrl);
+    }
+  };
 
   const getTypeIcon = () => {
     switch (item.type) {
@@ -44,10 +88,13 @@ export const ContentCard: React.FC<ContentCardProps> = ({
   return (
     <div
       id={`content-card-${item.id}`}
-      className="glass-card glass-card-hover rounded-2xl sm:rounded-3xl overflow-hidden flex flex-col group relative border border-white/80 transition-all duration-300"
+      className="glass-card glass-card-hover rounded-2xl sm:rounded-3xl overflow-hidden flex flex-col group relative border border-white/80 transition-all duration-300 select-none protected-media-container"
     >
       {/* Thumbnail Container */}
-      <div className="relative aspect-[4/5] w-full overflow-hidden bg-purple-100/50 select-none">
+      <div 
+        onContextMenu={(e) => e.preventDefault()}
+        className="relative aspect-[4/5] w-full overflow-hidden bg-purple-100/50 select-none"
+      >
         
         {/* Media Thumbnail */}
         <img
@@ -55,7 +102,9 @@ export const ContentCard: React.FC<ContentCardProps> = ({
           alt={item.title}
           loading="lazy"
           decoding="async"
-          className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 ${
+          onContextMenu={(e) => e.preventDefault()}
+          onDragStart={(e) => e.preventDefault()}
+          className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 pointer-events-none ${
             !canAccess ? 'filter blur-[10px] scale-105 opacity-80' : 'opacity-95'
           }`}
           referrerPolicy="no-referrer"
@@ -162,25 +211,37 @@ export const ContentCard: React.FC<ContentCardProps> = ({
           )}
         </div>
 
-        {/* Action Button */}
-        <div className="mt-4 pt-3 border-t border-purple-100/80">
+        {/* Action Button & Share (Disabled/Hidden once unlocked) */}
+        <div className="mt-4 pt-3 border-t border-purple-100/80 flex items-center gap-2">
           {canAccess ? (
             <button
               id={`btn-view-${item.id}`}
               onClick={() => onOpen(item)}
-              className="w-full py-2.5 px-4 rounded-2xl text-xs sm:text-sm font-extrabold text-purple-950 bg-white hover:bg-pink-50 border border-purple-200 shadow-sm transition-all flex items-center justify-center gap-2"
+              className="flex-1 py-2.5 px-3 rounded-2xl text-xs sm:text-sm font-extrabold text-purple-950 bg-white hover:bg-pink-50 border border-purple-200 shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
             >
               {item.type === 'video' ? <Play className="w-4 h-4 fill-pink-600 text-pink-600" /> : <Eye className="w-4 h-4 text-pink-600" />}
-              <span>{item.type === 'video' ? 'Watch Full Video' : 'View Full Photo Set'}</span>
+              <span className="truncate">{item.type === 'video' ? 'Watch Video' : 'View Photos'}</span>
             </button>
           ) : (
             <button
               id={`btn-unlock-${item.id}`}
               onClick={() => onBuy(item)}
-              className="w-full glow-pink-btn py-2.5 px-4 rounded-2xl text-xs sm:text-sm font-black text-white flex items-center justify-center gap-2 shadow-md shadow-pink-500/20"
+              className="flex-1 glow-pink-btn py-2.5 px-3 rounded-2xl text-xs sm:text-sm font-black text-white flex items-center justify-center gap-1.5 shadow-md shadow-pink-500/20 cursor-pointer"
             >
-              <Lock className="w-4 h-4" />
-              <span>Unlock Now • {formatINR(item.price)}</span>
+              <Lock className="w-3.5 h-3.5" />
+              <span className="truncate">Unlock • {formatINR(item.price)}</span>
+            </button>
+          )}
+
+          {/* Quick Share Button - Only visible for locked content (buying referral) and hidden for unlocked/purchased media */}
+          {!isUnlocked && (
+            <button
+              type="button"
+              onClick={handleShareClick}
+              className="p-2.5 rounded-2xl bg-gradient-to-tr from-pink-500 via-purple-600 to-pink-500 hover:brightness-110 text-white shadow-sm transition-transform active:scale-90 cursor-pointer shrink-0"
+              title="पोस्ट शेयर करें (WhatsApp, Instagram, Link)"
+            >
+              {copied ? <Check className="w-4 h-4 text-white" /> : <Share2 className="w-4 h-4 text-white" />}
             </button>
           )}
         </div>

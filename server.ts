@@ -208,10 +208,10 @@ async function startServer() {
     }
   });
 
-  // 8. Direct UPI Payment UTR Submission with Strict Verification
+  // 8. Direct UPI Payment UTR Submission with Strict Verification & Screenshot Proof
   app.post('/api/payments/submit-utr', (req: Request, res: Response) => {
     try {
-      const { orderId, utr } = req.body;
+      const { orderId, utr, screenshotUrl } = req.body;
       if (!orderId) {
         return res.status(400).json({ success: false, error: 'Order ID is required' });
       }
@@ -219,7 +219,7 @@ async function startServer() {
         return res.status(400).json({ success: false, error: 'कृपया सही 12-अंकों का UPI UTR / Transaction No. दर्ज करें।' });
       }
 
-      const result = db.validateAndProcessUtr(orderId, utr);
+      const result = db.validateAndProcessUtr(orderId, utr, screenshotUrl);
       if (!result.success) {
         return res.status(400).json({ success: false, error: result.error });
       }

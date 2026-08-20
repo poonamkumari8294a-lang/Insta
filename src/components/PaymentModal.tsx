@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MediaItem, OrderItem } from '../types';
 import { createOrder, checkOrderStatus, submitPaymentUtr, devSimulatePayment, formatINR, saveAccessToken } from '../utils/api';
+import { compressImageFile } from '../utils/mediaUpload';
 import confetti from 'canvas-confetti';
 import {
   X,
@@ -28,7 +29,11 @@ import {
   Film,
   Image as ImageIcon,
   Layers,
-  Star
+  Star,
+  Download,
+  Upload,
+  Camera,
+  Trash2
 } from 'lucide-react';
 
 interface PaymentModalProps {
@@ -60,8 +65,44 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   const [utrNumber, setUtrNumber] = useState('');
   const [utrError, setUtrError] = useState<string | null>(null);
   const [showUtrHelp, setShowUtrHelp] = useState(false);
+  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
+  const [screenshotName, setScreenshotName] = useState<string | null>(null);
+  const [isProcessingScreenshot, setIsProcessingScreenshot] = useState(false);
+  const screenshotInputRef = useRef<HTMLInputElement>(null);
   const [recentBuyersCount] = useState(() => Math.floor(Math.random() * 18) + 34);
   const pollingRef = useRef<any>(null);
+
+  const handleScreenshotSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsProcessingScreenshot(true);
+    try {
+      // Compress to optimal dimensions and high quality
+      const compressedDataUrl = await compressImageFile(file, 1280, 1280, 0.82);
+      setScreenshotUrl(compressedDataUrl);
+      setScreenshotName(file.name);
+    } catch (err: any) {
+      console.error('Screenshot compression error:', err);
+      // Fallback: Read raw
+      const reader = new FileReader();
+      reader.onload = () => {
+        setScreenshotUrl(reader.result as string);
+        setScreenshotName(file.name);
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      setIsProcessingScreenshot(false);
+    }
+  };
+
+  const handleRemoveScreenshot = () => {
+    setScreenshotUrl(null);
+    setScreenshotName(null);
+    if (screenshotInputRef.current) {
+      screenshotInputRef.current.value = '';
+    }
+  };
 
   // Initialize Order on mount
   useEffect(() => {
@@ -171,6 +212,16 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     setTimeout(() => setCopiedOrderId(false), 2000);
   };
 
+  const handleDownloadQr = () => {
+    if (!orderData?.qrDataUrl) return;
+    const link = document.createElement('a');
+    link.href = orderData.qrDataUrl;
+    link.download = `UPI-QR-${item.id}-${item.price}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // UTR Submission with validation
   const handleSubmitUtr = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -192,7 +243,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     setIsSubmittingUtr(true);
 
     try {
-      const res = await submitPaymentUtr(orderData.order.orderId, cleanUtr);
+      const res = await submitPaymentUtr(orderData.order.orderId, cleanUtr, screenshotUrl || undefined);
 
       if (res.success) {
         if (res.status === 'paid') {
@@ -549,49 +600,92 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 </div>
 
                 {/* QR Code Container with Glowing Gradient Ring */}
-                <div className="relative p-1 rounded-3xl bg-gradient-to-tr from-pink-500 via-purple-500 to-amber-400 shadow-xl shadow-pink-500/20">
-                  <div className="p-3 bg-white rounded-[22px]">
+                <div className="relative p-1.5 rounded-3xl bg-gradient-to-tr from-pink-500 via-purple-600 to-amber-400 shadow-2xl shadow-pink-500/25 animate-pulse-ring">
+                  <div className="p-3.5 bg-white rounded-[22px] flex flex-col items-center">
                     {orderData?.qrDataUrl ? (
-                      <img
-                        src={orderData.qrDataUrl}
-                        alt="UPI Dynamic QR Code"
-                        className="w-40 h-40 sm:w-44 sm:h-44 object-contain"
-                      />
+                      <div className="relative group">
+                        <img
+                          src={orderData.qrDataUrl}
+                          alt="UPI Dynamic QR Code"
+                          className="w-44 h-44 sm:w-48 sm:h-48 object-contain rounded-xl"
+                        />
+                        {/* Center UPI Badge on QR */}
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                          <div className="w-9 h-9 rounded-full bg-white/90 shadow-md border border-pink-300 flex items-center justify-center">
+                            <Zap className="w-5 h-5 text-pink-600 fill-pink-500" />
+                          </div>
+                        </div>
+                      </div>
                     ) : (
-                      <div className="w-40 h-40 flex items-center justify-center">
+                      <div className="w-44 h-44 flex items-center justify-center">
                         <RefreshCw className="w-8 h-8 animate-spin text-pink-600" />
                       </div>
                     )}
                   </div>
                 </div>
 
+                {/* Direct Action Buttons Under QR: Download QR & Screenshot Tip */}
+                <div className="flex items-center gap-2 mt-3 w-full max-w-xs">
+                  <button
+                    type="button"
+                    onClick={handleDownloadQr}
+                    className="flex-1 py-2.5 px-3 rounded-2xl bg-gradient-to-r from-pink-600 via-purple-600 to-pink-600 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-pink-500/30 hover:brightness-110 active:scale-95 transition-all cursor-pointer"
+                  >
+                    <Download className="w-4 h-4 animate-bounce" />
+                    <span>Download QR Code (डाउनलोड करें)</span>
+                  </button>
+                </div>
+
                 {/* Amount note under QR */}
-                <p className="text-xs font-extrabold text-purple-950 mt-3 flex items-center gap-1">
-                  <Sparkles className="w-3.5 h-3.5 text-pink-600 animate-spin" style={{ animationDuration: '6s' }} />
-                  <span>किसी भी UPI ऐप से केवल <strong>{formatINR(item.price)}</strong> भेजें</span>
-                </p>
-                <p className="text-[11px] text-purple-900/70 mt-0.5 font-medium">
-                  PhonePe • Google Pay • Paytm • BHIM • Cred
-                </p>
+                <div className="mt-2.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-pink-100/90 via-purple-100/90 to-pink-100/90 border border-pink-300/80 text-xs font-black text-purple-950 flex items-center gap-1.5 shadow-sm">
+                  <Sparkles className="w-3.5 h-3.5 text-pink-600 fill-pink-500" />
+                  <span>पेमेंट राशि: <strong className="text-pink-700 text-sm font-black">{formatINR(item.price)}</strong> (No Extra Fee)</span>
+                </div>
 
-                {/* Mobile Intent Direct Pay Button */}
-                {orderData?.upiIntentUrl && (
-                  <div className="w-full mt-3 pt-3 border-t border-purple-100 space-y-2">
-                    <a
-                      id="btn-open-upi-app"
-                      href={orderData.upiIntentUrl}
-                      className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-purple-700 via-pink-600 to-purple-800 text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-lg shadow-pink-500/25 hover:brightness-110 active:scale-[0.99] transition-all cursor-pointer"
+                {/* Simple 2-Way Payment Options: QR Code or Copy UPI ID */}
+                <div className="w-full mt-3 pt-3 border-t border-purple-100 space-y-2.5 text-left">
+                  
+                  {/* Primary 1-Click Copy UPI ID */}
+                  <div className="p-3 rounded-2xl bg-gradient-to-r from-pink-50 via-purple-50 to-white border-2 border-pink-300 flex items-center justify-between gap-2 shadow-sm">
+                    <div className="min-w-0">
+                      <span className="text-[10px] font-black uppercase text-pink-700 tracking-wider block">
+                        Payee UPI ID (पेमेंट आईडी)
+                      </span>
+                      <p className="font-mono font-black text-xs sm:text-sm text-purple-950 truncate">
+                        {orderData?.order.upiId || 'ashokjee62022@ybl'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopyUpi}
+                      className="px-4 py-2 rounded-xl bg-purple-950 text-white font-black text-xs flex items-center gap-1.5 hover:bg-pink-600 active:scale-95 transition-all shrink-0 cursor-pointer shadow-sm"
                     >
-                      <Smartphone className="w-4 h-4 text-yellow-300" />
-                      <span>PhonePe / GPay / Paytm में तुरंत खोलें</span>
-                      <ExternalLink className="w-3.5 h-3.5 ml-0.5 opacity-80" />
-                    </a>
-
-                    <p className="text-[10px] text-purple-900/60 font-medium">
-                      💡 <strong>PhonePe टिप:</strong> अगर लिंक से बैंक 'Security' एरर दे, तो ऊपर दिए गए <strong>QR कोड</strong> का स्क्रीनशॉट लेकर PhonePe स्कैनर में डालें या सीधे UPI ID पर भेजें।
-                    </p>
+                      {copiedUpi ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="text-emerald-300">Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 text-pink-400" />
+                          <span>Copy UPI ID</span>
+                        </>
+                      )}
+                    </button>
                   </div>
-                )}
+
+                  {/* Easy How-to-pay Guide */}
+                  <div className="p-3 rounded-2xl bg-purple-50/80 border border-purple-200 text-[11px] text-purple-950 space-y-1.5">
+                    <div className="font-black text-purple-950 flex items-center gap-1.5">
+                      <Smartphone className="w-3.5 h-3.5 text-pink-600" />
+                      <span>पेमेंट कैसे करें (2 आसान तरीके):</span>
+                    </div>
+                    <ol className="list-decimal list-inside space-y-1 text-[11px] text-purple-900/90 font-medium pl-0.5">
+                      <li><strong>तरीका 1 (सबसे आसान):</strong> ऊपर दिख रहे <strong>QR कोड का स्क्रीनशॉट लें</strong> ➔ PhonePe / GPay / Paytm का स्कैनर खोलकर गैलरी से स्कैन करें।</li>
+                      <li><strong>तरीका 2:</strong> <strong>"Copy UPI ID"</strong> दबाएं ➔ अपने UPI ऐप में <strong>To UPI ID</strong> चुनकर पेस्ट करें और <strong>₹{item.price}</strong> ट्रांसफर करें।</li>
+                    </ol>
+                  </div>
+                </div>
               </div>
 
               {/* STEP 2: STRICT MANDATORY 12-DIGIT UTR VERIFICATION */}
@@ -626,7 +720,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 )}
 
                 {/* UTR Submission Form */}
-                <form onSubmit={handleSubmitUtr} className="space-y-2.5">
+                <form onSubmit={handleSubmitUtr} className="space-y-3">
                   <div className="relative">
                     <input
                       type="text"
@@ -645,6 +739,73 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                     <span className={`absolute right-3.5 top-3.5 text-[11px] font-bold ${utrNumber.length === 12 ? 'text-emerald-600 font-black' : 'text-purple-900/50'}`}>
                       {utrNumber.length}/12 {utrNumber.length === 12 ? '✓' : 'अंक'}
                     </span>
+                  </div>
+
+                  {/* Payment Screenshot Upload Section */}
+                  <div className="p-3 bg-white/95 rounded-2xl border border-purple-200/90 space-y-2 shadow-xs">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-black text-purple-950 flex items-center gap-1.5">
+                        <Camera className="w-3.5 h-3.5 text-pink-600" />
+                        <span>पेमेंट रसीद / स्क्रीनशॉट (Payment Screenshot):</span>
+                      </label>
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                        फास्ट वेरिफिकेशन
+                      </span>
+                    </div>
+
+                    <input
+                      ref={screenshotInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg,image/webp"
+                      onChange={handleScreenshotSelect}
+                      className="hidden"
+                    />
+
+                    {isProcessingScreenshot ? (
+                      <div className="py-4 px-3 rounded-xl bg-purple-50/70 border border-purple-100 flex items-center justify-center gap-2 text-xs font-bold text-purple-900 animate-pulse">
+                        <RefreshCw className="w-4 h-4 animate-spin text-pink-600" />
+                        <span>स्क्रीनशॉट प्रोसेस किया जा रहा है...</span>
+                      </div>
+                    ) : screenshotUrl ? (
+                      <div className="flex items-center justify-between gap-2 p-2 bg-emerald-50/80 border border-emerald-200 rounded-xl">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <img
+                            src={screenshotUrl}
+                            alt="Receipt Preview"
+                            className="w-11 h-11 object-cover rounded-lg border border-emerald-300 shrink-0 shadow-xs"
+                          />
+                          <div className="min-w-0">
+                            <span className="text-xs font-bold text-emerald-950 flex items-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span>स्क्रीनशॉट संलग्न है (Attached)</span>
+                            </span>
+                            <p className="text-[10px] text-emerald-800/80 truncate max-w-[170px] sm:max-w-[220px]">
+                              {screenshotName || 'payment-receipt.jpg'}
+                            </p>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={handleRemoveScreenshot}
+                          className="p-1.5 rounded-lg bg-white hover:bg-rose-50 text-rose-600 hover:text-rose-700 border border-rose-200 transition-colors shrink-0 cursor-pointer shadow-xs"
+                          title="स्क्रीनशॉट हटाएं"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => screenshotInputRef.current?.click()}
+                        className="w-full py-2.5 px-3 rounded-xl border-2 border-dashed border-purple-300 hover:border-pink-500 bg-purple-50/50 hover:bg-pink-50/40 text-purple-900 transition-all flex items-center justify-center gap-2 group cursor-pointer"
+                      >
+                        <Upload className="w-4 h-4 text-pink-600 group-hover:scale-110 transition-transform" />
+                        <span className="text-xs font-bold group-hover:text-pink-700">
+                          स्क्रीनशॉट अपलोड करें (गैलरी / कैमरा से चुनें)
+                        </span>
+                      </button>
+                    )}
                   </div>
 
                   {utrError && (

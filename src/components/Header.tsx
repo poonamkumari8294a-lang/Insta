@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { SiteSettings } from '../types';
-import { BadgeCheck, Instagram, Sparkles, Lock, Menu, X, ShieldCheck, Heart, Film } from 'lucide-react';
+import { BadgeCheck, Instagram, Sparkles, Lock, Menu, X, ShieldCheck, Heart, Film, Share2 } from 'lucide-react';
 
 interface HeaderProps {
   settings: SiteSettings;
   unlockedCount: number;
   onOpenPurchases: () => void;
+  onOpenShare?: () => void;
   activeTab: string;
   onNavigate: (route: string) => void;
 }
@@ -14,6 +15,7 @@ export const Header: React.FC<HeaderProps> = ({
   settings,
   unlockedCount,
   onOpenPurchases,
+  onOpenShare,
   activeTab,
   onNavigate,
 }) => {
@@ -129,8 +131,22 @@ export const Header: React.FC<HeaderProps> = ({
             </a>
           </nav>
 
-          {/* Right Actions: My Purchases & Instant Unlock Button */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          {/* Right Actions: Share, My Purchases & Instant Unlock Button */}
+          <div className="flex items-center gap-2 sm:gap-2.5">
+            {/* Share Button (Desktop & Tablet) */}
+            {onOpenShare && (
+              <button
+                id="header-btn-share"
+                type="button"
+                onClick={onOpenShare}
+                className="px-3 py-2 rounded-2xl text-xs font-bold text-purple-900 bg-white/80 hover:bg-pink-50 border border-purple-200/60 shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                title="वेबसाइट शेयर करें (Share VIP Hub)"
+              >
+                <Share2 className="w-3.5 h-3.5 text-pink-600" />
+                <span className="hidden sm:inline">Share</span>
+              </button>
+            )}
+
             <button
               id="header-btn-my-purchases"
               onClick={onOpenPurchases}
@@ -150,10 +166,11 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="header-btn-explore-cta"
               onClick={() => onNavigate('content')}
-              className="glow-pink-btn px-4 sm:px-5 py-2 sm:py-2.5 rounded-2xl text-xs sm:text-sm font-bold text-white flex items-center gap-1.5 shrink-0 shadow-md"
+              className="glow-pink-btn px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-2xl text-xs sm:text-sm font-bold text-white flex items-center gap-1.5 shrink-0 shadow-md"
             >
               <Film className="w-4 h-4" />
-              <span>Unlock Content</span>
+              <span className="hidden xs:inline">Unlock Content</span>
+              <span className="xs:hidden">VIP</span>
             </button>
 
             {/* Mobile Menu Toggle */}
@@ -232,6 +249,20 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           <div className="pt-2 flex flex-col gap-2">
+            {onOpenShare && (
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenShare();
+                  setMobileMenuOpen(false);
+                }}
+                className="w-full py-2.5 px-4 rounded-2xl text-xs font-bold text-white bg-gradient-to-r from-pink-500 via-purple-600 to-pink-500 hover:brightness-105 flex items-center justify-center gap-2 shadow-md cursor-pointer transition-all"
+              >
+                <Share2 className="w-4 h-4 text-white" />
+                <span>वेबसाइट दोस्तों के साथ शेयर करें (Share VIP Hub)</span>
+              </button>
+            )}
+
             <a
               href={settings.instagramUrl}
               target="_blank"

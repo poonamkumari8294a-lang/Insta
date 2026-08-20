@@ -24,6 +24,7 @@ interface ContentDetailPageProps {
   onBack: () => void;
   onBuy: (item: MediaItem) => void;
   onOpenMedia: (item: MediaItem) => void;
+  onOpenShare?: (item: MediaItem) => void;
 }
 
 export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
@@ -33,6 +34,7 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
   onBack,
   onBuy,
   onOpenMedia,
+  onOpenShare,
 }) => {
   const isFree = item.access === 'free';
   const canAccess = isFree || isUnlocked;
@@ -44,14 +46,35 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10 space-y-10">
       
-      {/* Back Button */}
-      <button
-        onClick={onBack}
-        className="inline-flex items-center gap-2 text-xs font-black text-purple-950 hover:text-pink-600 bg-white/80 hover:bg-pink-50 px-4 py-2 rounded-2xl border border-purple-200 transition-colors shadow-sm"
-      >
-        <ArrowLeft className="w-4 h-4" />
-        <span>Back to VIP Gallery</span>
-      </button>
+      {/* Top Bar: Back Button & Share (Share hidden if content is unlocked) */}
+      <div className="flex items-center justify-between gap-4">
+        <button
+          onClick={onBack}
+          className="inline-flex items-center gap-2 text-xs font-black text-purple-950 hover:text-pink-600 bg-white/80 hover:bg-pink-50 px-4 py-2.5 rounded-2xl border border-purple-200 transition-colors shadow-sm cursor-pointer"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>Back to VIP Gallery</span>
+        </button>
+
+        {!isUnlocked ? (
+          onOpenShare && (
+            <button
+              id="detail-top-btn-share"
+              type="button"
+              onClick={() => onOpenShare(item)}
+              className="inline-flex items-center gap-2 text-xs font-black text-white bg-gradient-to-r from-pink-500 to-purple-600 hover:brightness-105 px-4 py-2.5 rounded-2xl shadow-md shadow-pink-500/20 transition-all cursor-pointer"
+            >
+              <Share2 className="w-4 h-4" />
+              <span>Share Preview Link</span>
+            </button>
+          )
+        ) : (
+          <div className="inline-flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-purple-50 text-purple-900 border border-purple-200 text-xs font-bold shadow-xs">
+            <Lock className="w-3.5 h-3.5 text-pink-600" />
+            <span>VIP Unlocked • Non-Shareable</span>
+          </div>
+        )}
+      </div>
 
       {/* Main Content Showcase */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
@@ -233,6 +256,7 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                 isUnlocked={isUnlocked}
                 onOpen={onOpenMedia}
                 onBuy={onBuy}
+                onOpenShare={onOpenShare}
               />
             ))}
           </div>

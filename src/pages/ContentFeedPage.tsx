@@ -8,6 +8,7 @@ interface ContentFeedPageProps {
   unlockedIds: string[];
   onOpenMedia: (item: MediaItem) => void;
   onBuyMedia: (item: MediaItem) => void;
+  onOpenShare?: (item: MediaItem) => void;
 }
 
 export const ContentFeedPage: React.FC<ContentFeedPageProps> = ({
@@ -15,6 +16,7 @@ export const ContentFeedPage: React.FC<ContentFeedPageProps> = ({
   unlockedIds,
   onOpenMedia,
   onBuyMedia,
+  onOpenShare,
 }) => {
   const [filterType, setFilterType] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -190,6 +192,7 @@ export const ContentFeedPage: React.FC<ContentFeedPageProps> = ({
               isUnlocked={unlockedIds.includes(item.id)}
               onOpen={onOpenMedia}
               onBuy={onBuyMedia}
+              onOpenShare={onOpenShare}
             />
           ))}
         </div>

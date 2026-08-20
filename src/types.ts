@@ -34,6 +34,7 @@ export interface OrderItem {
   upiId: string;
   payerUpi?: string;
   transactionRef?: string;
+  screenshotUrl?: string;
   qrString: string;
   qrDataUrl?: string;
   accessToken?: string;

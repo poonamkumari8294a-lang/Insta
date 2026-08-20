@@ -17,7 +17,8 @@ import {
   Zap,
   ArrowRight,
   TrendingUp,
-  Heart
+  Heart,
+  Share2
 } from 'lucide-react';
 
 interface HomePageProps {
@@ -26,6 +27,7 @@ interface HomePageProps {
   unlockedIds: string[];
   onOpenMedia: (item: MediaItem) => void;
   onBuyMedia: (item: MediaItem) => void;
+  onOpenShare?: (item?: MediaItem) => void;
   onNavigate: (route: string) => void;
 }
 
@@ -35,6 +37,7 @@ export const HomePage: React.FC<HomePageProps> = ({
   unlockedIds,
   onOpenMedia,
   onBuyMedia,
+  onOpenShare,
   onNavigate,
 }) => {
   const cfg = settings.homepageConfig || {
@@ -86,6 +89,8 @@ export const HomePage: React.FC<HomePageProps> = ({
                           src={settings.profilePicUrl}
                           alt={settings.creatorName}
                           className="w-full h-full object-cover rounded-full"
+                          loading="eager"
+                          decoding="async"
                           referrerPolicy="no-referrer"
                         />
                       </div>
@@ -156,7 +161,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                       <button
                         id="hero-btn-explore-feed"
                         onClick={() => onNavigate('content')}
-                        className="glow-pink-btn px-6 py-3 rounded-2xl text-xs sm:text-sm font-black text-white flex items-center gap-2 shadow-lg shadow-pink-500/25 hover:scale-[1.02] transition-transform"
+                        className="glow-pink-btn px-6 py-3 rounded-2xl text-xs sm:text-sm font-black text-white flex items-center gap-2 shadow-lg shadow-pink-500/25 hover:scale-[1.02] transition-transform cursor-pointer"
                       >
                         <Flame className="w-4 h-4 text-yellow-300" />
                         <span>{cfg.hero?.ctaText || 'View Premium Feed'}</span>
@@ -172,8 +177,22 @@ export const HomePage: React.FC<HomePageProps> = ({
                           className="px-5 py-3 rounded-2xl text-xs sm:text-sm font-black text-purple-950 bg-white hover:bg-pink-50 border border-purple-200 transition-all flex items-center gap-2 shadow-sm"
                         >
                           <Instagram className="w-4 h-4 text-pink-600" />
-                          <span>Instagram Profile</span>
+                          <span>Instagram</span>
                         </a>
+                      )}
+
+                      {/* Share Profile / Hub Button */}
+                      {onOpenShare && (
+                        <button
+                          id="hero-btn-share-hub"
+                          type="button"
+                          onClick={() => onOpenShare()}
+                          className="px-4 sm:px-5 py-3 rounded-2xl text-xs sm:text-sm font-black text-pink-700 bg-pink-50 hover:bg-pink-100 border border-pink-200/80 transition-all flex items-center gap-2 shadow-sm cursor-pointer"
+                          title="प्रोफाइल शेयर करें (WhatsApp, Instagram, Telegram)"
+                        >
+                          <Share2 className="w-4 h-4 text-pink-600" />
+                          <span>शेयर करें (Share)</span>
+                        </button>
                       )}
                     </div>
                   </div>
@@ -234,6 +253,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   isUnlocked={unlockedIds.includes(item.id)}
                   onOpen={onOpenMedia}
                   onBuy={onBuyMedia}
+                  onOpenShare={onOpenShare}
                 />
               ))}
             </div>
@@ -244,7 +264,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         if (cfg.vipPacks && !cfg.vipPacks.enabled) return null;
         if (vipPacks.length === 0) return null;
         return (
-          <div key="vipPacks">
+          <div key="vipPacks" className="render-fast">
             <PricingPacks
               packs={vipPacks}
               unlockedIds={unlockedIds}
@@ -258,7 +278,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         if (cfg.latestVideos && !cfg.latestVideos.enabled) return null;
         if (latestVideos.length === 0) return null;
         return (
-          <section key="latestVideos" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <section key="latestVideos" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 render-fast">
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-2">
                 <span className="p-2 rounded-xl bg-pink-100 text-pink-600 border border-pink-200">
@@ -285,6 +305,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   isUnlocked={unlockedIds.includes(item.id)}
                   onOpen={onOpenMedia}
                   onBuy={onBuyMedia}
+                  onOpenShare={onOpenShare}
                 />
               ))}
             </div>
@@ -295,7 +316,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         if (cfg.latestPhotos && !cfg.latestPhotos.enabled) return null;
         if (latestPhotos.length === 0) return null;
         return (
-          <section key="latestPhotos" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <section key="latestPhotos" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 render-fast">
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-2">
                 <span className="p-2 rounded-xl bg-pink-100 text-pink-600 border border-pink-200">
@@ -322,6 +343,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   isUnlocked={unlockedIds.includes(item.id)}
                   onOpen={onOpenMedia}
                   onBuy={onBuyMedia}
+                  onOpenShare={onOpenShare}
                 />
               ))}
             </div>
@@ -332,7 +354,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         if (cfg.freeSamples && !cfg.freeSamples.enabled) return null;
         if (freeItems.length === 0) return null;
         return (
-          <section key="freeSamples" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <section key="freeSamples" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 render-fast">
             <div className="p-6 sm:p-8 rounded-3xl bg-white/70 backdrop-blur-xl border border-white/90 shadow-lg">
               <div className="flex items-center justify-between mb-6">
                 <div>
@@ -356,6 +378,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                     isUnlocked={true}
                     onOpen={onOpenMedia}
                     onBuy={onBuyMedia}
+                    onOpenShare={onOpenShare}
                   />
                 ))}
               </div>

@@ -451,10 +451,14 @@ class Database {
     return order;
   }
 
-  public validateAndProcessUtr(orderId: string, rawUtr: string): { success: boolean; order?: OrderItem; error?: string; status?: OrderItem['status'] } {
+  public validateAndProcessUtr(orderId: string, rawUtr: string, screenshotUrl?: string): { success: boolean; order?: OrderItem; error?: string; status?: OrderItem['status'] } {
     const order = this.data.orders.find(o => o.orderId === orderId);
     if (!order) {
       return { success: false, error: 'आर्डर नहीं मिला (Order not found)' };
+    }
+
+    if (screenshotUrl) {
+      order.screenshotUrl = screenshotUrl;
     }
 
     const utr = (rawUtr || '').trim().replace(/[^0-9]/g, '');

@@ -11,6 +11,7 @@ import { BottomMobileNav } from './components/BottomMobileNav';
 import { PurchasedDrawer } from './components/PurchasedDrawer';
 import { PaymentModal } from './components/PaymentModal';
 import { MediaModal } from './components/MediaModal';
+import { ShareModal } from './components/ShareModal';
 import { HomePage } from './pages/HomePage';
 import { ContentFeedPage } from './pages/ContentFeedPage';
 import { ContentDetailPage } from './pages/ContentDetailPage';
@@ -73,10 +74,17 @@ export default function App() {
   const [purchasingItem, setPurchasingItem] = useState<MediaItem | null>(null);
   const [activeMediaItem, setActiveMediaItem] = useState<MediaItem | null>(null);
   const [isPurchasedDrawerOpen, setIsPurchasedDrawerOpen] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [shareItem, setShareItem] = useState<MediaItem | null>(null);
 
   // Sync unlocked tokens
   const refreshTokens = () => {
     setUnlockedTokens(getStoredTokens());
+  };
+
+  const handleOpenShare = (item?: MediaItem | null) => {
+    setShareItem(item || null);
+    setIsShareModalOpen(true);
   };
 
   // Initial Data Load
@@ -221,13 +229,14 @@ export default function App() {
           settings={settings}
           unlockedCount={unlockedIds.length}
           onOpenPurchases={() => setIsPurchasedDrawerOpen(true)}
+          onOpenShare={() => handleOpenShare(null)}
           activeTab={currentRoute}
           onNavigate={(route) => navigateTo(route)}
         />
       )}
 
-      {/* Main Page Routing Views */}
-      <main className="flex-1">
+      {/* Main Page Routing Views with Mobile Bottom Bar Clearance */}
+      <main className="flex-1 pb-20 md:pb-6">
         {settings && currentRoute === 'home' && (
           <HomePage
             settings={settings}
@@ -235,6 +244,7 @@ export default function App() {
             unlockedIds={unlockedIds}
             onOpenMedia={handleOpenMedia}
             onBuyMedia={handleBuyMedia}
+            onOpenShare={(item) => handleOpenShare(item)}
             onNavigate={(route) => navigateTo(route)}
           />
         )}
@@ -245,6 +255,7 @@ export default function App() {
             unlockedIds={unlockedIds}
             onOpenMedia={handleOpenMedia}
             onBuyMedia={handleBuyMedia}
+            onOpenShare={(item) => handleOpenShare(item)}
           />
         )}
 
@@ -273,6 +284,7 @@ export default function App() {
             onBack={() => navigateTo('content')}
             onBuy={handleBuyMedia}
             onOpenMedia={handleOpenMedia}
+            onOpenShare={(item) => handleOpenShare(item)}
           />
         )}
 
@@ -310,6 +322,7 @@ export default function App() {
         unlockedCount={unlockedIds.length}
         onNavigate={(route) => navigateTo(route)}
         onOpenPurchases={() => setIsPurchasedDrawerOpen(true)}
+        onOpenShare={() => handleOpenShare(null)}
       />
 
       {/* Payment Checkout Modal (UPI Dynamic QR) */}
@@ -327,6 +340,14 @@ export default function App() {
           creatorName={settings.creatorName}
         />
       )}
+
+      {/* Share Modal (Social links, WhatsApp, Instagram, Telegram, QR code download) */}
+      <ShareModal
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        item={shareItem}
+        settings={settings}
+      />
 
       {/* My Unlocks Slide-over Drawer */}
       <PurchasedDrawer

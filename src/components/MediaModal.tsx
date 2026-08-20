@@ -1,6 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MediaItem } from '../types';
-import { X, Play, Pause, Volume2, VolumeX, Maximize, Sparkles, Download, Check, ShieldAlert } from 'lucide-react';
+import {
+  X,
+  Sparkles,
+  ShieldCheck,
+  Lock,
+  AlertTriangle,
+  EyeOff
+} from 'lucide-react';
 
 interface MediaModalProps {
   item: MediaItem | null;
@@ -13,28 +20,75 @@ export const MediaModal: React.FC<MediaModalProps> = ({
   onClose,
   creatorName,
 }) => {
-  const [isPlaying, setIsPlaying] = useState(true);
-  const [isMuted, setIsMuted] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [isScreenProtected, setIsScreenProtected] = useState(false);
+  const [securityWarning, setSecurityWarning] = useState<string | null>(null);
+
+  // Anti-Screenshot & Screen-Recording Deterrence
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setIsScreenProtected(true);
+      } else {
+        setTimeout(() => setIsScreenProtected(false), 300);
+      }
+    };
+
+    const handleBlur = () => {
+      // When screen capture / snipping tool captures focus, protect the canvas
+      setIsScreenProtected(true);
+    };
+
+    const handleFocus = () => {
+      setIsScreenProtected(false);
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      // PrintScreen key deterrence
+      if (e.key === 'PrintScreen' || e.keyCode === 44) {
+        try {
+          navigator.clipboard.writeText('🔒 Media is protected by creator DRM');
+        } catch (_) {}
+        setSecurityWarning('⚠️ स्क्रीनशॉट और शेयरिंग प्रतिबंधित है (Screenshots & Sharing are disabled for VIP content).');
+        setTimeout(() => setSecurityWarning(null), 4000);
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Prevent Save Page / Print Page shortcuts
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'p' || e.key === 'u')) {
+        e.preventDefault();
+        setSecurityWarning('⚠️ Saving, sharing and printing protected media is disabled.');
+        setTimeout(() => setSecurityWarning(null), 3000);
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   if (!item) return null;
-
-  const handleCopyLink = () => {
-    navigator.clipboard.writeText(window.location.origin + `/content/${item.id}`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   const mediaSource = item.mediaUrl || item.thumbnailUrl;
 
   return (
-    <div className="fixed inset-0 z-50 bg-purple-950/40 backdrop-blur-xl flex items-center justify-center p-2 sm:p-4 md:p-6 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 bg-purple-950/60 backdrop-blur-xl flex items-center justify-center p-2 sm:p-4 md:p-6 animate-in fade-in duration-200 select-none">
       
       {/* Modal Container */}
-      <div className="relative w-full max-w-4xl max-h-[92vh] flex flex-col bg-white/85 backdrop-blur-2xl rounded-3xl border border-white/90 overflow-hidden shadow-2xl">
+      <div className="relative w-full max-w-4xl max-h-[94vh] flex flex-col bg-white/90 backdrop-blur-2xl rounded-3xl border border-white/90 overflow-hidden shadow-2xl">
         
         {/* Top Bar */}
-        <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4 border-b border-purple-100 bg-white/70">
+        <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-3.5 border-b border-purple-100 bg-white/80">
           <div className="flex items-center gap-2 sm:gap-3 pr-2">
             <span className="bg-pink-100 text-pink-700 border border-pink-200 text-xs font-black px-3 py-1 rounded-full uppercase tracking-wider flex items-center gap-1 shadow-sm">
               <Sparkles className="w-3 h-3 text-pink-600" />
@@ -46,26 +100,58 @@ export const MediaModal: React.FC<MediaModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={handleCopyLink}
-              className="text-xs px-3 py-1.5 rounded-2xl bg-white hover:bg-pink-50 text-purple-900 border border-purple-100 flex items-center gap-1 font-bold shadow-sm"
-            >
-              {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Download className="w-3.5 h-3.5" />}
-              <span className="hidden sm:inline">{copied ? 'Copied' : 'Share'}</span>
-            </button>
+            {/* Private Non-Shareable Tag */}
+            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-purple-50 text-purple-900 border border-purple-200 text-xs font-bold shadow-xs">
+              <Lock className="w-3.5 h-3.5 text-pink-600" />
+              <span>Private VIP • Non-Shareable</span>
+            </div>
 
             <button
               id="media-modal-close-btn"
               onClick={onClose}
-              className="p-2 rounded-2xl bg-white text-purple-900/60 hover:text-purple-950 hover:bg-pink-50 border border-purple-100 transition-all shadow-sm"
+              className="p-2 rounded-2xl bg-white text-purple-900/70 hover:text-purple-950 hover:bg-pink-50 border border-purple-200 transition-all shadow-sm cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* Media Player Area */}
-        <div className="relative flex-1 bg-purple-950 flex items-center justify-center min-h-[300px] sm:min-h-[460px] max-h-[65vh] overflow-hidden select-none">
+        {/* Security Warning Notification */}
+        {securityWarning && (
+          <div className="px-4 py-2 bg-amber-500 text-amber-950 text-xs font-black flex items-center justify-center gap-2 animate-in slide-in-from-top-2">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>{securityWarning}</span>
+          </div>
+        )}
+
+        {/* Media Player Area with DRM & Anti-Recording Watermarks */}
+        <div
+          onContextMenu={(e) => e.preventDefault()}
+          className="relative flex-1 bg-zinc-950 flex items-center justify-center min-h-[300px] sm:min-h-[460px] max-h-[65vh] overflow-hidden select-none protected-media-container"
+        >
+          {/* Obfuscation Shield when recording or app lost focus */}
+          {isScreenProtected && (
+            <div className="absolute inset-0 z-30 bg-black/95 backdrop-blur-3xl flex flex-col items-center justify-center p-6 text-center text-white space-y-3">
+              <div className="w-14 h-14 rounded-full bg-pink-500/20 border border-pink-500 flex items-center justify-center text-pink-400">
+                <EyeOff className="w-7 h-7" />
+              </div>
+              <h4 className="text-base font-black">Content Protected</h4>
+              <p className="text-xs text-zinc-400 max-w-sm">
+                Screenshots, sharing & screen recording are strictly prohibited for creator content.
+              </p>
+            </div>
+          )}
+
+          {/* Dynamic Floating Watermark Tile Grid */}
+          <div className="absolute inset-0 pointer-events-none z-20 flex flex-wrap items-center justify-around opacity-[0.18] overflow-hidden select-none rotate-[-15deg] scale-125">
+            {Array.from({ length: 12 }).map((_, idx) => (
+              <div key={idx} className="p-8 text-[11px] font-mono font-black text-white/90 whitespace-nowrap">
+                @{creatorName} VIP • PRIVATE • NON-TRANSFERABLE
+              </div>
+            ))}
+          </div>
+
+          {/* Media Content */}
           {item.type === 'video' ? (
             <div className="relative w-full h-full flex items-center justify-center group">
               <video
@@ -73,14 +159,16 @@ export const MediaModal: React.FC<MediaModalProps> = ({
                 autoPlay
                 loop
                 playsInline
-                muted={isMuted}
                 controls
-                className="w-full h-full max-h-[65vh] object-contain"
+                controlsList="nodownload noplaybackrate"
+                disablePictureInPicture
+                onContextMenu={(e) => e.preventDefault()}
+                className="w-full h-full max-h-[65vh] object-contain pointer-events-auto"
               />
 
-              {/* Watermark Protection Overlay */}
-              <div className="absolute bottom-4 right-4 pointer-events-none opacity-50 text-xs font-mono text-white bg-black/60 px-2 py-1 rounded backdrop-blur-sm">
-                @{creatorName} VIP • {item.id}
+              {/* Dynamic Timestamp & Viewer Watermark */}
+              <div className="absolute bottom-4 right-4 pointer-events-none opacity-70 text-[10px] font-mono text-white bg-black/70 px-2.5 py-1 rounded-md backdrop-blur-sm z-20">
+                @{creatorName} VIP • {item.id} • {new Date().toLocaleDateString()}
               </div>
             </div>
           ) : (
@@ -88,19 +176,21 @@ export const MediaModal: React.FC<MediaModalProps> = ({
               <img
                 src={mediaSource}
                 alt={item.title}
-                className="w-full h-full max-h-[65vh] object-contain rounded-lg"
+                onContextMenu={(e) => e.preventDefault()}
+                onDragStart={(e) => e.preventDefault()}
+                className="w-full h-full max-h-[65vh] object-contain rounded-lg pointer-events-none"
                 referrerPolicy="no-referrer"
               />
-              {/* Subtle Watermark */}
-              <div className="absolute bottom-6 right-6 pointer-events-none opacity-50 text-xs font-mono text-white bg-black/60 px-2.5 py-1 rounded-md backdrop-blur-sm">
-                @{creatorName} • Exclusive Photo
+              {/* Corner Watermark */}
+              <div className="absolute bottom-5 right-5 pointer-events-none opacity-70 text-[10px] font-mono text-white bg-black/70 px-2.5 py-1 rounded-md backdrop-blur-sm z-20">
+                @{creatorName} • Exclusive VIP Photo
               </div>
             </div>
           )}
         </div>
 
         {/* Bottom Details Footer */}
-        <div className="px-4 py-3 sm:px-6 sm:py-4 bg-white/80 border-t border-purple-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="px-4 py-3 sm:px-6 sm:py-3.5 bg-white/90 border-t border-purple-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
             <p className="text-xs text-purple-900/80 leading-relaxed max-w-2xl font-medium">
               {item.description}
@@ -114,10 +204,10 @@ export const MediaModal: React.FC<MediaModalProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-[11px] text-pink-700 flex items-center gap-1 font-bold">
-              <ShieldAlert className="w-3.5 h-3.5 text-pink-600" />
-              Creator Protected Media
+          <div className="flex items-center gap-3 shrink-0">
+            <span className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full flex items-center gap-1 font-black">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+              DRM Protected • Non-Shareable
             </span>
           </div>
         </div>
