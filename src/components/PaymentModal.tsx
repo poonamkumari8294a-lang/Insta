@@ -576,7 +576,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
                 {/* Mobile Intent Direct Pay Button */}
                 {orderData?.upiIntentUrl && (
-                  <div className="w-full mt-3 pt-3 border-t border-purple-100">
+                  <div className="w-full mt-3 pt-3 border-t border-purple-100 space-y-2">
                     <a
                       id="btn-open-upi-app"
                       href={orderData.upiIntentUrl}
@@ -586,6 +586,10 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                       <span>PhonePe / GPay / Paytm में तुरंत खोलें</span>
                       <ExternalLink className="w-3.5 h-3.5 ml-0.5 opacity-80" />
                     </a>
+
+                    <p className="text-[10px] text-purple-900/60 font-medium">
+                      💡 <strong>PhonePe टिप:</strong> अगर लिंक से बैंक 'Security' एरर दे, तो ऊपर दिए गए <strong>QR कोड</strong> का स्क्रीनशॉट लेकर PhonePe स्कैनर में डालें या सीधे UPI ID पर भेजें।
+                    </p>
                   </div>
                 )}
               </div>
