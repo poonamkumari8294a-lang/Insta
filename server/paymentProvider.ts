@@ -22,7 +22,7 @@ export class PaymentProvider {
     const settings = db.getSettings();
     this.config = {
       mode: (process.env.PAYMENT_GATEWAY_MODE as any) || 'sandbox_simulator',
-      upiId: settings.upiId || process.env.CREATOR_UPI_ID || 'ashokjee62022.wallet@phonepe',
+      upiId: settings.upiId || process.env.CREATOR_UPI_ID || '6202292319pnb@ybl',
       merchantName: settings.creatorName || 'Ruma Kumari',
       webhookSecret: process.env.WEBHOOK_SECRET || 'whsec_ruma_creator_secret_key_8849'
     };

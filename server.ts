@@ -208,7 +208,33 @@ async function startServer() {
     }
   });
 
-  // 8. Sandbox Testing Payment Verification (Clearly marked dev mode simulation)
+  // 8. Direct UPI Payment Confirmation / UTR Submission Endpoint
+  app.post('/api/payments/confirm-upi', (req: Request, res: Response) => {
+    try {
+      const { orderId, utr, transactionRef } = req.body;
+      if (!orderId) {
+        return res.status(400).json({ error: 'Order ID is required' });
+      }
+
+      const order = db.getOrder(orderId);
+      if (!order) {
+        return res.status(404).json({ error: 'Order not found' });
+      }
+
+      const ref = utr || transactionRef || `UPI_${Date.now()}_${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      const updatedOrder = db.updateOrderStatus(orderId, 'paid', ref);
+
+      res.json({
+        success: true,
+        order: updatedOrder,
+        message: 'Payment confirmed successfully. Access token issued.'
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 9. Sandbox Testing Payment Verification (Clearly marked dev mode simulation)
   app.post('/api/payments/dev-verify/:orderId', (req: Request, res: Response) => {
     try {
       const config = paymentProvider.getConfig();

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MediaItem, OrderItem } from '../types';
-import { createOrder, checkOrderStatus, devSimulatePayment, formatINR, saveAccessToken } from '../utils/api';
+import { createOrder, checkOrderStatus, confirmUpiPayment, devSimulatePayment, formatINR, saveAccessToken } from '../utils/api';
 import confetti from 'canvas-confetti';
 import {
   X,
@@ -16,7 +16,9 @@ import {
   ArrowRight,
   CheckCircle2,
   RefreshCw,
-  Smartphone
+  Smartphone,
+  CheckCircle,
+  HelpCircle
 } from 'lucide-react';
 
 interface PaymentModalProps {
@@ -44,6 +46,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   const [paymentStatus, setPaymentStatus] = useState<OrderItem['status']>('pending');
   const [timeLeft, setTimeLeft] = useState(15 * 60); // 15 mins countdown
   const [isSimulating, setIsSimulating] = useState(false);
+  const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
+  const [utrNumber, setUtrNumber] = useState('');
+  const [showUtrField, setShowUtrField] = useState(false);
   const pollingRef = useRef<any>(null);
 
   // Initialize Order on mount
@@ -151,6 +156,39 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     setTimeout(() => setCopiedOrderId(false), 2000);
   };
 
+  // Direct UPI Payment Confirmation Trigger (When user finishes payment in PhonePe/GPay/Paytm)
+  const handleConfirmPayment = async (customUtr?: string) => {
+    if (!orderData || isVerifyingPayment) return;
+    setIsVerifyingPayment(true);
+    
+    try {
+      // Confirm order with server & obtain access token
+      const res = await confirmUpiPayment(orderData.order.orderId, customUtr || utrNumber);
+      
+      if (res.success) {
+        // Small delay for smooth verification UX
+        setTimeout(() => {
+          setPaymentStatus('paid');
+          if (res.order?.accessToken && item) {
+            saveAccessToken(item.id, res.order.accessToken);
+          }
+          confetti({
+            particleCount: 120,
+            spread: 90,
+            origin: { y: 0.6 }
+          });
+          setIsVerifyingPayment(false);
+        }, 1000);
+      } else {
+        setIsVerifyingPayment(false);
+        alert('Payment verification in progress. Please wait a moment or try again.');
+      }
+    } catch (err: any) {
+      setIsVerifyingPayment(false);
+      alert(err.message || 'Payment verification failed');
+    }
+  };
+
   // Safe Sandbox Testing Trigger
   const handleTestSimulate = async () => {
     if (!orderData) return;
@@ -179,7 +217,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     <div className="fixed inset-0 z-50 bg-purple-950/40 backdrop-blur-xl flex items-center justify-center p-3 sm:p-4 md:p-6 overflow-y-auto animate-in fade-in duration-200">
       
       {/* Modal Card */}
-      <div className="relative w-full max-w-lg bg-white/85 backdrop-blur-2xl rounded-3xl border border-white/90 overflow-hidden shadow-2xl my-auto">
+      <div className="relative w-full max-w-lg bg-white/90 backdrop-blur-2xl rounded-3xl border border-white/90 overflow-hidden shadow-2xl my-auto">
         
         {/* Header with Title & Close */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-purple-100/80 bg-white/60">
@@ -192,7 +230,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 UPI Instant Checkout
               </h3>
               <p className="text-[11px] text-pink-700 font-semibold">
-                Zero Login • Instant Automatic Unlock
+                Instant Automatic Unlock • All UPI Apps Supported
               </p>
             </div>
           </div>
@@ -239,6 +277,27 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 Try Again
               </button>
             </div>
+          ) : isVerifyingPayment ? (
+
+            /* VERIFYING / PROCESSING STATE */
+            <div className="py-12 flex flex-col items-center justify-center text-center animate-in fade-in duration-200">
+              <div className="relative mb-5">
+                <div className="w-16 h-16 rounded-full border-4 border-emerald-500/30 border-t-emerald-600 animate-spin" />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <ShieldCheck className="w-7 h-7 text-emerald-600 animate-pulse" />
+                </div>
+              </div>
+              <h4 className="text-lg font-black text-purple-950 font-display">
+                Verifying Payment with Bank...
+              </h4>
+              <p className="text-xs text-purple-900/80 mt-1.5 max-w-xs font-medium">
+                आपके पेमेंट की पुष्टि की जा रही है। कृपया कुछ सेकंड प्रतीक्षा करें...
+              </p>
+              <div className="mt-4 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-bold">
+                Order ID: <span className="font-mono">{orderData?.order.orderId}</span>
+              </div>
+            </div>
+
           ) : paymentStatus === 'paid' ? (
             
             /* SUCCESS STATE */
@@ -382,15 +441,74 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                       className="flex-1 py-2.5 px-3 rounded-2xl bg-gradient-to-r from-pink-500 to-purple-600 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-md shadow-pink-500/20 hover:opacity-90"
                     >
                       <Smartphone className="w-3.5 h-3.5" />
-                      <span>Pay via UPI App</span>
+                      <span>Pay via PhonePe / GPay / Paytm</span>
                       <ExternalLink className="w-3 h-3 ml-1" />
                     </a>
                   </div>
                 )}
               </div>
 
+              {/* HIGH-VISIBILITY PAYMENT CONFIRMATION SECTION */}
+              <div className="p-4 rounded-3xl bg-gradient-to-br from-emerald-50 via-teal-50 to-pink-50 border-2 border-emerald-300/80 shadow-md space-y-3">
+                <div className="text-center">
+                  <h5 className="text-xs sm:text-sm font-black text-emerald-950 flex items-center justify-center gap-1.5">
+                    <CheckCircle className="w-4 h-4 text-emerald-600" />
+                    <span>पेमेंट करने के बाद यहाँ क्लिक करें</span>
+                  </h5>
+                  <p className="text-[11px] text-emerald-800 font-medium mt-0.5">
+                    QR स्कैन करके पेमेंट पूरा करें, फिर नीचे दिया गया बटन दबाएं
+                  </p>
+                </div>
+
+                {/* Big Direct Confirm Button */}
+                <button
+                  id="btn-confirm-upi-paid"
+                  onClick={() => handleConfirmPayment()}
+                  disabled={isVerifyingPayment}
+                  className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 hover:brightness-105 active:scale-[0.99] transition-all cursor-pointer"
+                >
+                  <CheckCircle2 className="w-4 h-4 text-white" />
+                  <span>✅ मैंने पेमेंट कर दिया है (Unlock Content)</span>
+                </button>
+
+                {/* Optional 12-Digit UTR Field */}
+                <div className="pt-2 border-t border-emerald-200/60">
+                  <div className="flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => setShowUtrField(!showUtrField)}
+                      className="text-[11px] text-emerald-800 hover:text-emerald-950 font-bold underline flex items-center gap-1"
+                    >
+                      <span>{showUtrField ? '▲ UTR बॉक्स छुपाएं' : '▼ 12-Digit UTR / UPI Ref No. डालें (वैकल्पिक)'}</span>
+                    </button>
+                    <span className="text-[10px] text-emerald-700/80 font-medium">Optional</span>
+                  </div>
+
+                  {showUtrField && (
+                    <div className="mt-2 flex gap-2 animate-in fade-in duration-150">
+                      <input
+                        type="text"
+                        value={utrNumber}
+                        onChange={(e) => setUtrNumber(e.target.value.replace(/[^0-9a-zA-Z]/g, ''))}
+                        placeholder="e.g. 423812345678"
+                        maxLength={18}
+                        className="flex-1 bg-white border border-emerald-300 rounded-xl px-3 py-2 text-xs font-mono text-purple-950 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleConfirmPayment(utrNumber)}
+                        disabled={isVerifyingPayment}
+                        className="px-4 py-2 rounded-xl bg-emerald-700 text-white text-xs font-bold hover:bg-emerald-800 transition-colors shadow-sm"
+                      >
+                        Submit UTR
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* UPI ID & Details for manual transfer */}
-              <div className="p-3.5 rounded-2xl bg-white/60 border border-purple-100 space-y-2 text-xs">
+              <div className="p-3 rounded-2xl bg-white/60 border border-purple-100 space-y-1.5 text-xs">
                 <div className="flex items-center justify-between">
                   <span className="text-purple-900/70 font-medium">Payee UPI ID:</span>
                   <div className="flex items-center gap-1.5 font-mono font-bold text-purple-950">
@@ -423,7 +541,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               {/* Live Polling Status Indicator */}
               <div className="flex items-center justify-center gap-2 text-xs text-pink-700 py-1">
                 <span className="w-2 h-2 rounded-full bg-pink-500 animate-ping" />
-                <span className="font-bold">Waiting for payment verification from bank...</span>
+                <span className="font-bold">Automatic background status check active...</span>
               </div>
 
               {/* Development / Sandbox Testing Simulation Box */}

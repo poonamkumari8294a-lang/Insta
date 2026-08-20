@@ -10,7 +10,7 @@ export const CLIENT_SITE_SETTINGS: SiteSettings = {
   instagramUrl: 'https://instagram.com/ruma__cutegirl',
   instagramHandle: '@ruma__cuteg...',
   badgeText: 'VIP Creator',
-  upiId: 'ashokjee62022.wallet@phonepe',
+  upiId: '6202292319pnb@ybl',
   postsCount: 135,
   followersCount: 3358,
   viewsCount: '346.0K',

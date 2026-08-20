@@ -1344,13 +1344,19 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
               </div>
 
               <div>
-                <label className="text-xs font-bold text-purple-950 block mb-1">UPI ID (All Payments Go Here)</label>
+                <label className="text-xs font-bold text-purple-950 block mb-1">
+                  UPI ID (Bank Account UPI ID for Payments)
+                </label>
                 <input
                   name="upiId"
-                  defaultValue={siteSettings?.upiId || 'ashokjee62022.wallet@phonepe'}
+                  defaultValue={siteSettings?.upiId || '6202292319pnb@ybl'}
                   required
+                  placeholder="e.g. 6202292319pnb@ybl or username@okhdfcbank"
                   className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2.5 text-xs text-emerald-700 font-mono font-bold shadow-sm"
                 />
+                <p className="text-[11px] text-purple-900/70 mt-1 font-medium">
+                  ⚠️ <strong>जरूरी नोट:</strong> <code className="text-pink-600 font-bold">.wallet@phonepe</code> वॉलेट आईडी काम नहीं करता। अपना बैंक से जुड़ा UPI ID डालें (जैसे: PhonePe: <code className="text-emerald-700 font-bold">नंबर@ybl</code> / <code className="text-emerald-700 font-bold">नंबर@ibl</code>, GPay: <code className="text-emerald-700 font-bold">name@okhdfcbank</code>, Paytm: <code className="text-emerald-700 font-bold">नंबर@paytm</code>).
+                </p>
               </div>
             </div>
 
