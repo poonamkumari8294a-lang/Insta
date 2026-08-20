@@ -95,26 +95,33 @@ export const PricingPacks: React.FC<PricingPacksProps> = ({
                 {/* Price and CTA Button */}
                 <div className="mt-6 pt-4 border-t border-purple-100 flex items-center justify-between gap-3">
                   <div>
-                    <span className="text-[10px] text-purple-800/70 block uppercase font-extrabold tracking-wider">One-Time Price</span>
-                    <span className="font-display text-2xl font-black text-purple-950">
-                      {formatINR(pack.price)}
+                    <span className="text-[10px] text-pink-700 block uppercase font-extrabold tracking-wider line-through">
+                      ₹{Math.max(pack.price * 3, pack.price + 250)}
                     </span>
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="font-display text-2xl font-black text-purple-950">
+                        {formatINR(pack.price)}
+                      </span>
+                      <span className="text-[9px] font-black uppercase bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">
+                        75% OFF
+                      </span>
+                    </div>
                   </div>
 
                   {isUnlocked ? (
                     <button
                       onClick={() => onOpen(pack)}
-                      className="py-2.5 px-5 rounded-2xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition-all shadow-md"
+                      className="py-2.5 px-5 rounded-2xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition-all shadow-md cursor-pointer"
                     >
                       View Pack 🎉
                     </button>
                   ) : (
                     <button
                       onClick={() => onBuy(pack)}
-                      className="glow-pink-btn py-2.5 px-5 rounded-2xl text-xs font-black text-white flex items-center gap-1.5 shadow-md"
+                      className="glow-pink-btn py-3 px-5 rounded-2xl text-xs font-black text-white flex items-center gap-1.5 shadow-lg shadow-pink-500/25 cursor-pointer hover:scale-105 active:scale-95 transition-all"
                     >
                       <Lock className="w-3.5 h-3.5" />
-                      <span>Unlock Pack</span>
+                      <span>Unlock VIP Pack</span>
                     </button>
                   )}
                 </div>

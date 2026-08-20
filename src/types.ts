@@ -88,6 +88,7 @@ export interface SiteSettings {
   announcementEnabled: boolean;
   supportEmail: string;
   supportTelegram: string;
+  paymentVerificationMode?: 'manual_approval' | 'instant_utr';
   storyHighlights: StoryHighlight[];
   homepageConfig?: HomepageSectionConfig;
 }

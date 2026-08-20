@@ -208,26 +208,68 @@ async function startServer() {
     }
   });
 
-  // 8. Direct UPI Payment Confirmation / UTR Submission Endpoint
-  app.post('/api/payments/confirm-upi', (req: Request, res: Response) => {
+  // 8. Direct UPI Payment UTR Submission with Strict Verification
+  app.post('/api/payments/submit-utr', (req: Request, res: Response) => {
     try {
-      const { orderId, utr, transactionRef } = req.body;
+      const { orderId, utr } = req.body;
       if (!orderId) {
-        return res.status(400).json({ error: 'Order ID is required' });
+        return res.status(400).json({ success: false, error: 'Order ID is required' });
+      }
+      if (!utr) {
+        return res.status(400).json({ success: false, error: 'कृपया सही 12-अंकों का UPI UTR / Transaction No. दर्ज करें।' });
       }
 
+      const result = db.validateAndProcessUtr(orderId, utr);
+      if (!result.success) {
+        return res.status(400).json({ success: false, error: result.error });
+      }
+
+      res.json({
+        success: true,
+        status: result.status,
+        order: result.order,
+        message: result.status === 'paid'
+          ? 'पेमेंट सफलतापूर्वक सत्यापित हो गया है! कंटेंट अनलॉक हो गया है।'
+          : 'UTR सफलतापूर्वक सबमिट हो गया है। बैंक सत्यापन के बाद कंटेंट अपने आप खुल जाएगा।'
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Admin Manual Order Approval Endpoint
+  app.post('/api/payments/approve/:orderId', (req: Request, res: Response) => {
+    try {
+      const { orderId } = req.params;
       const order = db.getOrder(orderId);
       if (!order) {
         return res.status(404).json({ error: 'Order not found' });
       }
 
-      const ref = utr || transactionRef || `UPI_${Date.now()}_${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-      const updatedOrder = db.updateOrderStatus(orderId, 'paid', ref);
-
+      const updated = db.updateOrderStatus(orderId, 'paid', order.transactionRef || `ADM_${Date.now()}`);
       res.json({
         success: true,
-        order: updatedOrder,
-        message: 'Payment confirmed successfully. Access token issued.'
+        order: updated,
+        message: 'Order approved and unlocked.'
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Admin Reject Order Endpoint
+  app.post('/api/payments/reject/:orderId', (req: Request, res: Response) => {
+    try {
+      const { orderId } = req.params;
+      const { reason } = req.body;
+      const rejected = db.rejectOrder(orderId, reason);
+      if (!rejected) {
+        return res.status(404).json({ error: 'Order not found' });
+      }
+      res.json({
+        success: true,
+        order: rejected,
+        message: 'Order marked as invalid/rejected.'
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

@@ -306,69 +306,59 @@ export async function checkOrderStatus(orderId: string): Promise<{
   };
 }
 
-export async function confirmUpiPayment(orderId: string, utr?: string): Promise<{ success: boolean; order: OrderItem }> {
+export async function submitPaymentUtr(orderId: string, utr: string): Promise<{ success: boolean; status?: OrderItem['status']; order?: OrderItem; message?: string; error?: string }> {
   try {
-    const res = await fetch('/api/payments/confirm-upi', {
+    const res = await fetch('/api/payments/submit-utr', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orderId, utr, transactionRef: utr || `UPI_USER_${Date.now()}` })
+      body: JSON.stringify({ orderId, utr })
     });
 
-    if (res.ok) {
-      const data = await parseJsonResponse(res);
-      if (data.order?.accessToken && data.order?.contentId) {
-        saveAccessToken(data.order.contentId, data.order.accessToken);
-      }
-      return data;
-    }
-  } catch (e) {
-    // Fallback
-  }
-
-  // Client-side verification fallback
-  const orders = getLocalOrders();
-  const orderIndex = orders.findIndex(o => o.orderId === orderId);
-  const token = `tok_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-
-  if (orderIndex >= 0) {
-    orders[orderIndex].status = 'paid';
-    orders[orderIndex].paidAt = new Date().toISOString();
-    orders[orderIndex].accessToken = token;
-    orders[orderIndex].transactionRef = utr || `UPI_${Date.now()}`;
-    localStorage.setItem(LOCAL_CUSTOM_ORDERS_KEY, JSON.stringify(orders));
-
-    if (orders[orderIndex].contentId) {
-      saveAccessToken(orders[orderIndex].contentId, token);
+    const data = await parseJsonResponse(res);
+    if (!res.ok) {
+      return { success: false, error: data.error || 'सत्यापन विफल रहा (Verification failed)' };
     }
 
-    return {
-      success: true,
-      order: orders[orderIndex]
-    };
+    if (data.order?.accessToken && data.order?.contentId) {
+      saveAccessToken(data.order.contentId, data.order.accessToken);
+    }
+    return data;
+  } catch (e: any) {
+    return { success: false, error: e.message || 'नेटवर्क त्रुटि (Network error)' };
   }
+}
 
-  const dummyOrder: OrderItem = {
-    orderId,
-    contentId: 'rk-001',
-    contentTitle: 'Unlocked Content',
-    contentType: 'photo',
-    thumbnailUrl: CLIENT_CONTENT_LIST[0].thumbnailUrl,
-    amount: 49,
-    currency: 'INR',
-    status: 'paid',
-    upiId: '6202292319pnb@ybl',
-    qrString: '',
-    customerSessionId: getOrCreateSessionId(),
-    paidAt: new Date().toISOString(),
-    accessToken: token,
-    createdAt: new Date().toISOString(),
-    expiresAt: new Date().toISOString()
-  };
+export async function adminApproveOrder(orderId: string): Promise<{ success: boolean; order?: OrderItem; error?: string }> {
+  try {
+    const res = await fetch(`/api/payments/approve/${orderId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    return await parseJsonResponse(res);
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+}
 
-  return {
-    success: true,
-    order: dummyOrder
-  };
+export async function adminRejectOrder(orderId: string, reason?: string): Promise<{ success: boolean; order?: OrderItem; error?: string }> {
+  try {
+    const res = await fetch(`/api/payments/reject/${orderId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason })
+    });
+    return await parseJsonResponse(res);
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+}
+
+export async function confirmUpiPayment(orderId: string, utr?: string): Promise<{ success: boolean; order: OrderItem }> {
+  const res = await submitPaymentUtr(orderId, utr || '');
+  if (res.success && res.order) {
+    return { success: true, order: res.order };
+  }
+  throw new Error(res.error || 'Payment verification failed');
 }
 
 export async function devSimulatePayment(orderId: string): Promise<{ success: boolean; order: OrderItem }> {

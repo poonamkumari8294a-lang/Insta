@@ -92,13 +92,24 @@ export const ContentCard: React.FC<ContentCardProps> = ({
           <div className="absolute inset-0 flex flex-col items-center justify-center p-4 z-10">
             <div 
               onClick={() => onBuy(item)}
-              className="cursor-pointer flex flex-col items-center group-hover:scale-110 transition-transform"
+              className="cursor-pointer flex flex-col items-center group-hover:scale-105 transition-all duration-300"
             >
-              <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-white/90 border-2 border-pink-400 backdrop-blur-md flex items-center justify-center shadow-xl shadow-pink-500/30 mb-2">
-                <Lock className="w-7 h-7 text-pink-600 animate-pulse" />
+              {/* Pulsing Lock Ring Aura */}
+              <div className="relative mb-2.5">
+                <div className="absolute -inset-2 rounded-full bg-gradient-to-r from-pink-500 via-purple-500 to-amber-400 opacity-75 blur-md animate-pulse group-hover:opacity-100 transition-opacity" />
+                <div className="relative w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-white/95 border-2 border-pink-400 backdrop-blur-md flex items-center justify-center shadow-2xl shadow-pink-600/40 group-hover:rotate-6 transition-transform">
+                  <Lock className="w-6 h-6 sm:w-7 sm:h-7 text-pink-600 animate-bounce" />
+                </div>
+                {/* Sparkle Badge */}
+                <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-amber-400 text-amber-950 font-black text-[10px] shadow-sm animate-spin" style={{ animationDuration: '6s' }}>
+                  ✦
+                </span>
               </div>
-              <span className="text-xs font-black text-white tracking-wide bg-purple-950/80 backdrop-blur-md px-3.5 py-1 rounded-full border border-white/30 shadow-lg">
-                Tap to Unlock ({formatINR(item.price)})
+
+              {/* Glowing CTA Pill */}
+              <span className="text-xs font-black text-white tracking-wide bg-gradient-to-r from-pink-600 via-purple-600 to-pink-600 bg-[length:200%_auto] hover:bg-right px-4 py-1.5 rounded-full border border-white/40 shadow-xl shadow-pink-500/30 flex items-center gap-1.5 animate-pulse">
+                <Sparkles className="w-3.5 h-3.5 text-yellow-300 fill-yellow-300" />
+                <span>Unlock VIP ({formatINR(item.price)})</span>
               </span>
             </div>
           </div>

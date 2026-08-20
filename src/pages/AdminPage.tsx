@@ -13,6 +13,8 @@ import {
   deleteAdminContent,
   updateAdminSettings,
   verifyAdminOrder,
+  adminApproveOrder,
+  adminRejectOrder,
   formatINR
 } from '../utils/api';
 import { HomepageControlTab } from '../components/HomepageControlTab';
@@ -302,6 +304,35 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
     }
   };
 
+  const handleApproveOrder = async (orderId: string) => {
+    try {
+      const res = await adminApproveOrder(orderId);
+      if (res.success) {
+        alert('✅ Order approved successfully! Content unlocked for customer.');
+        loadAdminData();
+      } else {
+        alert(res.error || 'Failed to approve order');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Approval failed');
+    }
+  };
+
+  const handleRejectOrder = async (orderId: string) => {
+    if (!confirm('Are you sure you want to REJECT this payment claim? The order will be marked as Failed.')) return;
+    try {
+      const res = await adminRejectOrder(orderId, 'Payment not received in bank / Invalid UTR');
+      if (res.success) {
+        alert('❌ Order rejected.');
+        loadAdminData();
+      } else {
+        alert(res.error || 'Failed to reject order');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Reject failed');
+    }
+  };
+
   // Filter & Sort Content Items
   const filteredContent = contentList
     .filter((c) => {
@@ -538,6 +569,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
         >
           <ShoppingBag className="w-4 h-4" />
           <span>Orders & Payments ({ordersList.length})</span>
+          {ordersList.filter(o => o.status === 'waiting_verification').length > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black animate-pulse shadow-sm">
+              {ordersList.filter(o => o.status === 'waiting_verification').length} Pending
+            </span>
+          )}
         </button>
 
         <button
@@ -1141,10 +1177,35 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
       {activeTab === 'orders' && (
         <div className="space-y-6 animate-in fade-in duration-200">
           
+          {/* Pending Verification Notice Banner */}
+          {ordersList.filter(o => o.status === 'waiting_verification').length > 0 && (
+            <div className="p-4 rounded-3xl bg-amber-500/15 border-2 border-amber-400 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-amber-400 text-amber-950 font-black shrink-0">
+                  <ShieldAlert className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs sm:text-sm font-black text-amber-950">
+                    {ordersList.filter(o => o.status === 'waiting_verification').length} Payment(s) Waiting For Verification!
+                  </h4>
+                  <p className="text-[11px] text-amber-900/80 font-medium">
+                    ग्राहकों ने UTR सबमिट किया है। अपने PhonePe / Bank SMS में UTR चेक करें और <strong>"Approve & Unlock"</strong> दबाएं।
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setOrderStatusFilter('waiting_verification')}
+                className="px-4 py-2 rounded-xl bg-amber-500 text-amber-950 font-black text-xs hover:bg-amber-400 transition-colors shadow-sm whitespace-nowrap"
+              >
+                Show Pending ({ordersList.filter(o => o.status === 'waiting_verification').length})
+              </button>
+            </div>
+          )}
+
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h2 className="font-display font-black text-xl text-purple-950">Payment Orders & Webhooks</h2>
-              <p className="text-xs text-purple-900/70 font-medium">Track and manually audit UPI payment verification.</p>
+              <h2 className="font-display font-black text-xl text-purple-950">Payment Orders & UTR Audit</h2>
+              <p className="text-xs text-purple-900/70 font-medium">Track, audit, and approve verified UPI bank transfers.</p>
             </div>
 
             <div className="flex items-center gap-2">
@@ -1152,7 +1213,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                 type="text"
                 value={orderSearch}
                 onChange={(e) => setOrderSearch(e.target.value)}
-                placeholder="Search order ID or title..."
+                placeholder="Search order ID, title or UTR..."
                 className="bg-white/90 border border-purple-200 rounded-2xl px-3 py-2 text-xs text-purple-950 placeholder-purple-900/40 focus:outline-none focus:border-pink-500 shadow-sm font-medium"
               />
 
@@ -1161,10 +1222,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                 onChange={(e) => setOrderStatusFilter(e.target.value)}
                 className="bg-white/90 border border-purple-200 rounded-2xl px-3 py-2 text-xs text-purple-950 shadow-sm font-semibold"
               >
-                <option value="all">All Statuses</option>
-                <option value="paid">Paid</option>
-                <option value="pending">Pending</option>
-                <option value="expired">Expired</option>
+                <option value="all">All Statuses ({ordersList.length})</option>
+                <option value="waiting_verification">⏳ Review UTR ({ordersList.filter(o => o.status === 'waiting_verification').length})</option>
+                <option value="paid">✅ Paid ({ordersList.filter(o => o.status === 'paid').length})</option>
+                <option value="pending">🕒 Pending ({ordersList.filter(o => o.status === 'pending').length})</option>
+                <option value="failed">❌ Failed / Rejected ({ordersList.filter(o => o.status === 'failed').length})</option>
+                <option value="expired">⌛ Expired ({ordersList.filter(o => o.status === 'expired').length})</option>
               </select>
             </div>
           </div>
@@ -1179,8 +1242,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                     <th className="py-3 px-4">Amount</th>
                     <th className="py-3 px-4">Status</th>
                     <th className="py-3 px-4">Created</th>
-                    <th className="py-3 px-4">Txn / UTR Ref</th>
-                    <th className="py-3 px-4">Manual Action</th>
+                    <th className="py-3 px-4">Submitted UTR / Ref</th>
+                    <th className="py-3 px-4 text-right">Verification Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-purple-100">
@@ -1192,7 +1255,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                     </tr>
                   ) : (
                     filteredOrders.map((o) => (
-                      <tr key={o.orderId} className="hover:bg-purple-50/50">
+                      <tr
+                        key={o.orderId}
+                        className={
+                          o.status === 'waiting_verification'
+                            ? 'bg-amber-50/60 hover:bg-amber-50 font-semibold'
+                            : 'hover:bg-purple-50/50'
+                        }
+                      >
                         <td className="py-3.5 px-4 font-mono font-bold text-pink-700">
                           {o.orderId}
                         </td>
@@ -1207,31 +1277,65 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                             className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
                               o.status === 'paid'
                                 ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                                : o.status === 'waiting_verification'
+                                ? 'bg-amber-200 text-amber-900 border border-amber-300 animate-pulse'
+                                : o.status === 'failed'
+                                ? 'bg-rose-100 text-rose-700 border border-rose-200'
                                 : o.status === 'expired'
                                 ? 'bg-zinc-100 text-zinc-600'
-                                : 'bg-amber-100 text-amber-700 border border-amber-200'
+                                : 'bg-purple-100 text-purple-700 border border-purple-200'
                             }`}
                           >
-                            {o.status}
+                            {o.status === 'waiting_verification' ? '⏳ Review UTR' : o.status}
                           </span>
                         </td>
                         <td className="py-3.5 px-4 text-purple-900/60 font-medium text-[11px]">
                           {new Date(o.createdAt).toLocaleString()}
                         </td>
-                        <td className="py-3.5 px-4 font-mono text-purple-900/80 font-bold text-[11px]">
-                          {o.transactionRef || '—'}
-                        </td>
                         <td className="py-3.5 px-4">
-                          {o.status !== 'paid' ? (
+                          {o.transactionRef ? (
+                            <span className="font-mono font-bold text-xs px-2.5 py-1 rounded-lg bg-white border border-purple-200 text-purple-950 shadow-xs">
+                              {o.transactionRef}
+                            </span>
+                          ) : (
+                            <span className="text-purple-900/40 font-mono text-[11px]">—</span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          {o.status === 'waiting_verification' ? (
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => handleApproveOrder(o.orderId)}
+                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black shadow-sm flex items-center gap-1 transition-transform active:scale-95 cursor-pointer"
+                                title="Approve payment & unlock content for user"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>Approve & Unlock</span>
+                              </button>
+                              <button
+                                onClick={() => handleRejectOrder(o.orderId)}
+                                className="px-2.5 py-1.5 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-700 text-[11px] font-bold transition-colors cursor-pointer"
+                                title="Reject fake claim"
+                              >
+                                <XCircle className="w-3.5 h-3.5" />
+                                <span>Reject</span>
+                              </button>
+                            </div>
+                          ) : o.status === 'pending' ? (
                             <button
                               onClick={() => handleManualVerify(o.orderId)}
-                              className="px-3 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-[11px] font-black shadow-sm transition-transform active:scale-95"
+                              className="px-3 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-[11px] font-black shadow-sm transition-transform active:scale-95 cursor-pointer"
                             >
                               Verify & Issue Token
                             </button>
+                          ) : o.status === 'paid' ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-black">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Paid & Unlocked</span>
+                            </span>
                           ) : (
-                            <span className="text-[11px] text-emerald-700 font-bold">
-                              Token Issued
+                            <span className="text-[11px] text-purple-900/50 font-medium">
+                              {o.status === 'failed' ? 'Rejected' : 'Closed'}
                             </span>
                           )}
                         </td>
@@ -1275,6 +1379,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                 postsCount: Number(formData.get('postsCount')) || 135,
                 viewsCount: formData.get('viewsCount') as string || '346.0K',
                 upiId: formData.get('upiId') as string,
+                paymentVerificationMode: (formData.get('paymentVerificationMode') as 'manual_approval' | 'instant_utr') || 'manual_approval',
                 announcement: formData.get('announcement') as string,
                 announcementEnabled: formData.get('announcementEnabled') === 'on',
                 supportEmail: formData.get('supportEmail') as string,
@@ -1358,6 +1463,36 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                   ⚠️ <strong>जरूरी नोट:</strong> <code className="text-pink-600 font-bold">.wallet@phonepe</code> वॉलेट आईडी काम नहीं करता। अपना बैंक से जुड़ा UPI ID डालें (जैसे: PhonePe: <code className="text-emerald-700 font-bold">नंबर@ybl</code> / <code className="text-emerald-700 font-bold">नंबर@ibl</code>, GPay: <code className="text-emerald-700 font-bold">name@okhdfcbank</code>, Paytm: <code className="text-emerald-700 font-bold">नंबर@paytm</code>).
                 </p>
               </div>
+            </div>
+
+            {/* Payment Security & Anti-Fraud Mode */}
+            <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-r from-emerald-50 via-teal-50/50 to-white border-2 border-emerald-200 space-y-2.5 shadow-xs">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                  <span className="text-xs sm:text-sm font-black text-purple-950">
+                    Payment Verification & Anti-Fraud Security (पेमेंट सत्यापन सुरक्षा)
+                  </span>
+                </div>
+                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  Fraud Protected
+                </span>
+              </div>
+              <p className="text-[11px] text-purple-900/70 font-medium">
+                चुनें कि बिना असली पेमेंट के कोई फर्जी तरीके से कंटेंट न खोल सके:
+              </p>
+              <select
+                name="paymentVerificationMode"
+                defaultValue={siteSettings?.paymentVerificationMode || 'manual_approval'}
+                className="w-full bg-white border-2 border-emerald-300 rounded-2xl px-3.5 py-2.5 text-xs text-purple-950 font-bold focus:ring-2 focus:ring-emerald-500 shadow-sm"
+              >
+                <option value="manual_approval">
+                  🔒 Manual Approval (Recommended: ग्राहक 12-अंकों का UTR डालेगा, आपके 'Approve' करने पर ही खुलेगा)
+                </option>
+                <option value="instant_utr">
+                  ⚡ Instant 12-Digit UTR (ग्राहक के वैध 12-अंक UTR डालते ही तुरंत अनलॉक होगा)
+                </option>
+              </select>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

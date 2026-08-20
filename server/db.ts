@@ -30,6 +30,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   announcementEnabled: true,
   supportEmail: 'contact.rumakumari@gmail.com',
   supportTelegram: 'https://t.me/rumakumari_vip',
+  paymentVerificationMode: 'manual_approval',
   homepageConfig: {
     hero: {
       enabled: true,
@@ -446,6 +447,83 @@ class Database {
         createdAt: new Date().toISOString()
       });
     }
+    this.saveData();
+    return order;
+  }
+
+  public validateAndProcessUtr(orderId: string, rawUtr: string): { success: boolean; order?: OrderItem; error?: string; status?: OrderItem['status'] } {
+    const order = this.data.orders.find(o => o.orderId === orderId);
+    if (!order) {
+      return { success: false, error: 'आर्डर नहीं मिला (Order not found)' };
+    }
+
+    const utr = (rawUtr || '').trim().replace(/[^0-9]/g, '');
+
+    if (utr.length !== 12) {
+      return {
+        success: false,
+        error: 'कृपया सही 12-अंकों का UPI UTR / Transaction Ref No. दर्ज करें (Exact 12 digits required)'
+      };
+    }
+
+    // Check all same digits (e.g. 000000000000, 111111111111)
+    if (/^(\d)\1{11}$/.test(utr)) {
+      return {
+        success: false,
+        error: 'अमान्य UTR नंबर: सभी 12 अंक एक जैसे नहीं हो सकते।'
+      };
+    }
+
+    // Check dummy/obvious fake sequences
+    const commonFakes = [
+      '123456789012', '012345678901', '987654321098', '123412341234',
+      '112233445566', '000011112222', '121212121212', '101010101010'
+    ];
+    if (commonFakes.includes(utr)) {
+      return {
+        success: false,
+        error: 'अमान्य UTR नंबर: कृपया अपने PhonePe/GPay/Paytm पेमेंट रसीद से असली UTR नंबर डालें।'
+      };
+    }
+
+    // Check duplicate UTR on other paid or waiting orders
+    const duplicate = this.data.orders.find(
+      o => o.transactionRef === utr && o.orderId !== orderId && o.status !== 'failed'
+    );
+    if (duplicate) {
+      return {
+        success: false,
+        error: 'यह UTR नंबर पहले ही किसी अन्य आर्डर पर दर्ज किया जा चुका है।'
+      };
+    }
+
+    const verificationMode = this.data.settings.paymentVerificationMode || 'manual_approval';
+
+    if (verificationMode === 'manual_approval') {
+      // Set to waiting_verification so admin must approve or verify
+      order.status = 'waiting_verification';
+      order.transactionRef = utr;
+      this.saveData();
+      return {
+        success: true,
+        order,
+        status: 'waiting_verification'
+      };
+    } else {
+      // Instant UTR Mode
+      const updated = this.updateOrderStatus(orderId, 'paid', utr);
+      return {
+        success: true,
+        order: updated || order,
+        status: 'paid'
+      };
+    }
+  }
+
+  public rejectOrder(orderId: string, reason?: string): OrderItem | null {
+    const order = this.data.orders.find(o => o.orderId === orderId);
+    if (!order) return null;
+    order.status = 'failed';
     this.saveData();
     return order;
   }
