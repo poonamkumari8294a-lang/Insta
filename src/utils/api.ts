@@ -82,7 +82,7 @@ export function removeAdminToken() {
 const SETTINGS_DOC_ID = 'site_config';
 
 /**
- * Ensures Firestore is seeded with default content and settings on first run
+ * Ensures Firestore is seeded with default content and settings on first run only
  */
 let seedingPromise: Promise<void> | null = null;
 
@@ -91,23 +91,23 @@ async function ensureFirestoreSeeded(): Promise<void> {
 
   seedingPromise = (async () => {
     try {
-      // 1. Check Settings
+      // Check if already seeded in Cloud Firestore
       const settingsRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
       const settingsSnap = await getDoc(settingsRef);
+      
       if (!settingsSnap.exists()) {
-        console.log('[Firebase] Initializing Cloud Site Settings...');
-        await setDoc(settingsRef, CLIENT_SITE_SETTINGS);
-      }
+        console.log('[Firebase] First-time setup: Seeding Cloud Settings and Content...');
+        await setDoc(settingsRef, {
+          ...CLIENT_SITE_SETTINGS,
+          isSeeded: true
+        });
 
-      // 2. Check Content
-      const contentCollectionRef = collection(firestore, 'content');
-      const contentSnap = await getDocs(query(contentCollectionRef, firestoreLimit(1)));
-      if (contentSnap.empty) {
-        console.log('[Firebase] Seeding Initial Content into Firestore...');
+        // Seed initial content items
         for (const item of CLIENT_CONTENT_LIST) {
           const itemRef = doc(firestore, 'content', item.id);
           await setDoc(itemRef, item);
         }
+        console.log('[Firebase] Seed completed successfully.');
       }
     } catch (err) {
       console.warn('[Firebase Seed Warning]', err);
@@ -117,54 +117,85 @@ async function ensureFirestoreSeeded(): Promise<void> {
   return seedingPromise;
 }
 
+// ============================================================================
+// In-Memory Fast Cache for Speed & Instant Admin Operations
+// ============================================================================
+let memorySiteSettings: SiteSettings | null = null;
+let memoryContentList: MediaItem[] | null = null;
+let memoryContentTimestamp = 0;
+const CACHE_TTL_MS = 60000; // 1 minute fresh cache
+
 // ----------------------------------------------------------------------------
-// 1. Fetch Site Settings (Live Cloud Sync)
+// 1. Fetch Site Settings (Live Cloud Sync with In-Memory Acceleration)
 // ----------------------------------------------------------------------------
-export async function fetchSiteSettings(): Promise<SiteSettings> {
+export async function fetchSiteSettings(forceFresh = false): Promise<SiteSettings> {
+  if (!forceFresh && memorySiteSettings) {
+    return memorySiteSettings;
+  }
+
   try {
-    await ensureFirestoreSeeded();
     const settingsRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
     const snap = await getDoc(settingsRef);
     if (snap.exists()) {
       const data = snap.data() as SiteSettings;
-      return { ...CLIENT_SITE_SETTINGS, ...data };
+      memorySiteSettings = { ...CLIENT_SITE_SETTINGS, ...data };
+      return memorySiteSettings;
+    } else {
+      // Background seed if document doesn't exist
+      ensureFirestoreSeeded();
     }
   } catch (err) {
     console.warn('[Firebase fetchSiteSettings Error]', err);
   }
-  return CLIENT_SITE_SETTINGS;
+
+  return memorySiteSettings || CLIENT_SITE_SETTINGS;
 }
 
 // ----------------------------------------------------------------------------
 // 2. Fetch Content List (Live Cloud Sync for All Visitors)
 // ----------------------------------------------------------------------------
-export async function fetchContentList(): Promise<MediaItem[]> {
-  try {
-    await ensureFirestoreSeeded();
-    const contentRef = collection(firestore, 'content');
-    const q = query(contentRef, orderBy('createdAt', 'desc'));
-    const snap = await getDocs(q);
+export async function fetchContentList(forceFresh = false): Promise<MediaItem[]> {
+  const now = Date.now();
+  if (!forceFresh && memoryContentList && (now - memoryContentTimestamp < CACHE_TTL_MS)) {
+    const userTokens = getStoredTokens();
+    return memoryContentList.map(item => {
+      const isUnlocked = item.access === 'free' || Boolean(userTokens[item.id]);
+      return {
+        ...item,
+        mediaUrl: isUnlocked ? item.mediaUrl : (item.previewUrl || item.thumbnailUrl)
+      };
+    });
+  }
 
-    if (!snap.empty) {
-      const userTokens = getStoredTokens();
-      const items: MediaItem[] = [];
-      snap.forEach(docSnap => {
-        const item = { ...docSnap.data(), id: docSnap.id } as MediaItem;
-        if (item.published !== false) {
-          // If locked and not unlocked, protect mediaUrl
-          const isUnlocked = item.access === 'free' || Boolean(userTokens[item.id]);
-          items.push({
-            ...item,
-            mediaUrl: isUnlocked ? item.mediaUrl : (item.previewUrl || item.thumbnailUrl)
-          });
-        }
-      });
-      return items;
-    }
+  try {
+    const contentRef = collection(firestore, 'content');
+    const snap = await getDocs(contentRef);
+
+    const userTokens = getStoredTokens();
+    const items: MediaItem[] = [];
+
+    snap.forEach(docSnap => {
+      const item = { ...docSnap.data(), id: docSnap.id } as MediaItem;
+      if (item.published !== false) {
+        items.push(item);
+      }
+    });
+
+    items.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    memoryContentList = items;
+    memoryContentTimestamp = now;
+
+    return items.map(item => {
+      const isUnlocked = item.access === 'free' || Boolean(userTokens[item.id]);
+      return {
+        ...item,
+        mediaUrl: isUnlocked ? item.mediaUrl : (item.previewUrl || item.thumbnailUrl)
+      };
+    });
   } catch (err) {
     console.warn('[Firebase fetchContentList Error]', err);
+    return memoryContentList || CLIENT_CONTENT_LIST;
   }
-  return CLIENT_CONTENT_LIST;
 }
 
 // ----------------------------------------------------------------------------
@@ -371,11 +402,16 @@ export async function verifyUserPayment(orderId: string, transactionRef?: string
 // 7. Admin Authentication
 // ----------------------------------------------------------------------------
 export async function adminLogin(passcode: string): Promise<{ success: boolean; token: string }> {
-  // Check settings passcode from Firebase or default
-  const settings = await fetchSiteSettings();
-  const validPasscodes = ['Ashok#8899', 'admin123', 'ruma@123', settings.upiId];
+  const cleanInput = passcode.trim();
+  if (!cleanInput) {
+    throw new Error('कृपया एडमिन पासवर्ड दर्ज करें।');
+  }
 
-  if (validPasscodes.includes(passcode) || passcode.trim() === 'Ashok#8899') {
+  // Check custom passcode saved in Firebase Settings or secure default
+  const settings = await fetchSiteSettings();
+  const configuredPasscode = (settings.adminPasscode && settings.adminPasscode.trim()) || 'Ashok#8899';
+
+  if (cleanInput === configuredPasscode || cleanInput === 'Ashok#8899') {
     const token = `adm_cloud_token_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     setAdminToken(token);
     return { success: true, token };
@@ -385,12 +421,16 @@ export async function adminLogin(passcode: string): Promise<{ success: boolean; 
 }
 
 // ----------------------------------------------------------------------------
-// 8. Admin Analytics & Stats (Aggregated from Firestore)
+// 8. Admin Analytics & Stats (Aggregated from Data or Firestore)
 // ----------------------------------------------------------------------------
-export async function fetchAdminStats(): Promise<AdminStats & { paymentConfig: any }> {
-  const content = await fetchAdminContent();
-  const orders = await fetchAdminOrders();
-  const settings = await fetchSiteSettings();
+export async function fetchAdminStats(
+  contentOverride?: MediaItem[],
+  ordersOverride?: OrderItem[],
+  settingsOverride?: SiteSettings
+): Promise<AdminStats & { paymentConfig: any }> {
+  const content = contentOverride || await fetchAdminContent();
+  const orders = ordersOverride || await fetchAdminOrders();
+  const settings = settingsOverride || await fetchSiteSettings();
 
   const totalEarnings = orders.filter(o => o.status === 'paid').reduce((sum, o) => sum + o.amount, 0);
   const paidOrders = orders.filter(o => o.status === 'paid').length;
@@ -556,22 +596,28 @@ export async function adminRejectOrder(orderId: string, _reason?: string): Promi
 }
 
 // ----------------------------------------------------------------------------
-// 10. Admin Content CRUD (Writes directly to Cloud Firestore)
+// 10. Admin Content CRUD (Writes directly to Cloud Firestore & Memory Cache)
 // ----------------------------------------------------------------------------
-export async function fetchAdminContent(): Promise<MediaItem[]> {
+export async function fetchAdminContent(forceFresh = false): Promise<MediaItem[]> {
+  const now = Date.now();
+  if (!forceFresh && memoryContentList && (now - memoryContentTimestamp < CACHE_TTL_MS)) {
+    return memoryContentList;
+  }
+
   try {
-    await ensureFirestoreSeeded();
     const contentRef = collection(firestore, 'content');
-    const q = query(contentRef, orderBy('createdAt', 'desc'));
-    const snap = await getDocs(q);
+    const snap = await getDocs(contentRef);
     const items: MediaItem[] = [];
     snap.forEach(d => {
       items.push({ ...d.data(), id: d.id } as MediaItem);
     });
+    items.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    memoryContentList = items;
+    memoryContentTimestamp = now;
     return items;
   } catch (err) {
     console.warn('[Firebase fetchAdminContent Error]', err);
-    return CLIENT_CONTENT_LIST;
+    return memoryContentList || CLIENT_CONTENT_LIST;
   }
 }
 
@@ -596,42 +642,59 @@ export async function createAdminContent(itemData: Partial<MediaItem>): Promise<
     ...itemData
   };
 
-  // 1. Save to Cloud Firestore
+  // Update memory cache instantly
+  if (memoryContentList) {
+    memoryContentList = [newItem, ...memoryContentList.filter(i => i.id !== newId)];
+  }
+
+  // Save to Cloud Firestore
   try {
     const docRef = doc(firestore, 'content', newId);
     await setDoc(docRef, newItem);
     console.log('[Firebase] Successfully created Cloud Post:', newId);
   } catch (err) {
     console.error('[Firebase createAdminContent Error]', err);
+    throw err;
   }
 
   return newItem;
 }
 
 export async function updateAdminContent(id: string, updates: Partial<MediaItem>): Promise<MediaItem> {
-  try {
-    const docRef = doc(firestore, 'content', id);
-    // Sanitize undefined fields
-    const cleanUpdates: Record<string, any> = {};
-    Object.entries(updates).forEach(([k, v]) => {
-      if (v !== undefined) cleanUpdates[k] = v;
-    });
+  // Sanitize undefined fields
+  const cleanUpdates: Record<string, any> = {};
+  Object.entries(updates).forEach(([k, v]) => {
+    if (v !== undefined) cleanUpdates[k] = v;
+  });
 
-    await updateDoc(docRef, cleanUpdates);
-    console.log('[Firebase] Successfully updated Cloud Post:', id);
-
-    const updatedSnap = await getDoc(docRef);
-    if (updatedSnap.exists()) {
-      return { ...updatedSnap.data(), id: updatedSnap.id } as MediaItem;
+  // Update memory cache immediately
+  let updatedItem: MediaItem = { id, ...updates } as MediaItem;
+  if (memoryContentList) {
+    const idx = memoryContentList.findIndex(i => i.id === id);
+    if (idx !== -1) {
+      updatedItem = { ...memoryContentList[idx], ...cleanUpdates };
+      memoryContentList[idx] = updatedItem;
     }
-  } catch (err) {
-    console.error('[Firebase updateAdminContent Error]', err);
   }
 
-  return { ...CLIENT_CONTENT_LIST[0], ...updates, id };
+  try {
+    const docRef = doc(firestore, 'content', id);
+    await updateDoc(docRef, cleanUpdates);
+    console.log('[Firebase] Successfully updated Cloud Post:', id);
+  } catch (err) {
+    console.error('[Firebase updateAdminContent Error]', err);
+    throw err;
+  }
+
+  return updatedItem;
 }
 
 export async function deleteAdminContent(id: string): Promise<boolean> {
+  // Update memory cache immediately
+  if (memoryContentList) {
+    memoryContentList = memoryContentList.filter(i => i.id !== id);
+  }
+
   try {
     const docRef = doc(firestore, 'content', id);
     await deleteDoc(docRef);
@@ -639,33 +702,34 @@ export async function deleteAdminContent(id: string): Promise<boolean> {
     return true;
   } catch (err) {
     console.error('[Firebase deleteAdminContent Error]', err);
-    return false;
+    throw err;
   }
 }
 
 // ----------------------------------------------------------------------------
-// 11. Update Site Settings (Writes to Cloud Firestore)
+// 11. Update Site Settings (Writes to Cloud Firestore & Memory Cache)
 // ----------------------------------------------------------------------------
 export async function updateAdminSettings(settings: Partial<SiteSettings>): Promise<SiteSettings> {
+  const cleanSettings: Record<string, any> = {};
+  Object.entries(settings).forEach(([k, v]) => {
+    if (v !== undefined) cleanSettings[k] = v;
+  });
+
+  const updated: SiteSettings = {
+    ...(memorySiteSettings || CLIENT_SITE_SETTINGS),
+    ...cleanSettings
+  };
+  memorySiteSettings = updated;
+
   try {
     const docRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
-    const cleanSettings: Record<string, any> = {};
-    Object.entries(settings).forEach(([k, v]) => {
-      if (v !== undefined) cleanSettings[k] = v;
-    });
-
     await setDoc(docRef, cleanSettings, { merge: true });
     console.log('[Firebase] Successfully updated Cloud Site Settings');
-
-    const updatedSnap = await getDoc(docRef);
-    if (updatedSnap.exists()) {
-      return updatedSnap.data() as SiteSettings;
-    }
   } catch (err) {
     console.error('[Firebase updateAdminSettings Error]', err);
   }
 
-  return { ...CLIENT_SITE_SETTINGS, ...settings };
+  return updated;
 }
 
 // ----------------------------------------------------------------------------

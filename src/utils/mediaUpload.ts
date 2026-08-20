@@ -27,9 +27,9 @@ export function readFileAsDataURL(file: File): Promise<string> {
  */
 export async function compressImageFile(
   file: File,
-  maxWidth = 1600,
-  maxHeight = 1600,
-  quality = 0.85
+  maxWidth = 1080,
+  maxHeight = 1080,
+  quality = 0.82
 ): Promise<string> {
   // If it's a GIF or SVG, do not re-encode through canvas to preserve animation/vector
   if (file.type === 'image/gif' || file.type === 'image/svg+xml') {
@@ -41,28 +41,31 @@ export async function compressImageFile(
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
-      let { width, height } = img;
+      let width = img.naturalWidth || img.width;
+      let height = img.naturalHeight || img.height;
 
       if (width > maxWidth || height > maxHeight) {
         const ratio = Math.min(maxWidth / width, maxHeight / height);
-        width = Math.round(width * ratio);
-        height = Math.round(height * ratio);
+        width = Math.max(1, Math.round(width * ratio));
+        height = Math.max(1, Math.round(height * ratio));
       }
 
       const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
       if (!ctx) {
         resolve(dataUrl);
         return;
       }
 
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(img, 0, 0, width, height);
-      // Use webp if supported, or jpeg
-      const outputType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
-      const compressed = canvas.toDataURL(outputType, quality);
+
+      // Fast JPEG compression to keep under 60-90KB
+      const compressed = canvas.toDataURL('image/jpeg', quality);
       resolve(compressed);
     };
     img.onerror = () => resolve(dataUrl);

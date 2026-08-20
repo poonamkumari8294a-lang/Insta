@@ -12,11 +12,12 @@ export interface MediaItem {
   thumbnailUrl: string;
   mediaUrl: string; // Protected URL (served via API token or preview)
   previewUrl?: string; // Short teaser or watermarked sample
+  galleryUrls?: string[]; // Array of photos for multi-photo sets and VIP albums
   tags: string[];
   views: number;
   likes: number;
   duration?: string; // e.g. "0:45", "1:30"
-  photoCount?: number; // for packs
+  photoCount?: number; // for packs / photo sets
   published: boolean;
   featured?: boolean;
   createdAt: string;
@@ -90,6 +91,7 @@ export interface SiteSettings {
   supportEmail: string;
   supportTelegram: string;
   paymentVerificationMode?: 'manual_approval' | 'instant_utr';
+  adminPasscode?: string;
   storyHighlights: StoryHighlight[];
   homepageConfig?: HomepageSectionConfig;
 }

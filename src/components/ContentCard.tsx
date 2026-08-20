@@ -75,13 +75,14 @@ export const ContentCard: React.FC<ContentCardProps> = ({
   };
 
   const getTypeText = () => {
+    const count = item.galleryUrls?.length || item.photoCount;
     switch (item.type) {
       case 'video':
         return item.duration ? `Video • ${item.duration}` : 'VIP Video';
       case 'pack':
-        return item.photoCount ? `VIP Pack • ${item.photoCount} HD Photos` : 'VIP Pack';
+        return count && count > 1 ? `VIP Pack • ${count} Photos` : 'VIP Pack';
       default:
-        return 'HD Photo Set';
+        return count && count > 1 ? `Album • ${count} Photos` : 'HD Photo';
     }
   };
 

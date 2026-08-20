@@ -6,7 +6,10 @@ import {
   ShieldCheck,
   Lock,
   AlertTriangle,
-  EyeOff
+  EyeOff,
+  ChevronLeft,
+  ChevronRight,
+  Layers
 } from 'lucide-react';
 
 interface MediaModalProps {
@@ -22,6 +25,12 @@ export const MediaModal: React.FC<MediaModalProps> = ({
 }) => {
   const [isScreenProtected, setIsScreenProtected] = useState(false);
   const [securityWarning, setSecurityWarning] = useState<string | null>(null);
+  const [photoIndex, setPhotoIndex] = useState(0);
+
+  // Reset photo index on item change
+  useEffect(() => {
+    setPhotoIndex(0);
+  }, [item?.id]);
 
   // Anti-Screenshot & Screen-Recording Deterrence
   useEffect(() => {
@@ -79,7 +88,23 @@ export const MediaModal: React.FC<MediaModalProps> = ({
 
   if (!item) return null;
 
+  const galleryList = (item.galleryUrls && item.galleryUrls.length > 0)
+    ? item.galleryUrls
+    : (item.mediaUrl ? [item.mediaUrl] : [item.thumbnailUrl]);
+
+  const activePhotoSrc = galleryList[photoIndex] || item.mediaUrl || item.thumbnailUrl;
   const mediaSource = item.mediaUrl || item.thumbnailUrl;
+  const hasMultiplePhotos = item.type !== 'video' && galleryList.length > 1;
+
+  const handleNextPhoto = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setPhotoIndex(prev => (prev + 1) % galleryList.length);
+  };
+
+  const handlePrevPhoto = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setPhotoIndex(prev => (prev - 1 + galleryList.length) % galleryList.length);
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-purple-950/60 backdrop-blur-xl flex items-center justify-center p-2 sm:p-4 md:p-6 animate-in fade-in duration-200 select-none">
@@ -172,17 +197,64 @@ export const MediaModal: React.FC<MediaModalProps> = ({
               </div>
             </div>
           ) : (
-            <div className="relative w-full h-full flex items-center justify-center p-2">
+            <div className="relative w-full h-full flex flex-col items-center justify-center p-2">
               <img
-                src={mediaSource}
-                alt={item.title}
+                key={activePhotoSrc}
+                src={activePhotoSrc}
+                alt={`${item.title} - ${photoIndex + 1}`}
                 onContextMenu={(e) => e.preventDefault()}
                 onDragStart={(e) => e.preventDefault()}
-                className="w-full h-full max-h-[65vh] object-contain rounded-lg pointer-events-none"
+                className="w-full h-full max-h-[60vh] object-contain rounded-lg pointer-events-none animate-in fade-in zoom-in-95 duration-150"
                 referrerPolicy="no-referrer"
               />
+
+              {/* Multi-Photo Carousel Controls */}
+              {hasMultiplePhotos && (
+                <>
+                  <button
+                    onClick={handlePrevPhoto}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 p-2.5 rounded-full bg-black/60 hover:bg-black/80 text-white border border-white/20 backdrop-blur-md transition-transform active:scale-90 z-20 cursor-pointer shadow-lg"
+                    title="Previous Photo"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+
+                  <button
+                    onClick={handleNextPhoto}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-2.5 rounded-full bg-black/60 hover:bg-black/80 text-white border border-white/20 backdrop-blur-md transition-transform active:scale-90 z-20 cursor-pointer shadow-lg"
+                    title="Next Photo"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+
+                  {/* Photo Counter Pill */}
+                  <div className="absolute top-4 right-4 flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/70 text-white border border-white/20 backdrop-blur-md text-xs font-black z-20">
+                    <Layers className="w-3.5 h-3.5 text-pink-400" />
+                    <span>{photoIndex + 1} / {galleryList.length}</span>
+                  </div>
+
+                  {/* Thumbnail Strip */}
+                  <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 p-1.5 rounded-2xl bg-black/70 border border-white/20 backdrop-blur-md max-w-[90%] overflow-x-auto no-scrollbar z-20">
+                    {galleryList.map((photo, idx) => (
+                      <button
+                        key={idx}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPhotoIndex(idx);
+                        }}
+                        className={`relative w-8 h-8 rounded-lg overflow-hidden shrink-0 border-2 transition-all cursor-pointer ${
+                          idx === photoIndex ? 'border-pink-500 scale-105 ring-2 ring-pink-500/50' : 'border-transparent opacity-60 hover:opacity-100'
+                        }`}
+                      >
+                        <img src={photo} alt={`Thumb ${idx + 1}`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
               {/* Corner Watermark */}
-              <div className="absolute bottom-5 right-5 pointer-events-none opacity-70 text-[10px] font-mono text-white bg-black/70 px-2.5 py-1 rounded-md backdrop-blur-sm z-20">
+              <div className="absolute bottom-4 right-4 pointer-events-none opacity-70 text-[10px] font-mono text-white bg-black/70 px-2.5 py-1 rounded-md backdrop-blur-sm z-10">
                 @{creatorName} • Exclusive VIP Photo
               </div>
             </div>

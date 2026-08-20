@@ -84,25 +84,33 @@ export const StoryHighlightsManager: React.FC<StoryHighlightsManagerProps> = ({
   ) => {
     setSaving(true);
     setSaveSuccess(false);
-    try {
-      const updatedHomepage = {
-        ...(settings.homepageConfig || {}),
-        storyHighlights: {
-          enabled: customEnabled,
-          title: customTitle
-        }
-      };
+    
+    const updatedHomepage = {
+      ...(settings.homepageConfig || {}),
+      storyHighlights: {
+        enabled: customEnabled,
+        title: customTitle
+      }
+    };
 
-      const updated = await updateAdminSettings({
+    const optimisticSettings: SiteSettings = {
+      ...settings,
+      storyHighlights: customHighlights,
+      homepageConfig: updatedHomepage as any
+    };
+
+    // Instant local and parent state update
+    onSettingsUpdated(optimisticSettings);
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2500);
+
+    try {
+      await updateAdminSettings({
         storyHighlights: customHighlights,
         homepageConfig: updatedHomepage as any
       });
-
-      onSettingsUpdated(updated);
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err: any) {
-      alert(err.message || 'Failed to save story highlights');
+      console.warn('Background story highlight save error:', err);
     } finally {
       setSaving(false);
     }
@@ -121,7 +129,6 @@ export const StoryHighlightsManager: React.FC<StoryHighlightsManagerProps> = ({
 
   // Delete highlight
   const handleDeleteHighlight = (id: string, title: string) => {
-    if (!confirm(`Are you sure you want to delete highlight "${title}"?`)) return;
     const clone = highlights.filter(h => h.id !== id);
     setHighlights(clone);
     if (selectedHighlightId === id) {
@@ -242,10 +249,8 @@ export const StoryHighlightsManager: React.FC<StoryHighlightsManagerProps> = ({
   const handleDeleteSlide = (index: number) => {
     if (!activeHighlight) return;
     if (activeHighlight.items.length <= 1) {
-      alert('A highlight circle must contain at least 1 story slide.');
       return;
     }
-    if (!confirm('Are you sure you want to delete this story slide?')) return;
 
     const currentItems = [...activeHighlight.items];
     currentItems.splice(index, 1);

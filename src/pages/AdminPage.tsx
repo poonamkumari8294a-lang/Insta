@@ -20,6 +20,7 @@ import {
 import { HomepageControlTab } from '../components/HomepageControlTab';
 import { StoryHighlightsManager } from '../components/StoryHighlightsManager';
 import { MediaUploadZone } from '../components/MediaUploadZone';
+import { MultiPhotoUploadZone } from '../components/MultiPhotoUploadZone';
 import {
   Lock,
   LayoutDashboard,
@@ -36,6 +37,7 @@ import {
   IndianRupee,
   RefreshCw,
   Eye,
+  EyeOff,
   Search,
   Sparkles,
   ExternalLink,
@@ -70,6 +72,7 @@ interface AdminPageProps {
 export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUpdated }) => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!!getAdminToken());
   const [passcode, setPasscode] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -105,12 +108,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
   const [contentFormData, setContentFormData] = useState<Partial<MediaItem>>({
     title: '',
     description: '',
-    type: 'video',
+    type: 'photo',
     access: 'premium',
     price: 99,
     thumbnailUrl: '',
     mediaUrl: '',
     previewUrl: '',
+    galleryUrls: [],
+    photoCount: 1,
     tags: ['Exclusive', 'VIP'],
     duration: '1:30',
     published: true,
@@ -122,6 +127,20 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
   const [orderStatusFilter, setOrderStatusFilter] = useState('all');
   const [viewingReceiptOrder, setViewingReceiptOrder] = useState<OrderItem | null>(null);
   const [copiedSecretLink, setCopiedSecretLink] = useState(false);
+
+  // In-App Toast & Confirmation Modal States (Eliminates iframe popup blocking)
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [deletingItem, setDeletingItem] = useState<MediaItem | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const [verifyingOrder, setVerifyingOrder] = useState<OrderItem | null>(null);
+  const [verifyingTxnRef, setVerifyingTxnRef] = useState('');
+  const [rejectingOrder, setRejectingOrder] = useState<OrderItem | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
 
   const getSecretUrl = () => {
     try {
@@ -135,9 +154,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
     try {
       navigator.clipboard.writeText(getSecretUrl());
       setCopiedSecretLink(true);
+      showToast('✅ सीक्रेट लिंक कॉपी हो गया (Secret admin link copied)');
       setTimeout(() => setCopiedSecretLink(false), 2500);
     } catch (err) {
-      prompt('Copy secret admin link:', getSecretUrl());
+      showToast(getSecretUrl(), 'info');
     }
   };
 
@@ -145,12 +165,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
   const loadAdminData = async () => {
     setLoading(true);
     try {
-      const [statsData, ordersData, contentData, settingsData] = await Promise.all([
-        fetchAdminStats(),
+      const [ordersData, contentData, settingsData] = await Promise.all([
         fetchAdminOrders(),
-        fetchAdminContent(),
-        fetchSiteSettings()
+        fetchAdminContent(true),
+        fetchSiteSettings(true)
       ]);
+      const statsData = await fetchAdminStats(contentData, ordersData, settingsData);
       setStats(statsData);
       setOrdersList(ordersData);
       setContentList(contentData);
@@ -187,6 +207,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
       await adminLogin(passcode);
       setIsAuthenticated(true);
       setPasscode('');
+      showToast('✅ एडमिन लॉगिन सफल (Welcome to Admin Dashboard)');
     } catch (err: any) {
       setLoginError(err.message || 'Invalid admin passcode');
     } finally {
@@ -197,31 +218,63 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
   const handleLogout = () => {
     removeAdminToken();
     setIsAuthenticated(false);
+    showToast('लॉगआउट सफल (Logged out)');
   };
 
   const handleSaveContent = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      if (editingItem) {
-        await updateAdminContent(editingItem.id, contentFormData);
-      } else {
-        await createAdminContent(contentFormData);
+      const payload: Partial<MediaItem> = { ...contentFormData };
+      
+      // Auto-sync multi-photo album fields
+      if (payload.type === 'photo' || payload.type === 'pack') {
+        if (payload.galleryUrls && payload.galleryUrls.length > 0) {
+          if (!payload.mediaUrl || !payload.galleryUrls.includes(payload.mediaUrl)) {
+            payload.mediaUrl = payload.galleryUrls[0];
+          }
+          if (!payload.thumbnailUrl) {
+            payload.thumbnailUrl = payload.galleryUrls[0];
+          }
+          payload.photoCount = payload.galleryUrls.length;
+        }
       }
-      setShowContentModal(false);
-      setEditingItem(null);
-      loadAdminData();
+
+      if (editingItem) {
+        // Instant optimistic update
+        const updatedItem = { ...editingItem, ...payload } as MediaItem;
+        setContentList(prev => prev.map(item => item.id === editingItem.id ? updatedItem : item));
+        setShowContentModal(false);
+        setEditingItem(null);
+        showToast('✅ पोस्ट सफलतापूर्वक अपडेट हो गई');
+        await updateAdminContent(editingItem.id, payload);
+      } else {
+        setShowContentModal(false);
+        showToast('⏳ नई पोस्ट पब्लिश हो रही है...');
+        const created = await createAdminContent(payload);
+        setContentList(prev => [created, ...prev]);
+        showToast('✅ नई पोस्ट सफलतापूर्वक पब्लिश हो गई');
+      }
     } catch (err: any) {
-      alert(err.message || 'Failed to save content');
+      showToast(err.message || 'Failed to save content', 'error');
+      loadAdminData();
     }
   };
 
-  const handleDeleteContent = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this content item?')) return;
+  const handleConfirmDelete = async () => {
+    if (!deletingItem) return;
+    setIsDeleting(true);
+    const targetId = deletingItem.id;
+    // Optimistic UI removal
+    setContentList(prev => prev.filter(c => c.id !== targetId));
+    setDeletingItem(null);
+    showToast('🗑️ पोस्ट सफलतापूर्वक डिलीट हो गई');
     try {
-      await deleteAdminContent(id);
-      loadAdminData();
+      await deleteAdminContent(targetId);
     } catch (err: any) {
-      alert(err.message || 'Failed to delete content');
+      showToast(err.message || 'डिलीट करने में विफल (Failed to delete)', 'error');
+      await loadAdminData();
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -242,19 +295,22 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
     }
   };
 
-  const handleBulkDelete = async () => {
+  const handleConfirmBulkDelete = async () => {
     if (selectedContentIds.length === 0) return;
-    if (!confirm(`Are you sure you want to delete ${selectedContentIds.length} selected items?`)) return;
     setBulkActionLoading(true);
+    const targetIds = [...selectedContentIds];
+    // Optimistic UI removal
+    setContentList(prev => prev.filter(c => !targetIds.includes(c.id)));
+    setSelectedContentIds([]);
+    setShowBulkDeleteConfirm(false);
     try {
-      for (const id of selectedContentIds) {
+      for (const id of targetIds) {
         await deleteAdminContent(id);
       }
-      setSelectedContentIds([]);
-      await loadAdminData();
-      alert('Selected items deleted successfully!');
+      showToast(`🗑️ ${targetIds.length} पोस्ट्स सफलतापूर्वक डिलीट हो गईं`);
     } catch (err: any) {
-      alert(err.message || 'Bulk delete failed');
+      showToast(err.message || 'Bulk delete failed', 'error');
+      await loadAdminData();
     } finally {
       setBulkActionLoading(false);
     }
@@ -263,15 +319,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
   const handleBulkPublish = async (publish: boolean) => {
     if (selectedContentIds.length === 0) return;
     setBulkActionLoading(true);
+    const targetIds = [...selectedContentIds];
+    // Optimistic UI update
+    setContentList(prev => prev.map(c => targetIds.includes(c.id) ? { ...c, published: publish } : c));
+    setSelectedContentIds([]);
     try {
-      for (const id of selectedContentIds) {
+      for (const id of targetIds) {
         await updateAdminContent(id, { published: publish });
       }
-      setSelectedContentIds([]);
-      await loadAdminData();
-      alert(`Selected items ${publish ? 'published' : 'unpublished'}!`);
+      showToast(`✅ चुने हुए पोस्ट्स ${publish ? 'पब्लिश' : 'अनपब्लिश'} कर दिए गए`);
     } catch (err: any) {
-      alert(err.message || 'Bulk publish update failed');
+      showToast(err.message || 'Bulk publish update failed', 'error');
+      await loadAdminData();
     } finally {
       setBulkActionLoading(false);
     }
@@ -280,29 +339,34 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
   const handleBulkFeatured = async (featured: boolean) => {
     if (selectedContentIds.length === 0) return;
     setBulkActionLoading(true);
+    const targetIds = [...selectedContentIds];
+    // Optimistic UI update
+    setContentList(prev => prev.map(c => targetIds.includes(c.id) ? { ...c, featured } : c));
+    setSelectedContentIds([]);
     try {
-      for (const id of selectedContentIds) {
+      for (const id of targetIds) {
         await updateAdminContent(id, { featured });
       }
-      setSelectedContentIds([]);
-      await loadAdminData();
-      alert(`Selected items ${featured ? 'featured on homepage' : 'removed from featured'}!`);
+      showToast(`⭐ चुने हुए पोस्ट्स होमपेज पर ${featured ? 'फीचर' : 'हटाए'} गए`);
     } catch (err: any) {
-      alert(err.message || 'Bulk feature update failed');
+      showToast(err.message || 'Bulk feature update failed', 'error');
+      await loadAdminData();
     } finally {
       setBulkActionLoading(false);
     }
   };
 
-  const handleManualVerify = async (orderId: string) => {
-    const txnRef = prompt('Enter Bank UTR / SMS Reference for confirmation:', `ADMIN_VERIFIED_${Date.now()}`);
-    if (!txnRef) return;
+  const handleManualVerifySubmit = async () => {
+    if (!verifyingOrder) return;
+    const txn = verifyingTxnRef.trim() || `ADMIN_VERIFIED_${Date.now()}`;
     try {
-      await verifyAdminOrder(orderId, txnRef);
-      alert('Order marked as PAID and access token issued!');
+      await verifyAdminOrder(verifyingOrder.orderId, txn);
+      showToast('✅ आर्डर मार्क हुआ PAID और कंटेंट अनलॉक हो गया!');
+      setVerifyingOrder(null);
+      setVerifyingTxnRef('');
       loadAdminData();
     } catch (err: any) {
-      alert(err.message || 'Failed to verify order');
+      showToast(err.message || 'Failed to verify order', 'error');
     }
   };
 
@@ -310,28 +374,29 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
     try {
       const res = await adminApproveOrder(orderId);
       if (res.success) {
-        alert('✅ Order approved successfully! Content unlocked for customer.');
+        showToast('✅ पेमेंट स्वीकार! ग्राहक के लिए कंटेंट तुरंत अनलॉक कर दिया गया।');
         loadAdminData();
       } else {
-        alert(res.error || 'Failed to approve order');
+        showToast(res.error || 'Failed to approve order', 'error');
       }
     } catch (err: any) {
-      alert(err.message || 'Approval failed');
+      showToast(err.message || 'Approval failed', 'error');
     }
   };
 
-  const handleRejectOrder = async (orderId: string) => {
-    if (!confirm('Are you sure you want to REJECT this payment claim? The order will be marked as Failed.')) return;
+  const handleConfirmReject = async () => {
+    if (!rejectingOrder) return;
     try {
-      const res = await adminRejectOrder(orderId, 'Payment not received in bank / Invalid UTR');
+      const res = await adminRejectOrder(rejectingOrder.orderId, 'Payment not received in bank / Invalid UTR');
       if (res.success) {
-        alert('❌ Order rejected.');
+        showToast('❌ आर्डर अस्वीकार (Order rejected)', 'info');
+        setRejectingOrder(null);
         loadAdminData();
       } else {
-        alert(res.error || 'Failed to reject order');
+        showToast(res.error || 'Failed to reject order', 'error');
       }
     } catch (err: any) {
-      alert(err.message || 'Reject failed');
+      showToast(err.message || 'Reject failed', 'error');
     }
   };
 
@@ -383,7 +448,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
             </div>
             <h2 className="font-display font-black text-2xl text-purple-950">Creator Admin Login</h2>
             <p className="text-xs text-purple-900/70 font-medium">
-              Enter your secure admin passkey to manage content, UPI orders, and settings.
+              सुरक्षित एडमिन पासकोड दर्ज करें (Enter your secret passkey)
             </p>
           </div>
 
@@ -395,63 +460,57 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-xs font-bold text-purple-950 block">Admin Passcode</label>
+              <label className="text-xs font-bold text-purple-950 block mb-1">
+                Admin Passcode (सीक्रेट पासवर्ड)
+              </label>
+              <div className="relative">
+                <input
+                  type={showLoginPassword ? 'text' : 'password'}
+                  required
+                  value={passcode}
+                  onChange={(e) => setPasscode(e.target.value)}
+                  placeholder="••••••••••••"
+                  autoComplete="current-password"
+                  className="w-full bg-white/90 border border-purple-200 rounded-2xl pl-4 pr-11 py-3 text-sm text-purple-950 placeholder-purple-900/40 focus:outline-none focus:border-pink-500 shadow-sm font-mono font-bold tracking-wider"
+                />
                 <button
                   type="button"
-                  onClick={() => setPasscode('Ashok#8899')}
-                  className="text-[11px] text-pink-600 hover:text-pink-700 font-bold hover:underline"
+                  onClick={() => setShowLoginPassword((prev) => !prev)}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 p-1 text-purple-400 hover:text-purple-700 transition-colors cursor-pointer"
+                  title={showLoginPassword ? 'Hide password' : 'Show password'}
                 >
-                  Fill Default (Ashok#8899)
+                  {showLoginPassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
                 </button>
               </div>
-              <input
-                type="password"
-                required
-                value={passcode}
-                onChange={(e) => setPasscode(e.target.value)}
-                placeholder="Enter passcode (e.g. Ashok#8899)"
-                className="w-full bg-white/90 border border-purple-200 rounded-2xl px-4 py-3 text-sm text-purple-950 placeholder-purple-900/40 focus:outline-none focus:border-pink-500 shadow-sm font-medium"
-              />
             </div>
 
             <button
               type="submit"
               disabled={loading}
-              className="w-full glow-pink-btn py-3 rounded-2xl text-xs sm:text-sm font-black text-white flex items-center justify-center gap-2 shadow-md shadow-pink-500/20 active:scale-[0.98] transition-transform"
+              className="w-full glow-pink-btn py-3.5 rounded-2xl text-xs sm:text-sm font-black text-white flex items-center justify-center gap-2 shadow-md shadow-pink-500/20 active:scale-[0.98] transition-transform cursor-pointer"
             >
-              {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
-              <span>{loading ? 'Authenticating...' : 'Access Admin Panel'}</span>
+              {loading ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>सत्यापित किया जा रहा है...</span>
+                </>
+              ) : (
+                <>
+                  <Lock className="w-4 h-4" />
+                  <span>Access Admin Panel</span>
+                </>
+              )}
             </button>
           </form>
 
-          <div className="pt-2 text-center space-y-3">
-            <div className="p-3 rounded-2xl bg-purple-100/70 border border-purple-200 text-left space-y-1.5">
-              <div className="flex items-center justify-between text-[11px] font-bold text-purple-950">
-                <span className="flex items-center gap-1">
-                  <KeyRound className="w-3.5 h-3.5 text-pink-600" />
-                  Your Secret Admin URL:
-                </span>
-                <button
-                  type="button"
-                  onClick={copySecretLink}
-                  className="text-[10px] text-pink-700 hover:text-pink-900 font-black flex items-center gap-1"
-                >
-                  {copiedSecretLink ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                  <span>{copiedSecretLink ? 'Copied!' : 'Copy Link'}</span>
-                </button>
-              </div>
-              <code className="block text-[10px] font-mono text-purple-900/80 truncate bg-white/80 p-1.5 rounded-xl border border-purple-200 select-all">
-                {getSecretUrl()}
-              </code>
-              <p className="text-[10px] text-purple-900/60 leading-tight">
-                🔒 Note: This link is completely hidden from the public website. Save/bookmark this URL in your browser to log in anytime.
-              </p>
-            </div>
-
+          <div className="pt-2 text-center">
             <button
               onClick={onBackToSite}
-              className="text-xs text-purple-900/60 hover:text-pink-600 font-bold transition-colors block mx-auto"
+              className="text-xs text-purple-900/60 hover:text-pink-600 font-bold transition-colors block mx-auto cursor-pointer"
             >
               ← Return to Public Website
             </button>
@@ -868,7 +927,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                         <td className="py-3 px-3">
                           {o.status !== 'paid' && (
                             <button
-                              onClick={() => handleManualVerify(o.orderId)}
+                              onClick={() => {
+                                setVerifyingOrder(o);
+                                setVerifyingTxnRef(`ADMIN_VERIFIED_${Date.now()}`);
+                              }}
                               className="px-2.5 py-1 rounded-xl bg-pink-100 hover:bg-pink-200 text-pink-700 text-[10px] font-black border border-pink-200 transition-colors"
                             >
                               Verify
@@ -907,12 +969,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                 setContentFormData({
                   title: '',
                   description: '',
-                  type: 'video',
+                  type: 'photo',
                   access: 'premium',
                   price: 99,
-                  thumbnailUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=800&auto=format&fit=crop&q=80',
-                  mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-                  previewUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+                  thumbnailUrl: '',
+                  mediaUrl: '',
+                  previewUrl: '',
+                  galleryUrls: [],
+                  photoCount: 1,
                   tags: ['Exclusive', 'VIP'],
                   duration: '1:30',
                   published: true,
@@ -1030,7 +1094,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                 <button
                   type="button"
                   disabled={bulkActionLoading}
-                  onClick={handleBulkDelete}
+                  onClick={() => setShowBulkDeleteConfirm(true)}
                   className="px-3 py-1.5 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-800 text-[11px] font-black border border-rose-200 shadow-xs transition-all flex items-center gap-1"
                 >
                   <Trash2 className="w-3 h-3" />
@@ -1121,7 +1185,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                       <button
                         onClick={() => {
                           setEditingItem(item);
-                          setContentFormData({ ...item });
+                          const existingPhotos = item.galleryUrls && item.galleryUrls.length > 0
+                            ? [...item.galleryUrls]
+                            : item.mediaUrl
+                            ? [item.mediaUrl]
+                            : [];
+                          setContentFormData({
+                            ...item,
+                            galleryUrls: existingPhotos,
+                            photoCount: existingPhotos.length || item.photoCount || 1
+                          });
                           setShowContentModal(true);
                         }}
                         className="p-2 rounded-xl bg-white hover:bg-pink-50 text-purple-900 border border-purple-100 shadow-sm"
@@ -1131,7 +1204,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                       </button>
 
                       <button
-                        onClick={() => handleDeleteContent(item.id)}
+                        onClick={() => setDeletingItem(item)}
                         className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 shadow-sm"
                         title="Delete"
                       >
@@ -1335,7 +1408,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                                 <span>Approve & Unlock</span>
                               </button>
                               <button
-                                onClick={() => handleRejectOrder(o.orderId)}
+                                onClick={() => setRejectingOrder(o)}
                                 className="px-2.5 py-1.5 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-700 text-[11px] font-bold transition-colors cursor-pointer"
                                 title="Reject fake claim"
                               >
@@ -1345,7 +1418,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                             </div>
                           ) : o.status === 'pending' ? (
                             <button
-                              onClick={() => handleManualVerify(o.orderId)}
+                              onClick={() => {
+                                setVerifyingOrder(o);
+                                setVerifyingTxnRef(`ADMIN_VERIFIED_${Date.now()}`);
+                              }}
                               className="px-3 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-[11px] font-black shadow-sm transition-transform active:scale-95 cursor-pointer"
                             >
                               Verify & Issue Token
@@ -1405,15 +1481,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                 announcement: formData.get('announcement') as string,
                 announcementEnabled: formData.get('announcementEnabled') === 'on',
                 supportEmail: formData.get('supportEmail') as string,
-                supportTelegram: formData.get('supportTelegram') as string
+                supportTelegram: formData.get('supportTelegram') as string,
+                adminPasscode: (formData.get('adminPasscode') as string)?.trim() || siteSettings?.adminPasscode || 'Ashok#8899'
               };
               try {
                 const res = await updateAdminSettings(updates);
                 setSiteSettings(res);
                 onSettingsUpdated(res);
-                alert('Settings and Profile Photo updated successfully!');
+                showToast('✅ सेटिंग्स और प्रोफाइल फोटो सफलतापूर्वक अपडेट हो गए!');
               } catch (err: any) {
-                alert(err.message || 'Failed to update settings');
+                showToast(err.message || 'Failed to update settings', 'error');
               }
             }}
             className="space-y-5"
@@ -1634,6 +1711,61 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                 defaultValue={siteSettings?.announcement || '✨ New VIP Backstage Reel is LIVE! Get 50% off this week only with instant UPI scan!'}
                 className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2.5 text-xs text-purple-950 shadow-sm font-medium"
               />
+            </div>
+
+            {/* Admin Security & Custom Passcode */}
+            <div className="p-4 sm:p-5 rounded-3xl bg-purple-50/80 border-2 border-purple-200 space-y-4 shadow-xs">
+              <div className="flex items-center justify-between border-b border-purple-200/60 pb-2">
+                <div className="flex items-center gap-2">
+                  <Lock className="w-4 h-4 text-purple-700" />
+                  <span className="text-xs font-black text-purple-950 uppercase tracking-wider">
+                    Admin Passcode & Security (एडमिन पासवर्ड व सुरक्षा)
+                  </span>
+                </div>
+                <span className="text-[10px] font-bold text-purple-700 bg-purple-100 px-2 py-0.5 rounded-lg">
+                  Private & Encrypted
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-purple-950 block mb-1">
+                    Change Admin Passcode (नया एडमिन पासवर्ड बनाएं)
+                  </label>
+                  <input
+                    name="adminPasscode"
+                    type="text"
+                    defaultValue={siteSettings?.adminPasscode || 'Ashok#8899'}
+                    placeholder="Enter new admin passcode"
+                    className="w-full bg-white border border-purple-300 rounded-2xl px-3.5 py-2.5 text-xs text-purple-950 font-mono font-bold focus:ring-2 focus:ring-pink-500 shadow-sm"
+                  />
+                  <p className="text-[10px] text-purple-900/60 mt-1">
+                    💡 अपना मनपसंद सीक्रेट पासवर्ड डालें और नीचे "Save & Publish" दबाएं।
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-purple-950 block">
+                    Your Private Admin URL (बुकमार्क लिंक)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 text-[11px] font-mono text-purple-900 truncate bg-white p-2 rounded-xl border border-purple-200 select-all">
+                      {getSecretUrl()}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={copySecretLink}
+                      className="px-3 py-2 bg-purple-200/80 hover:bg-purple-300 text-purple-950 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors shrink-0"
+                    >
+                      {copiedSecretLink ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedSecretLink ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-purple-900/60">
+                    🔒 यह लिंक केवल आप अपने पास सुरक्षित रखें।
+                  </p>
+                </div>
+              </div>
             </div>
 
             <button
@@ -1866,43 +1998,67 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                 />
               </div>
 
-              {/* 1. Main Media File Upload (Video or Photo directly from Gallery or Web URL) */}
+              {/* 1. Main Media File Upload: Multi-Photo Album Zone for photos/packs, Video Zone for reels */}
               <div className="pt-1">
-                <MediaUploadZone
-                  label={
-                    contentFormData.type === 'video'
-                      ? 'VIP Protected Video Reel (गैलरी से वीडियो चुनें)'
-                      : contentFormData.type === 'photo'
-                      ? 'VIP Protected HD Photo (गैलरी से फोटो चुनें)'
-                      : 'VIP Combo Master File / Preview (गैलरी से मीडिया चुनें)'
-                  }
-                  value={contentFormData.mediaUrl || ''}
-                  onChange={(url) => {
-                    setContentFormData(prev => ({
-                      ...prev,
-                      mediaUrl: url,
-                      previewUrl: prev.previewUrl || url
-                    }));
-                  }}
-                  accept={contentFormData.type === 'video' ? 'video' : contentFormData.type === 'photo' ? 'image' : 'any'}
-                  required
-                  onThumbnailExtracted={(thumbUrl) => {
-                    setContentFormData(prev => {
-                      if (!prev.thumbnailUrl) {
-                        return { ...prev, thumbnailUrl: thumbUrl };
-                      }
-                      return prev;
-                    });
-                  }}
-                  onDurationExtracted={(dur) => {
-                    setContentFormData(prev => ({ ...prev, duration: dur }));
-                  }}
-                  helperText={
-                    contentFormData.type === 'video'
-                      ? 'Select video directly from gallery. Video length and frame thumbnail are generated automatically!'
-                      : 'Select high-resolution photo directly from gallery or camera.'
-                  }
-                />
+                {contentFormData.type === 'photo' || contentFormData.type === 'pack' ? (
+                  <MultiPhotoUploadZone
+                    label={
+                      contentFormData.type === 'photo'
+                        ? 'VIP Photo Album / Multiple Photos (एक साथ कई फोटो अपलोड करें)'
+                        : 'VIP Photo Pack / Bundle (फोटो पैक गैलरी)'
+                    }
+                    photos={contentFormData.galleryUrls && contentFormData.galleryUrls.length > 0 
+                      ? contentFormData.galleryUrls 
+                      : contentFormData.mediaUrl 
+                      ? [contentFormData.mediaUrl] 
+                      : []
+                    }
+                    onChange={(photos) => {
+                      setContentFormData(prev => ({
+                        ...prev,
+                        galleryUrls: photos,
+                        mediaUrl: photos[0] || '',
+                        thumbnailUrl: prev.thumbnailUrl || photos[0] || '',
+                        photoCount: photos.length || 1
+                      }));
+                    }}
+                    currentCover={contentFormData.thumbnailUrl || contentFormData.mediaUrl || ''}
+                    onCoverChange={(coverUrl) => {
+                      setContentFormData(prev => ({
+                        ...prev,
+                        thumbnailUrl: coverUrl
+                      }));
+                    }}
+                    helperText="गैलरी से एक साथ 1 से अधिक फोटो चुनें। आप किसी भी फोटो को क्रॉप कर सकते हैं और कवर फोटो सेट कर सकते हैं।"
+                    required
+                  />
+                ) : (
+                  <MediaUploadZone
+                    label="VIP Protected Video Reel (गैलरी से वीडियो चुनें)"
+                    value={contentFormData.mediaUrl || ''}
+                    onChange={(url) => {
+                      setContentFormData(prev => ({
+                        ...prev,
+                        mediaUrl: url,
+                        previewUrl: prev.previewUrl || url
+                      }));
+                    }}
+                    accept="video"
+                    required
+                    onThumbnailExtracted={(thumbUrl) => {
+                      setContentFormData(prev => {
+                        if (!prev.thumbnailUrl) {
+                          return { ...prev, thumbnailUrl: thumbUrl };
+                        }
+                        return prev;
+                      });
+                    }}
+                    onDurationExtracted={(dur) => {
+                      setContentFormData(prev => ({ ...prev, duration: dur }));
+                    }}
+                    helperText="Select video directly from gallery. Video length and frame thumbnail are generated automatically!"
+                  />
+                )}
               </div>
 
               {/* 2. Thumbnail / Cover Poster Upload */}
@@ -1914,7 +2070,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                   accept="image"
                   aspectRatio="video"
                   required
-                  helperText="Shown on public cards. Auto-extracted if you upload a video reel above."
+                  helperText="Shown on public cards. If using multi-photo above, you can also star any photo to make it cover."
                 />
               </div>
 
@@ -2116,8 +2272,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                 {viewingReceiptOrder.status === 'waiting_verification' && (
                   <>
                     <button
-                      onClick={async () => {
-                        await handleRejectOrder(viewingReceiptOrder.orderId);
+                      onClick={() => {
+                        setRejectingOrder(viewingReceiptOrder);
                         setViewingReceiptOrder(null);
                       }}
                       className="px-4 py-2 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-700 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
@@ -2145,6 +2301,277 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------- */}
+      {/* 1. SINGLE ITEM DELETE CONFIRMATION MODAL */}
+      {/* ---------------------------------------------------- */}
+      {deletingItem && (
+        <div className="fixed inset-0 z-50 bg-purple-950/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="relative w-full max-w-md bg-white rounded-3xl p-6 border border-purple-100 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-2xl bg-rose-100 text-rose-600 shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-display font-black text-base text-purple-950">
+                  डिलीट करने की पुष्टि करें (Confirm Delete)
+                </h3>
+                <p className="text-xs text-purple-900/60 font-medium">
+                  Permanent Removal from Cloud Database
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-purple-50/80 rounded-2xl border border-purple-100 flex items-center gap-3">
+              <img
+                src={deletingItem.thumbnailUrl}
+                alt={deletingItem.title}
+                className="w-14 h-14 rounded-xl object-cover border border-purple-200 shrink-0"
+              />
+              <div className="min-w-0 flex-1">
+                <h4 className="font-bold text-xs text-purple-950 truncate">{deletingItem.title}</h4>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-pink-100 text-pink-700">
+                    {deletingItem.type}
+                  </span>
+                  <span className="text-[11px] font-bold text-emerald-700">
+                    {deletingItem.access === 'free' ? 'FREE' : formatINR(deletingItem.price)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <p className="text-xs text-purple-900/80 leading-relaxed font-medium">
+              क्या आप वाकई इस मीडिया पोस्ट को डिलीट करना चाहते हैं? यह डेटाबेस और वेबसाइट से स्थायी रूप से हटा दिया जाएगा।
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setDeletingItem(null)}
+                className="px-4 py-2.5 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 text-xs font-bold transition-colors cursor-pointer"
+              >
+                रद्द करें (Cancel)
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleConfirmDelete}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-black shadow-md shadow-rose-600/30 flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+              >
+                {isDeleting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>डिलीट हो रहा है...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>हाँ, डिलीट करें (Delete)</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------- */}
+      {/* 2. BULK DELETE CONFIRMATION MODAL */}
+      {/* ---------------------------------------------------- */}
+      {showBulkDeleteConfirm && (
+        <div className="fixed inset-0 z-50 bg-purple-950/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="relative w-full max-w-md bg-white rounded-3xl p-6 border border-purple-100 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-2xl bg-rose-100 text-rose-600 shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-display font-black text-base text-purple-950">
+                  बल्क डिलीट (Bulk Delete Posts)
+                </h3>
+                <p className="text-xs text-purple-900/60 font-medium">
+                  {selectedContentIds.length} items selected
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-purple-900/80 leading-relaxed font-medium">
+              क्या आप वाकई चुने हुए <strong>{selectedContentIds.length}</strong> पोस्ट्स को एक साथ हमेशा के लिए डिलीट करना चाहते हैं?
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={bulkActionLoading}
+                onClick={() => setShowBulkDeleteConfirm(false)}
+                className="px-4 py-2.5 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 text-xs font-bold transition-colors cursor-pointer"
+              >
+                रद्द करें (Cancel)
+              </button>
+              <button
+                type="button"
+                disabled={bulkActionLoading}
+                onClick={handleConfirmBulkDelete}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-black shadow-md shadow-rose-600/30 flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+              >
+                {bulkActionLoading ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>डिलीट हो रहा है...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{selectedContentIds.length} पोस्ट्स डिलीट करें</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------- */}
+      {/* 3. MANUAL ORDER VERIFY MODAL */}
+      {/* ---------------------------------------------------- */}
+      {verifyingOrder && (
+        <div className="fixed inset-0 z-50 bg-purple-950/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="relative w-full max-w-md bg-white rounded-3xl p-6 border border-purple-100 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-2xl bg-pink-100 text-pink-600 shrink-0">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-display font-black text-base text-purple-950">
+                  मैनुअल पेमेंट सत्यापन (Verify Order)
+                </h3>
+                <p className="text-xs text-purple-900/60 font-medium">
+                  Order ID: {verifyingOrder.orderId}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-purple-50/80 rounded-2xl border border-purple-100 text-xs space-y-1">
+              <div className="flex justify-between">
+                <span className="text-purple-900/60">Content:</span>
+                <span className="font-bold text-purple-950">{verifyingOrder.contentTitle}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-purple-900/60">Amount:</span>
+                <span className="font-black text-emerald-700">{formatINR(verifyingOrder.amount)}</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-purple-950 mb-1">
+                Bank UTR / Transaction Reference
+              </label>
+              <input
+                type="text"
+                value={verifyingTxnRef}
+                onChange={(e) => setVerifyingTxnRef(e.target.value)}
+                placeholder="e.g. 402849204928"
+                className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2.5 text-xs text-purple-950 font-mono shadow-xs font-medium"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setVerifyingOrder(null)}
+                className="px-4 py-2.5 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 text-xs font-bold transition-colors cursor-pointer"
+              >
+                रद्द करें (Cancel)
+              </button>
+              <button
+                type="button"
+                onClick={handleManualVerifySubmit}
+                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black shadow-md shadow-emerald-600/30 flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Verify & Issue Access</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------- */}
+      {/* 4. REJECT ORDER CONFIRMATION MODAL */}
+      {/* ---------------------------------------------------- */}
+      {rejectingOrder && (
+        <div className="fixed inset-0 z-50 bg-purple-950/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="relative w-full max-w-md bg-white rounded-3xl p-6 border border-purple-100 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-2xl bg-rose-100 text-rose-600 shrink-0">
+                <XCircle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-display font-black text-base text-purple-950">
+                  पेमेंट अस्वीकार करें (Reject Payment Claim)
+                </h3>
+                <p className="text-xs text-purple-900/60 font-medium">
+                  Order ID: {rejectingOrder.orderId}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-purple-900/80 leading-relaxed font-medium">
+              क्या आप वाकई इस क्लेम को अस्वीकार करना चाहते हैं? आर्डर का स्टेटस <strong>FAILED</strong> हो जाएगा।
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setRejectingOrder(null)}
+                className="px-4 py-2.5 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 text-xs font-bold transition-colors cursor-pointer"
+              >
+                रद्द करें (Cancel)
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmReject}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-black shadow-md shadow-rose-600/30 flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+                <span>अस्वीकार करें (Reject Claim)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------- */}
+      {/* 5. FLOATING IN-APP TOAST NOTIFICATION */}
+      {/* ---------------------------------------------------- */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom-5 duration-200">
+          <div
+            className={`flex items-center gap-3 px-5 py-3.5 rounded-2xl shadow-2xl border text-xs font-black ${
+              toast.type === 'error'
+                ? 'bg-rose-900 text-rose-50 border-rose-700'
+                : toast.type === 'info'
+                ? 'bg-purple-950 text-purple-100 border-purple-800'
+                : 'bg-emerald-900 text-emerald-50 border-emerald-700'
+            }`}
+          >
+            {toast.type === 'error' ? (
+              <AlertCircle className="w-4 h-4 text-rose-300 shrink-0" />
+            ) : (
+              <CheckCircle2 className="w-4 h-4 text-emerald-300 shrink-0" />
+            )}
+            <span>{toast.message}</span>
+            <button
+              onClick={() => setToast(null)}
+              className="ml-2 opacity-70 hover:opacity-100 text-xs font-bold"
+            >
+              ✕
+            </button>
           </div>
         </div>
       )}

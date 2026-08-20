@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
-import { Upload, Film, Image as ImageIcon, CheckCircle2, X, AlertCircle, Link as LinkIcon, RefreshCw, Eye } from 'lucide-react';
+import { Upload, Film, Image as ImageIcon, CheckCircle2, X, Link as LinkIcon, RefreshCw, Eye, Crop } from 'lucide-react';
 import { compressImageFile, processVideoFile, readFileAsDataURL, formatFileSize } from '../utils/mediaUpload';
+import { ImageCropperModal, CropAspectRatio } from './ImageCropperModal';
 
 interface MediaUploadZoneProps {
   id?: string;
@@ -13,6 +14,7 @@ interface MediaUploadZoneProps {
   aspectRatio?: 'square' | 'video' | 'banner' | 'auto';
   onThumbnailExtracted?: (thumbUrl: string) => void;
   onDurationExtracted?: (duration: string) => void;
+  enableCrop?: boolean;
 }
 
 export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
@@ -25,13 +27,21 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
   required = false,
   aspectRatio = 'auto',
   onThumbnailExtracted,
-  onDurationExtracted
+  onDurationExtracted,
+  enableCrop = true,
 }) => {
-  const [mode, setMode] = useState<'gallery' | 'url'>(value && (value.startsWith('http://') || value.startsWith('https://')) ? 'url' : 'gallery');
+  const [mode, setMode] = useState<'gallery' | 'url'>(
+    value && (value.startsWith('http://') || value.startsWith('https://')) && !value.startsWith('data:') ? 'url' : 'gallery'
+  );
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [fileDetails, setFileDetails] = useState<{ name: string; size: string; type: string } | null>(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
+  
+  // Image Cropper States
+  const [rawImageForCrop, setRawImageForCrop] = useState<string | null>(null);
+  const [showCropperModal, setShowCropperModal] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const acceptMime =
@@ -47,6 +57,12 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
     return url.match(/\.(mp4|webm|mov|m4v)(\?.*)?$/i) !== null;
   };
 
+  const getInitialCropAspect = (): CropAspectRatio => {
+    if (aspectRatio === 'square') return '1:1';
+    if (aspectRatio === 'banner' || aspectRatio === 'video') return '16:9';
+    return 'free';
+  };
+
   const handleFile = async (file: File) => {
     if (!file) return;
     setIsProcessing(true);
@@ -58,13 +74,22 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
       setFileDetails({
         name: file.name,
         size: formatFileSize(file.size),
-        type: isVideoFile ? 'Video' : 'Photo'
+        type: isVideoFile ? 'Video' : 'Photo',
       });
 
       if (isImageFile) {
-        // Compress image to manageable size while preserving clarity
-        const compressedDataUrl = await compressImageFile(file, 1600, 1600, 0.88);
-        onChange(compressedDataUrl);
+        // Read image data
+        const rawData = await readFileAsDataURL(file);
+        
+        if (enableCrop) {
+          // Open the interactive Crop Modal immediately for the user
+          setRawImageForCrop(rawData);
+          setShowCropperModal(true);
+        } else {
+          // Compress directly if crop is disabled
+          const compressedDataUrl = await compressImageFile(file, 1600, 1600, 0.88);
+          onChange(compressedDataUrl);
+        }
       } else if (isVideoFile) {
         // Process video, extract duration and frame
         const videoDataUrl = await readFileAsDataURL(file);
@@ -90,6 +115,19 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const handleCropComplete = (croppedDataUrl: string) => {
+    onChange(croppedDataUrl);
+    setShowCropperModal(false);
+    setRawImageForCrop(null);
+  };
+
+  const handleManualCropOpen = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!value || isVideo(value)) return;
+    setRawImageForCrop(value);
+    setShowCropperModal(true);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -137,7 +175,7 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
           <button
             type="button"
             onClick={() => setMode('gallery')}
-            className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${
+            className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
               mode === 'gallery'
                 ? 'bg-pink-600 text-white shadow-xs font-black'
                 : 'text-purple-900/70 hover:text-purple-950'
@@ -149,7 +187,7 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
           <button
             type="button"
             onClick={() => setMode('url')}
-            className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${
+            className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
               mode === 'url'
                 ? 'bg-pink-600 text-white shadow-xs font-black'
                 : 'text-purple-900/70 hover:text-purple-950'
@@ -177,25 +215,38 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
               <button
                 type="button"
                 onClick={() => onChange('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-purple-400 hover:text-purple-700"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-purple-400 hover:text-purple-700 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             )}
           </div>
           {value && (
-            <div className="flex items-center gap-3 p-2 bg-purple-50/80 rounded-xl border border-purple-100">
-              <div className="w-12 h-12 rounded-lg bg-black overflow-hidden shrink-0">
-                {isVideo(value) ? (
-                  <video src={value} className="w-full h-full object-cover" />
-                ) : (
-                  <img src={value} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                )}
+            <div className="flex items-center justify-between p-2.5 bg-purple-50/80 rounded-2xl border border-purple-100">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-12 h-12 rounded-xl bg-black overflow-hidden shrink-0 border border-purple-200">
+                  {isVideo(value) ? (
+                    <video src={value} className="w-full h-full object-cover" />
+                  ) : (
+                    <img src={value} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <span className="text-[11px] font-bold text-purple-950 truncate block">URL Linked Media</span>
+                  <span className="text-[10px] text-purple-900/60 truncate block">{value}</span>
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <span className="text-[11px] font-bold text-purple-950 truncate block">URL Linked Media</span>
-                <span className="text-[10px] text-purple-900/60 truncate block">{value}</span>
-              </div>
+
+              {!isVideo(value) && enableCrop && (
+                <button
+                  type="button"
+                  onClick={handleManualCropOpen}
+                  className="px-3 py-1.5 rounded-xl bg-pink-100 hover:bg-pink-200 text-pink-700 text-[11px] font-black border border-pink-200 flex items-center gap-1 shadow-xs transition-colors cursor-pointer shrink-0 ml-2"
+                >
+                  <Crop className="w-3.5 h-3.5" />
+                  <span>Crop</span>
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -230,8 +281,8 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
               {isProcessing ? (
                 <div className="flex flex-col items-center justify-center py-4 space-y-2">
                   <RefreshCw className="w-7 h-7 text-pink-600 animate-spin" />
-                  <span className="text-xs font-black text-purple-950">Processing Media from Gallery...</span>
-                  <span className="text-[10px] text-purple-900/60">Optimizing & generating thumbnail</span>
+                  <span className="text-xs font-black text-purple-950">गैलरी से लोड हो रहा है...</span>
+                  <span className="text-[10px] text-purple-900/60">क्रॉप टूल तैयार किया जा रहा है</span>
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-2 space-y-2">
@@ -246,21 +297,29 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
                       {accept === 'video'
                         ? 'Supports MP4, WebM, MOV • Auto-extracts poster & duration'
                         : accept === 'image'
-                        ? 'Supports JPG, PNG, WEBP, GIF • High-def clarity'
-                        : 'Supports Photos & Videos directly from storage'}
+                        ? 'Supports JPG, PNG, WEBP • इन-ऐप लाइव फोटो क्रॉपिंग सपोर्ट'
+                        : 'Supports Photos & Videos directly from storage with Cropper'}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    className="px-3.5 py-1.5 rounded-xl bg-purple-100 group-hover:bg-pink-100 text-purple-950 text-[11px] font-black border border-purple-200 transition-colors"
-                  >
-                    📁 Browse Files / Gallery
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="px-3.5 py-1.5 rounded-xl bg-purple-100 group-hover:bg-pink-100 text-purple-950 text-[11px] font-black border border-purple-200 transition-colors"
+                    >
+                      📁 Browse Files / Gallery
+                    </button>
+                    {accept !== 'video' && enableCrop && (
+                      <span className="px-2.5 py-1 rounded-xl bg-pink-50 text-pink-600 text-[10px] font-bold border border-pink-100 flex items-center gap-1">
+                        <Crop className="w-3 h-3" />
+                        <span>Auto-Crop Ready</span>
+                      </span>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
           ) : (
-            /* Uploaded Preview State */
+            /* Uploaded Preview State with Direct Crop Tool Button */
             <div className="relative rounded-2xl border border-purple-200 bg-white/90 p-3 flex items-center gap-3 shadow-xs">
               <div
                 onClick={() => setShowPreviewModal(true)}
@@ -294,20 +353,30 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
                   <span>•</span>
                   <span className="capitalize">{isVideo(value) ? 'Video Reel' : 'Photo'}</span>
                 </div>
-                <div className="flex items-center gap-2 mt-1.5">
+                <div className="flex items-center gap-2.5 mt-1.5">
+                  {!isVideo(value) && enableCrop && (
+                    <button
+                      type="button"
+                      onClick={handleManualCropOpen}
+                      className="px-2.5 py-1 rounded-lg bg-pink-100 hover:bg-pink-200 text-pink-700 text-[10px] font-black border border-pink-200 flex items-center gap-1 transition-colors cursor-pointer"
+                    >
+                      <Crop className="w-3 h-3" />
+                      <span>✂️ क्रॉप / एडजस्ट करें</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="text-[10px] font-bold text-pink-600 hover:text-pink-700 underline"
+                    className="text-[10px] font-bold text-pink-600 hover:text-pink-700 underline cursor-pointer"
                   >
                     Change File
                   </button>
                   <button
                     type="button"
                     onClick={() => setShowPreviewModal(true)}
-                    className="text-[10px] font-bold text-purple-700 hover:text-purple-900"
+                    className="text-[10px] font-bold text-purple-700 hover:text-purple-900 cursor-pointer"
                   >
-                    View Full Preview
+                    Preview
                   </button>
                 </div>
               </div>
@@ -316,7 +385,7 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
                 type="button"
                 onClick={handleRemove}
                 title="Remove uploaded file"
-                className="p-2 rounded-xl bg-purple-50 hover:bg-rose-100 text-purple-400 hover:text-rose-600 transition-colors"
+                className="p-2 rounded-xl bg-purple-50 hover:bg-rose-100 text-purple-400 hover:text-rose-600 transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -342,7 +411,7 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
               <button
                 type="button"
                 onClick={() => setShowPreviewModal(false)}
-                className="p-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                className="p-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -356,11 +425,26 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
               )}
             </div>
 
-            <div className="flex items-center justify-end">
+            <div className="flex items-center justify-between">
+              {!isVideo(value) && enableCrop ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    setShowPreviewModal(false);
+                    handleManualCropOpen(e);
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-pink-100 hover:bg-pink-200 text-pink-700 text-xs font-black border border-pink-200 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Crop className="w-3.5 h-3.5" />
+                  <span>क्रॉप टूल खोलें (Crop Image)</span>
+                </button>
+              ) : (
+                <div />
+              )}
               <button
                 type="button"
                 onClick={() => setShowPreviewModal(false)}
-                className="px-4 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-xs font-bold"
+                className="px-4 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-xs font-bold cursor-pointer"
               >
                 Close Preview
               </button>
@@ -368,6 +452,27 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
           </div>
         </div>
       )}
+
+      {/* Interactive Image Cropper Modal */}
+      {showCropperModal && rawImageForCrop && (
+        <ImageCropperModal
+          imageSrc={rawImageForCrop}
+          isOpen={showCropperModal}
+          onClose={() => {
+            setShowCropperModal(false);
+            setRawImageForCrop(null);
+            // If there's no existing value and user cancels, leave empty or set raw
+            if (!value && rawImageForCrop) {
+              onChange(rawImageForCrop);
+            }
+          }}
+          onCropComplete={handleCropComplete}
+          title={`क्रॉप करें: ${label}`}
+          initialAspect={getInitialCropAspect()}
+          showCircularMask={aspectRatio === 'square'}
+        />
+      )}
     </div>
   );
 };
+

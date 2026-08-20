@@ -75,6 +75,7 @@ async function startServer() {
         return {
           ...item,
           mediaUrl: '', // Hide raw full resolution private file URL
+          galleryUrls: [], // Conceal multi-photo URLs when locked
           isUnlocked: false
         };
       });
@@ -108,6 +109,7 @@ async function startServer() {
       res.json({
         ...item,
         mediaUrl: '',
+        galleryUrls: [],
         isUnlocked: false
       });
     } catch (err: any) {
