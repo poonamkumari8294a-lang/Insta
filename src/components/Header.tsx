@@ -22,7 +22,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-white/60 bg-white/65 backdrop-blur-xl transition-all shadow-sm">
+    <header className="sticky top-0 z-50 w-full border-b border-pink-200/60 bg-white/95 backdrop-blur-md transition-all shadow-xs hardware-accelerated">
       {/* Top Notification / VIP Announcement Banner */}
       {settings.announcementEnabled && settings.announcement && (
         <div className="bg-gradient-to-r from-pink-500 via-purple-600 to-pink-500 text-white text-xs font-semibold py-1.5 px-4 text-center tracking-wide flex items-center justify-center gap-2 overflow-hidden shadow-inner">

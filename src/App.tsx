@@ -215,7 +215,7 @@ export default function App() {
     : null;
 
   return (
-    <div className="min-h-screen bg-[#fdf2f8] text-purple-950 flex flex-col relative overflow-x-hidden selection:bg-pink-500 selection:text-white">
+    <div className="min-h-screen bg-[#fdf2f8] text-purple-950 flex flex-col relative overflow-x-clip selection:bg-pink-500 selection:text-white">
       
       {/* Background Floating Ambient Orbs (Frosted Glass Aesthetic) */}
       <div className="fixed top-[-5%] left-[-5%] w-[550px] h-[550px] bg-pink-400/25 rounded-full blur-[140px] pointer-events-none -z-10" />
