@@ -5,8 +5,8 @@ export const CLIENT_SITE_SETTINGS: SiteSettings = {
   username: 'ruma_cutegirl_official',
   bio: 'Pretty mood always 💋 | Fitness, Lifestyle & Exclusive VIP Content',
   tagline: 'Unlock my private, uncut HD photos, backstage reels & VIP stories instantly.',
-  profilePicUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80',
-  bannerUrl: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=1200&auto=format&fit=crop&q=80',
+  profilePicUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=max&q=80',
+  bannerUrl: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=1200&auto=format&fit=max&q=80',
   instagramUrl: 'https://instagram.com/ruma__cutegirl',
   instagramHandle: '@ruma__cuteg...',
   badgeText: 'VIP Creator',
@@ -19,6 +19,8 @@ export const CLIENT_SITE_SETTINGS: SiteSettings = {
   supportEmail: 'contact.rumakumari@gmail.com',
   supportTelegram: 'https://t.me/rumakumari_vip',
   paymentVerificationMode: 'manual_approval',
+  pushNotificationsEnabled: true,
+  notifyOnNewPost: true,
   homepageConfig: {
     hero: {
       enabled: true,
@@ -91,17 +93,17 @@ export const CLIENT_SITE_SETTINGS: SiteSettings = {
     {
       id: 'highlight-1',
       title: '🌸 Ruma Diaries 💕',
-      coverImage: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=400&auto=format&fit=crop&q=80',
+      coverImage: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=400&auto=format&fit=max&q=80',
       items: [
         {
           id: 'story-1-1',
-          url: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=800&auto=format&fit=crop&q=80',
+          url: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=800&auto=format&fit=max&q=80',
           type: 'image',
           caption: 'Morning vibes ✨ pretty mood always'
         },
         {
           id: 'story-1-2',
-          url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=800&auto=format&fit=crop&q=80',
+          url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=800&auto=format&fit=max&q=80',
           type: 'image',
           caption: 'Special shoot day coming up! 📸'
         }
@@ -110,11 +112,11 @@ export const CLIENT_SITE_SETTINGS: SiteSettings = {
     {
       id: 'highlight-2',
       title: 'back look',
-      coverImage: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=400&auto=format&fit=crop&q=80',
+      coverImage: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=400&auto=format&fit=max&q=80',
       items: [
         {
           id: 'story-2-1',
-          url: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=800&auto=format&fit=crop&q=80',
+          url: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=800&auto=format&fit=max&q=80',
           type: 'image',
           caption: 'Gym session progress 💪'
         }
@@ -123,11 +125,11 @@ export const CLIENT_SITE_SETTINGS: SiteSettings = {
     {
       id: 'highlight-3',
       title: 'link 🔗',
-      coverImage: 'https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?w=400&auto=format&fit=crop&q=80',
+      coverImage: 'https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?w=400&auto=format&fit=max&q=80',
       items: [
         {
           id: 'story-3-1',
-          url: 'https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?w=800&auto=format&fit=crop&q=80',
+          url: 'https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?w=800&auto=format&fit=max&q=80',
           type: 'image',
           caption: 'Instant direct checkout on UPI! Tap below.'
         }
@@ -136,11 +138,11 @@ export const CLIENT_SITE_SETTINGS: SiteSettings = {
     {
       id: 'highlight-4',
       title: '🥵 special',
-      coverImage: 'https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?w=400&auto=format&fit=crop&q=80',
+      coverImage: 'https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?w=400&auto=format&fit=max&q=80',
       items: [
         {
           id: 'story-4-1',
-          url: 'https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?w=800&auto=format&fit=crop&q=80',
+          url: 'https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?w=800&auto=format&fit=max&q=80',
           type: 'image',
           caption: 'VIP reel teaser 🔥 check latest upload'
         }
@@ -157,8 +159,8 @@ export const CLIENT_CONTENT_LIST: MediaItem[] = [
     type: 'photo',
     access: 'premium',
     price: 49,
-    thumbnailUrl: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=800&auto=format&fit=crop&q=80',
-    mediaUrl: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=1600&auto=format&fit=crop&q=95',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=800&auto=format&fit=max&q=80',
+    mediaUrl: 'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=1600&auto=format&fit=max&q=95',
     tags: ['Fitness', 'HD Photo', 'Exclusive', 'Gym'],
     views: 3149,
     likes: 428,
@@ -173,7 +175,7 @@ export const CLIENT_CONTENT_LIST: MediaItem[] = [
     type: 'video',
     access: 'premium',
     price: 99,
-    thumbnailUrl: 'https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?w=800&auto=format&fit=crop&q=80',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?w=800&auto=format&fit=max&q=80',
     mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
     previewUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
     tags: ['Reel', 'Dress', 'Dance', 'VIP Video'],
@@ -191,7 +193,7 @@ export const CLIENT_CONTENT_LIST: MediaItem[] = [
     type: 'video',
     access: 'premium',
     price: 99,
-    thumbnailUrl: 'https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?w=800&auto=format&fit=crop&q=80',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?w=800&auto=format&fit=max&q=80',
     mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
     previewUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
     tags: ['Workout', 'Exclusive', 'Reel'],
@@ -209,8 +211,8 @@ export const CLIENT_CONTENT_LIST: MediaItem[] = [
     type: 'photo',
     access: 'free',
     price: 0,
-    thumbnailUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=800&auto=format&fit=crop&q=80',
-    mediaUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=1600&auto=format&fit=crop&q=90',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=800&auto=format&fit=max&q=80',
+    mediaUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=1600&auto=format&fit=max&q=90',
     tags: ['Free', 'Lifestyle', 'Casual'],
     views: 5240,
     likes: 890,
@@ -225,8 +227,8 @@ export const CLIENT_CONTENT_LIST: MediaItem[] = [
     type: 'pack',
     access: 'premium',
     price: 199,
-    thumbnailUrl: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=800&auto=format&fit=crop&q=80',
-    mediaUrl: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=1600&auto=format&fit=crop&q=95',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=800&auto=format&fit=max&q=80',
+    mediaUrl: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=1600&auto=format&fit=max&q=95',
     tags: ['VIP Pack', 'Photoset', 'Ultra HD', 'Best Value'],
     views: 4120,
     likes: 730,
@@ -242,7 +244,7 @@ export const CLIENT_CONTENT_LIST: MediaItem[] = [
     type: 'video',
     access: 'free',
     price: 0,
-    thumbnailUrl: 'https://images.unsplash.com/photo-1518611012118-696072aa579a?w=800&auto=format&fit=crop&q=80',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1518611012118-696072aa579a?w=800&auto=format&fit=max&q=80',
     mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
     previewUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
     tags: ['Free', 'Workout', 'Warmup'],
@@ -260,7 +262,7 @@ export const CLIENT_CONTENT_LIST: MediaItem[] = [
     type: 'video',
     access: 'premium',
     price: 149,
-    thumbnailUrl: 'https://images.unsplash.com/photo-1516575334481-f85287c2c82d?w=800&auto=format&fit=crop&q=80',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1516575334481-f85287c2c82d?w=800&auto=format&fit=max&q=80',
     mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyBlazes.mp4',
     previewUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyBlazes.mp4',
     tags: ['Q&A', 'VIP Video', 'Uncut'],
@@ -278,8 +280,8 @@ export const CLIENT_CONTENT_LIST: MediaItem[] = [
     type: 'photo',
     access: 'premium',
     price: 49,
-    thumbnailUrl: 'https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?w=800&auto=format&fit=crop&q=80',
-    mediaUrl: 'https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?w=1600&auto=format&fit=crop&q=95',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?w=800&auto=format&fit=max&q=80',
+    mediaUrl: 'https://images.unsplash.com/photo-1583391733956-3750e0ff4e8b?w=1600&auto=format&fit=max&q=95',
     tags: ['Saree', 'Golden Hour', 'Traditional', 'HD Photo'],
     views: 2450,
     likes: 540,

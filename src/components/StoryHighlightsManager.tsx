@@ -149,7 +149,7 @@ export const StoryHighlightsManager: React.FC<StoryHighlightsManagerProps> = ({
       setEditingHighlight(null);
       setHighlightForm({
         title: '🌸 New Highlight',
-        coverImage: settings.profilePicUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80'
+        coverImage: settings.profilePicUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=max&q=80'
       });
     }
     setShowAddHighlightModal(true);

@@ -20,8 +20,10 @@ export default defineConfig(() => {
         output: {
           manualChunks: {
             'vendor-react': ['react', 'react-dom'],
+            'vendor-firebase': ['firebase/app', 'firebase/firestore'],
             'vendor-icons': ['lucide-react'],
             'vendor-qr': ['qrcode'],
+            'vendor-utils': ['canvas-confetti', 'react-easy-crop'],
           },
         },
       },

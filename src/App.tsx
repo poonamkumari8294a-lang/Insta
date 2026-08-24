@@ -1,25 +1,38 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { MediaItem, SiteSettings } from './types';
 import {
   fetchSiteSettings,
   fetchContentList,
+  getCachedSiteSettingsSync,
+  getCachedContentListSync,
   getStoredTokens
 } from './utils/api';
 import { Header } from './components/Header';
 import { Footer } from './components/Footer';
 import { BottomMobileNav } from './components/BottomMobileNav';
-import { PurchasedDrawer } from './components/PurchasedDrawer';
-import { PaymentModal } from './components/PaymentModal';
-import { MediaModal } from './components/MediaModal';
-import { ShareModal } from './components/ShareModal';
 import { HomePage } from './pages/HomePage';
 import { ContentFeedPage } from './pages/ContentFeedPage';
-import { ContentDetailPage } from './pages/ContentDetailPage';
-import { LegalPages } from './pages/LegalPages';
-import { AdminPage } from './pages/AdminPage';
 import { PricingPacks } from './components/PricingPacks';
 import { HowItWorks } from './components/HowItWorks';
+import { NotificationPermissionBanner } from './components/NotificationPermissionBanner';
+import { ForegroundNotificationToast, ForegroundNotificationData } from './components/ForegroundNotificationToast';
+import { setupForegroundMessageListener } from './services/notificationService';
 import { Sparkles, RefreshCw } from 'lucide-react';
+
+// Code-split heavy chunks for Android Mobile fast loading
+const AdminPage = lazy(() => import('./pages/AdminPage').then(m => ({ default: m.AdminPage })));
+const ContentDetailPage = lazy(() => import('./pages/ContentDetailPage').then(m => ({ default: m.ContentDetailPage })));
+const LegalPages = lazy(() => import('./pages/LegalPages').then(m => ({ default: m.LegalPages })));
+const PaymentModal = lazy(() => import('./components/PaymentModal').then(m => ({ default: m.PaymentModal })));
+const MediaModal = lazy(() => import('./components/MediaModal').then(m => ({ default: m.MediaModal })));
+const ShareModal = lazy(() => import('./components/ShareModal').then(m => ({ default: m.ShareModal })));
+const PurchasedDrawer = lazy(() => import('./components/PurchasedDrawer').then(m => ({ default: m.PurchasedDrawer })));
+
+const FallbackLoader = () => (
+  <div className="flex items-center justify-center p-8">
+    <div className="w-8 h-8 rounded-full border-2 border-pink-500 border-t-transparent animate-spin" />
+  </div>
+);
 
 const getRouteFromUrl = (): { route: string; mediaId?: string } => {
   try {
@@ -61,14 +74,17 @@ export default function App() {
   const [currentRoute, setCurrentRoute] = useState<string>(initialUrlRoute.route);
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(initialUrlRoute.mediaId || null);
 
-  // Data States
-  const [settings, setSettings] = useState<SiteSettings | null>(null);
-  const [content, setContent] = useState<MediaItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Instant SWR Hydration (0ms First Contentful Paint)
+  const [settings, setSettings] = useState<SiteSettings>(() => getCachedSiteSettingsSync());
+  const [content, setContent] = useState<MediaItem[]>(() => getCachedContentListSync());
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Unlocked Access Tokens state
-  const [unlockedTokens, setUnlockedTokens] = useState<Record<string, string>>({});
+  const [unlockedTokens, setUnlockedTokens] = useState<Record<string, string>>(() => getStoredTokens());
+
+  // Push Notification Foreground Toast state
+  const [foregroundNotification, setForegroundNotification] = useState<ForegroundNotificationData | null>(null);
 
   // Modals & Drawers
   const [purchasingItem, setPurchasingItem] = useState<MediaItem | null>(null);
@@ -76,6 +92,23 @@ export default function App() {
   const [isPurchasedDrawerOpen, setIsPurchasedDrawerOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [shareItem, setShareItem] = useState<MediaItem | null>(null);
+
+  // Setup foreground push notification listener
+  useEffect(() => {
+    const unsubscribe = setupForegroundMessageListener((payload) => {
+      const title = payload.notification?.title || payload.data?.title || '📸 नया फोटो अपलोड हुआ!';
+      const body = payload.notification?.body || payload.data?.body || 'Ruma Cute Girl पर नया exclusive content उपलब्ध है।';
+      const image = payload.notification?.image || payload.data?.image || '';
+      const postId = payload.data?.postId || '';
+      const url = payload.data?.url || (postId ? `/#detail/${postId}` : '/');
+
+      setForegroundNotification({ title, body, image, url, postId });
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, []);
 
   // Sync unlocked tokens
   const refreshTokens = () => {
@@ -87,46 +120,60 @@ export default function App() {
     setIsShareModalOpen(true);
   };
 
-  // Initial Data Load
+  // Initial Data Load & Background Refresh
   const loadData = async (silent = false) => {
-    if (!silent) setLoading(true);
+    if (!silent && !settings) setLoading(true);
     setError(null);
     try {
       refreshTokens();
       const [settingsData, contentData] = await Promise.all([
-        fetchSiteSettings(),
-        fetchContentList()
+        fetchSiteSettings(silent),
+        fetchContentList(silent)
       ]);
       setSettings(settingsData);
       setContent(contentData);
     } catch (err: any) {
-      console.error('App init error:', err);
-      if (!silent) setError(err.message || 'Failed to connect to backend service');
+      console.warn('App sync error:', err);
+      if (!silent && !settings) setError(err.message || 'Failed to connect to backend service');
     } finally {
       if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadData();
+    // Initial fetch in background
+    loadData(true);
 
-    // Periodic silent refresh to pick up live admin changes across all devices
+    // Smart visibility listener: Refresh only when user returns to app and screen is active
+    let lastRefreshTime = Date.now();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && Date.now() - lastRefreshTime > 60000) {
+        lastRefreshTime = Date.now();
+        loadData(true);
+      }
+    };
+
+    // Periodic silent refresh (throttled to 90s to save 4G battery and mobile data)
     const interval = setInterval(() => {
-      loadData(true);
-    }, 15000);
+      if (document.visibilityState === 'visible') {
+        lastRefreshTime = Date.now();
+        loadData(true);
+      }
+    }, 90000);
 
     // Listen for hash & URL changes (e.g. typing #admin in URL bar)
     const handleUrlChange = () => {
       const { route, mediaId } = getRouteFromUrl();
       setCurrentRoute(route);
       if (mediaId) setSelectedMediaId(mediaId);
-      loadData(true);
     };
 
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('hashchange', handleUrlChange);
     window.addEventListener('popstate', handleUrlChange);
     return () => {
       clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('hashchange', handleUrlChange);
       window.removeEventListener('popstate', handleUrlChange);
     };
@@ -284,15 +331,18 @@ export default function App() {
         )}
 
         {currentRoute === 'detail' && activeContentItem && (
-          <ContentDetailPage
-            item={activeContentItem}
-            allContent={content}
-            isUnlocked={unlockedIds.includes(activeContentItem.id)}
-            onBack={() => navigateTo('content')}
-            onBuy={handleBuyMedia}
-            onOpenMedia={handleOpenMedia}
-            onOpenShare={(item) => handleOpenShare(item)}
-          />
+          <Suspense fallback={<FallbackLoader />}>
+            <ContentDetailPage
+              item={activeContentItem}
+              allContent={content}
+              isUnlocked={unlockedIds.includes(activeContentItem.id)}
+              unlockedIds={unlockedIds}
+              onBack={() => navigateTo('content')}
+              onBuy={handleBuyMedia}
+              onOpenMedia={handleOpenMedia}
+              onOpenShare={(item) => handleOpenShare(item)}
+            />
+          </Suspense>
         )}
 
         {(currentRoute === 'terms' ||
@@ -300,24 +350,28 @@ export default function App() {
           currentRoute === 'refund' ||
           currentRoute === 'contact') &&
           settings && (
-            <LegalPages
-              pageType={currentRoute as any}
-              settings={settings}
-              onNavigate={(route) => navigateTo(route)}
-            />
+            <Suspense fallback={<FallbackLoader />}>
+              <LegalPages
+                pageType={currentRoute as any}
+                settings={settings}
+                onNavigate={(route) => navigateTo(route)}
+              />
+            </Suspense>
           )}
 
         {currentRoute === 'admin' && (
-          <AdminPage
-            onBackToSite={() => {
-              loadData(true);
-              navigateTo('home');
-            }}
-            onSettingsUpdated={(newSettings) => {
-              setSettings(newSettings);
-              loadData(true);
-            }}
-          />
+          <Suspense fallback={<FallbackLoader />}>
+            <AdminPage
+              onBackToSite={() => {
+                loadData(true);
+                navigateTo('home');
+              }}
+              onSettingsUpdated={(newSettings) => {
+                setSettings(newSettings);
+                loadData(true);
+              }}
+            />
+          </Suspense>
         )}
       </main>
 
@@ -338,44 +392,82 @@ export default function App() {
         onOpenShare={() => handleOpenShare(null)}
       />
 
-      {/* Payment Checkout Modal (UPI Dynamic QR) */}
-      <PaymentModal
-        item={purchasingItem}
-        onClose={() => setPurchasingItem(null)}
-        onSuccess={handlePaymentSuccess}
-      />
+      {/* Lazy Loaded Modals & Drawers */}
+      <Suspense fallback={null}>
+        {/* Payment Checkout Modal (UPI Dynamic QR) */}
+        {purchasingItem && (
+          <PaymentModal
+            item={purchasingItem}
+            onClose={() => setPurchasingItem(null)}
+            onSuccess={handlePaymentSuccess}
+          />
+        )}
 
-      {/* Media Fullscreen Viewer Modal */}
-      {settings && (
-        <MediaModal
-          item={activeMediaItem}
-          onClose={() => setActiveMediaItem(null)}
-          creatorName={settings.creatorName}
+        {/* Media Fullscreen Viewer Modal */}
+        {settings && activeMediaItem && (
+          <MediaModal
+            item={activeMediaItem}
+            onClose={() => setActiveMediaItem(null)}
+            creatorName={settings.creatorName}
+          />
+        )}
+
+        {/* Share Modal (Social links, WhatsApp, Instagram, Telegram, QR code download) */}
+        {isShareModalOpen && (
+          <ShareModal
+            isOpen={isShareModalOpen}
+            onClose={() => setIsShareModalOpen(false)}
+            item={shareItem}
+            settings={settings}
+          />
+        )}
+
+        {/* My Unlocks Slide-over Drawer */}
+        {isPurchasedDrawerOpen && (
+          <PurchasedDrawer
+            isOpen={isPurchasedDrawerOpen}
+            onClose={() => setIsPurchasedDrawerOpen(false)}
+            unlockedItems={unlockedItems}
+            onOpenItem={(item) => {
+              setIsPurchasedDrawerOpen(false);
+              handleOpenMedia(item);
+            }}
+            onExplore={() => {
+              setIsPurchasedDrawerOpen(false);
+              navigateTo('content');
+            }}
+          />
+        )}
+      </Suspense>
+
+      {/* Web Push Notification Opt-in Prompt (Non-intrusive, only on public user views) */}
+      {currentRoute !== 'admin' && (
+        <NotificationPermissionBanner
+          vapidKey={settings?.vapidKey}
+          onSubscribed={(token) => {
+            console.log('[App] Push token registered:', token);
+          }}
         />
       )}
 
-      {/* Share Modal (Social links, WhatsApp, Instagram, Telegram, QR code download) */}
-      <ShareModal
-        isOpen={isShareModalOpen}
-        onClose={() => setIsShareModalOpen(false)}
-        item={shareItem}
-        settings={settings}
-      />
-
-      {/* My Unlocks Slide-over Drawer */}
-      <PurchasedDrawer
-        isOpen={isPurchasedDrawerOpen}
-        onClose={() => setIsPurchasedDrawerOpen(false)}
-        unlockedItems={unlockedItems}
-        onOpenItem={(item) => {
-          setIsPurchasedDrawerOpen(false);
-          handleOpenMedia(item);
-        }}
-        onExplore={() => {
-          setIsPurchasedDrawerOpen(false);
-          navigateTo('content');
-        }}
-      />
+      {/* Foreground Notification In-App Alert Toast */}
+      {foregroundNotification && (
+        <ForegroundNotificationToast
+          notification={foregroundNotification}
+          onClose={() => setForegroundNotification(null)}
+          onNavigate={(url) => {
+            if (url.includes('#media/')) {
+              const id = url.split('#media/')[1];
+              navigateTo('detail', id);
+            } else if (url.includes('#detail/')) {
+              const id = url.split('#detail/')[1];
+              navigateTo('detail', id);
+            } else {
+              navigateTo('home');
+            }
+          }}
+        />
+      )}
 
     </div>
   );

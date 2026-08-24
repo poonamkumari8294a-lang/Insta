@@ -18,6 +18,16 @@ service cloud.firestore {
       allow read, write: if true;
     }
     
+    // Notification Tokens: Subscribers can register or update their FCM token
+    match /notificationTokens/{tokenId} {
+      allow read, write: if true;
+    }
+
+    // Sent Notifications log: For delivery history and duplicate prevention
+    match /sentNotifications/{notificationId} {
+      allow read, write: if true;
+    }
+    
     // Global fallback rule
     match /{document=**} {
       allow read, write: if true;

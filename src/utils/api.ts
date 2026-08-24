@@ -118,41 +118,93 @@ async function ensureFirestoreSeeded(): Promise<void> {
 }
 
 // ============================================================================
-// In-Memory Fast Cache for Speed & Instant Admin Operations
+// In-Memory Fast Cache & SWR LocalStorage for Instant 0ms Cold Start
 // ============================================================================
+const SETTINGS_CACHE_KEY = 'ruma_cached_settings_v2';
+const CONTENT_CACHE_KEY = 'ruma_cached_content_v2';
+
 let memorySiteSettings: SiteSettings | null = null;
 let memoryContentList: MediaItem[] | null = null;
 let memoryContentTimestamp = 0;
+let activeContentPromise: Promise<MediaItem[]> | null = null;
+let activeSettingsPromise: Promise<SiteSettings> | null = null;
 const CACHE_TTL_MS = 60000; // 1 minute fresh cache
 
+/**
+ * Synchronously retrieves cached settings from localStorage for 0ms initial render
+ */
+export function getCachedSiteSettingsSync(): SiteSettings {
+  if (memorySiteSettings) return memorySiteSettings;
+  try {
+    const raw = localStorage.getItem(SETTINGS_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      memorySiteSettings = { ...CLIENT_SITE_SETTINGS, ...parsed };
+      return memorySiteSettings;
+    }
+  } catch (_) {}
+  return CLIENT_SITE_SETTINGS;
+}
+
+/**
+ * Synchronously retrieves cached content list from localStorage for 0ms initial render
+ */
+export function getCachedContentListSync(): MediaItem[] {
+  if (memoryContentList && memoryContentList.length > 0) return memoryContentList;
+  try {
+    const raw = localStorage.getItem(CONTENT_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as MediaItem[];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        memoryContentList = parsed;
+        return parsed;
+      }
+    }
+  } catch (_) {}
+  return CLIENT_CONTENT_LIST;
+}
+
 // ----------------------------------------------------------------------------
-// 1. Fetch Site Settings (Live Cloud Sync with In-Memory Acceleration)
+// 1. Fetch Site Settings (Live Cloud Sync with In-Memory Acceleration & Deduplication)
 // ----------------------------------------------------------------------------
 export async function fetchSiteSettings(forceFresh = false): Promise<SiteSettings> {
   if (!forceFresh && memorySiteSettings) {
     return memorySiteSettings;
   }
 
-  try {
-    const settingsRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
-    const snap = await getDoc(settingsRef);
-    if (snap.exists()) {
-      const data = snap.data() as SiteSettings;
-      memorySiteSettings = { ...CLIENT_SITE_SETTINGS, ...data };
-      return memorySiteSettings;
-    } else {
-      // Background seed if document doesn't exist
-      ensureFirestoreSeeded();
-    }
-  } catch (err) {
-    console.warn('[Firebase fetchSiteSettings Error]', err);
+  if (activeSettingsPromise) {
+    return activeSettingsPromise;
   }
 
-  return memorySiteSettings || CLIENT_SITE_SETTINGS;
+  activeSettingsPromise = (async () => {
+    try {
+      const settingsRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
+      const snap = await getDoc(settingsRef);
+      if (snap.exists()) {
+        const data = snap.data() as SiteSettings;
+        memorySiteSettings = { ...CLIENT_SITE_SETTINGS, ...data };
+        try {
+          localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(memorySiteSettings));
+        } catch (_) {}
+        return memorySiteSettings;
+      } else {
+        // Background seed if document doesn't exist
+        ensureFirestoreSeeded();
+      }
+    } catch (err) {
+      console.warn('[Firebase fetchSiteSettings Error]', err);
+    } finally {
+      activeSettingsPromise = null;
+    }
+
+    return memorySiteSettings || getCachedSiteSettingsSync();
+  })();
+
+  return activeSettingsPromise;
 }
 
 // ----------------------------------------------------------------------------
-// 2. Fetch Content List (Live Cloud Sync for All Visitors)
+// 2. Fetch Content List (Live Cloud Sync with Deduplication & Query Limiting)
 // ----------------------------------------------------------------------------
 export async function fetchContentList(forceFresh = false): Promise<MediaItem[]> {
   const now = Date.now();
@@ -162,40 +214,62 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
       const isUnlocked = item.access === 'free' || Boolean(userTokens[item.id]);
       return {
         ...item,
-        mediaUrl: isUnlocked ? item.mediaUrl : (item.previewUrl || item.thumbnailUrl)
+        mediaUrl: isUnlocked ? item.mediaUrl : (item.previewUrl || item.thumbnailUrl),
+        galleryUrls: isUnlocked 
+          ? item.galleryUrls 
+          : (item.previewUrl ? [item.previewUrl] : [item.thumbnailUrl])
       };
     });
   }
 
-  try {
-    const contentRef = collection(firestore, 'content');
-    const snap = await getDocs(contentRef);
-
-    const userTokens = getStoredTokens();
-    const items: MediaItem[] = [];
-
-    snap.forEach(docSnap => {
-      const item = { ...docSnap.data(), id: docSnap.id } as MediaItem;
-      if (item.published !== false) {
-        items.push(item);
-      }
-    });
-
-    items.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-    memoryContentList = items;
-    memoryContentTimestamp = now;
-
-    return items.map(item => {
-      const isUnlocked = item.access === 'free' || Boolean(userTokens[item.id]);
-      return {
-        ...item,
-        mediaUrl: isUnlocked ? item.mediaUrl : (item.previewUrl || item.thumbnailUrl)
-      };
-    });
-  } catch (err) {
-    console.warn('[Firebase fetchContentList Error]', err);
-    return memoryContentList || CLIENT_CONTENT_LIST;
+  if (activeContentPromise) {
+    return activeContentPromise;
   }
+
+  activeContentPromise = (async () => {
+    try {
+      const contentRef = collection(firestore, 'content');
+      // Limit to latest 50 items for super fast mobile 4G/5G initial payload
+      const contentQuery = query(contentRef, orderBy('createdAt', 'desc'), firestoreLimit(50));
+      const snap = await getDocs(contentQuery);
+
+      const userTokens = getStoredTokens();
+      const items: MediaItem[] = [];
+
+      snap.forEach(docSnap => {
+        const item = { ...docSnap.data(), id: docSnap.id } as MediaItem;
+        if (item.published !== false) {
+          items.push(item);
+        }
+      });
+
+      items.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      memoryContentList = items;
+      memoryContentTimestamp = Date.now();
+
+      try {
+        localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(items));
+      } catch (_) {}
+
+      return items.map(item => {
+        const isUnlocked = item.access === 'free' || Boolean(userTokens[item.id]);
+        return {
+          ...item,
+          mediaUrl: isUnlocked ? item.mediaUrl : (item.previewUrl || item.thumbnailUrl),
+          galleryUrls: isUnlocked 
+            ? item.galleryUrls 
+            : (item.previewUrl ? [item.previewUrl] : [item.thumbnailUrl])
+        };
+      });
+    } catch (err) {
+      console.warn('[Firebase fetchContentList Error]', err);
+      return memoryContentList || getCachedContentListSync();
+    } finally {
+      activeContentPromise = null;
+    }
+  })();
+
+  return activeContentPromise;
 }
 
 // ----------------------------------------------------------------------------
@@ -203,7 +277,6 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
 // ----------------------------------------------------------------------------
 export async function fetchContentDetail(id: string): Promise<MediaItem> {
   try {
-    await ensureFirestoreSeeded();
     const itemRef = doc(firestore, 'content', id);
     const snap = await getDoc(itemRef);
     if (snap.exists()) {
@@ -212,14 +285,17 @@ export async function fetchContentDetail(id: string): Promise<MediaItem> {
       const isUnlocked = item.access === 'free' || Boolean(userTokens[item.id]);
       return {
         ...item,
-        mediaUrl: isUnlocked ? item.mediaUrl : (item.previewUrl || item.thumbnailUrl)
+        mediaUrl: isUnlocked ? item.mediaUrl : (item.previewUrl || item.thumbnailUrl),
+        galleryUrls: isUnlocked 
+          ? item.galleryUrls 
+          : (item.previewUrl ? [item.previewUrl] : [item.thumbnailUrl])
       };
     }
   } catch (err) {
     console.warn('[Firebase fetchContentDetail Error]', err);
   }
 
-  const fallback = CLIENT_CONTENT_LIST.find(c => c.id === id);
+  const fallback = (memoryContentList || CLIENT_CONTENT_LIST).find(c => c.id === id);
   if (!fallback) throw new Error('Content not found');
   return fallback;
 }

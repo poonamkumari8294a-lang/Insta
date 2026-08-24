@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StoryHighlight } from '../types';
+import { getOptimizedImageUrl } from '../utils/imageOptimizer';
 import { X, ChevronLeft, ChevronRight, Volume2, VolumeX, Sparkles, Heart } from 'lucide-react';
 
 interface StoryHighlightsProps {
@@ -100,8 +101,10 @@ export const StoryHighlights: React.FC<StoryHighlightsProps> = ({
             <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full p-[2.5px] bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 group-hover:scale-105 group-active:scale-95 transition-all duration-300 shadow-md shadow-pink-500/20">
               <div className="w-full h-full rounded-full p-[2px] bg-[#0f0715]">
                 <img
-                  src={hl.coverImage}
+                  src={getOptimizedImageUrl(hl.coverImage, 160, 75)}
                   alt={hl.title}
+                  width={80}
+                  height={80}
                   loading="lazy"
                   decoding="async"
                   className="w-full h-full object-cover rounded-full group-hover:brightness-110 transition-all"

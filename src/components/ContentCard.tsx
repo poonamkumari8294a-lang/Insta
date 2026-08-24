@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { MediaItem } from '../types';
 import { formatINR } from '../utils/api';
+import { getOptimizedImageUrl, getResponsiveSrcSet } from '../utils/imageOptimizer';
+import { LockedPhotoOverlay } from './LockedPhotoOverlay';
 import {
   Lock,
   Play,
@@ -22,14 +24,16 @@ interface ContentCardProps {
   onOpen: (item: MediaItem) => void;
   onBuy: (item: MediaItem) => void;
   onOpenShare?: (item: MediaItem) => void;
+  priority?: boolean;
 }
 
-export const ContentCard: React.FC<ContentCardProps> = ({
+const ContentCardComponent: React.FC<ContentCardProps> = ({
   item,
   isUnlocked,
   onOpen,
   onBuy,
   onOpenShare,
+  priority = false,
 }) => {
   const [copied, setCopied] = useState(false);
   const isFree = item.access === 'free';
@@ -91,78 +95,68 @@ export const ContentCard: React.FC<ContentCardProps> = ({
       id={`content-card-${item.id}`}
       className="glass-card glass-card-hover rounded-2xl sm:rounded-3xl overflow-hidden flex flex-col group relative border border-white/80 transition-all duration-300 select-none protected-media-container"
     >
-      {/* Thumbnail Container */}
+      {/* Media Wrapper (Natural Aspect Ratio - 100% Zero Cropping across 9:16, 4:5, 1:1, 16:9, 4:3) */}
       <div 
         onContextMenu={(e) => e.preventDefault()}
-        className="relative aspect-[4/5] w-full overflow-hidden bg-purple-100/50 select-none"
+        className="relative w-full overflow-hidden bg-purple-950/10 select-none flex items-center justify-center"
       >
-        
-        {/* Media Thumbnail */}
+        {/* Subtle Ambient Blurred Fill behind the photo (prevents harsh empty edges on extreme wide/tall shots) */}
         <img
-          src={item.thumbnailUrl}
-          alt={item.title}
+          src={getOptimizedImageUrl(item.thumbnailUrl, 160, 30)}
+          alt=""
+          aria-hidden="true"
           loading="lazy"
           decoding="async"
+          className="absolute inset-0 w-full h-full object-cover filter blur-2xl scale-125 opacity-25 select-none pointer-events-none"
+          referrerPolicy="no-referrer"
+        />
+
+        {/* Media Thumbnail Foreground (Natural Ratio, Height Auto, Width 100%, Never Cropped, Never Distorted) */}
+        <img
+          src={canAccess ? getOptimizedImageUrl(item.thumbnailUrl, 640, 80) : getOptimizedImageUrl(item.thumbnailUrl, 320, 45)}
+          srcSet={canAccess ? (getResponsiveSrcSet(item.thumbnailUrl) || undefined) : undefined}
+          sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+          alt={item.title}
+          loading={priority ? 'eager' : 'lazy'}
+          decoding="async"
+          {...(priority ? { fetchPriority: 'high' as const } : {})}
           onContextMenu={(e) => e.preventDefault()}
           onDragStart={(e) => e.preventDefault()}
-          className={`w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 pointer-events-none ${
-            !canAccess ? 'filter blur-[10px] scale-105 opacity-80' : 'opacity-95'
+          className={`relative z-[1] block w-full h-auto max-h-[85vh] object-contain transition-transform duration-500 group-hover:scale-105 pointer-events-none ${
+            !canAccess ? 'filter blur-[16px] scale-105 opacity-55' : 'opacity-100'
           }`}
           referrerPolicy="no-referrer"
         />
 
-        {/* Gradient Overlay */}
-        <div className="absolute inset-0 bg-gradient-to-t from-purple-950/60 via-transparent to-black/20" />
+        {/* Ambient Gradient Overlay for Unlocked items */}
+        {canAccess && (
+          <div className="absolute inset-0 z-[2] bg-gradient-to-t from-purple-950/60 via-transparent to-black/20 pointer-events-none" />
+        )}
 
-        {/* Top Badges */}
-        <div className="absolute top-3 left-3 right-3 flex items-center justify-between z-10">
-          
-          {/* Type Badge */}
-          <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-white/85 backdrop-blur-md text-purple-950 border border-white/80 flex items-center gap-1.5 shadow-sm">
-            {getTypeIcon()}
-            <span>{getTypeText()}</span>
-          </span>
+        {/* Top Badges (Only displayed when item is unlocked, locked items show premium overlay header) */}
+        {canAccess && (
+          <div className="absolute top-3 left-3 right-3 flex items-center justify-between z-10">
+            {/* Type Badge */}
+            <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-white/85 backdrop-blur-md text-purple-950 border border-white/80 flex items-center gap-1.5 shadow-sm">
+              {getTypeIcon()}
+              <span>{getTypeText()}</span>
+            </span>
 
-          {/* Access / Price Badge */}
-          {canAccess ? (
+            {/* Access Badge */}
             <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/90 text-white backdrop-blur-md flex items-center gap-1 shadow-sm">
               <CheckCircle2 className="w-3 h-3 text-white" />
               {isFree ? 'FREE' : 'UNLOCKED'}
             </span>
-          ) : (
-            <span className="px-3 py-1 rounded-full text-xs font-black bg-gradient-to-r from-pink-500 to-purple-600 text-white shadow-md shadow-pink-500/25 flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-yellow-300" />
-              {formatINR(item.price)}
-            </span>
-          )}
-        </div>
-
-        {/* Center Action / Lock Icon */}
-        {!canAccess ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center p-4 z-10">
-            <div 
-              onClick={() => onBuy(item)}
-              className="cursor-pointer flex flex-col items-center group-hover:scale-105 transition-all duration-300"
-            >
-              {/* Pulsing Lock Ring Aura */}
-              <div className="relative mb-2.5">
-                <div className="absolute -inset-2 rounded-full bg-gradient-to-r from-pink-500 via-purple-500 to-amber-400 opacity-75 blur-md animate-pulse group-hover:opacity-100 transition-opacity" />
-                <div className="relative w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-white/95 border-2 border-pink-400 backdrop-blur-md flex items-center justify-center shadow-2xl shadow-pink-600/40 group-hover:rotate-6 transition-transform">
-                  <Lock className="w-6 h-6 sm:w-7 sm:h-7 text-pink-600 animate-bounce" />
-                </div>
-                {/* Sparkle Badge */}
-                <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-amber-400 text-amber-950 font-black text-[10px] shadow-sm animate-spin" style={{ animationDuration: '6s' }}>
-                  ✦
-                </span>
-              </div>
-
-              {/* Glowing CTA Pill */}
-              <span className="text-xs font-black text-white tracking-wide bg-gradient-to-r from-pink-600 via-purple-600 to-pink-600 bg-[length:200%_auto] hover:bg-right px-4 py-1.5 rounded-full border border-white/40 shadow-xl shadow-pink-500/30 flex items-center gap-1.5 animate-pulse">
-                <Sparkles className="w-3.5 h-3.5 text-yellow-300 fill-yellow-300" />
-                <span>Unlock VIP ({formatINR(item.price)})</span>
-              </span>
-            </div>
           </div>
+        )}
+
+        {/* Premium Animated Lock Overlay */}
+        {!canAccess ? (
+          <LockedPhotoOverlay
+            item={item}
+            onUnlock={() => onBuy(item)}
+            variant="card"
+          />
         ) : (
           item.type === 'video' && (
             <div 
@@ -176,15 +170,17 @@ export const ContentCard: React.FC<ContentCardProps> = ({
           )
         )}
 
-        {/* Bottom stats inside thumbnail */}
-        <div className="absolute bottom-2 left-3 right-3 flex items-center justify-between text-[11px] text-white font-medium z-10">
-          <span className="flex items-center gap-1 bg-black/40 px-2.5 py-0.5 rounded-full backdrop-blur-md">
-            <Eye className="w-3 h-3 text-pink-300" /> {item.views.toLocaleString()}
-          </span>
-          <span className="flex items-center gap-1 bg-black/40 px-2.5 py-0.5 rounded-full backdrop-blur-md">
-            <Heart className="w-3 h-3 text-pink-300" /> {item.likes.toLocaleString()}
-          </span>
-        </div>
+        {/* Bottom stats inside thumbnail (Visible on unlocked items) */}
+        {canAccess && (
+          <div className="absolute bottom-2 left-3 right-3 flex items-center justify-between text-[11px] text-white font-medium z-10">
+            <span className="flex items-center gap-1 bg-black/40 px-2.5 py-0.5 rounded-full backdrop-blur-md">
+              <Eye className="w-3 h-3 text-pink-300" /> {item.views.toLocaleString()}
+            </span>
+            <span className="flex items-center gap-1 bg-black/40 px-2.5 py-0.5 rounded-full backdrop-blur-md">
+              <Heart className="w-3 h-3 text-pink-300" /> {item.likes.toLocaleString()}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Content Info */}
@@ -250,3 +246,5 @@ export const ContentCard: React.FC<ContentCardProps> = ({
     </div>
   );
 };
+
+export const ContentCard = React.memo(ContentCardComponent);

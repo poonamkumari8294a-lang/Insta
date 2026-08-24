@@ -138,7 +138,13 @@ export async function getCroppedImg(
     targetHeight
   );
 
-  // Return as fast, compact JPEG Data URL
+  // Return as fast, compact WebP / JPEG Data URL
+  try {
+    const webpUrl = croppedCanvas.toDataURL('image/webp', quality);
+    if (webpUrl.startsWith('data:image/webp')) {
+      return webpUrl;
+    }
+  } catch (_) {}
   return croppedCanvas.toDataURL('image/jpeg', quality);
 }
 

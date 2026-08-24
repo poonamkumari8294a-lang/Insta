@@ -1,7 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { MediaItem } from '../types';
 import { ContentCard } from '../components/ContentCard';
-import { Search, Filter, Sparkles, Film, Image as ImageIcon, Layers, Gift } from 'lucide-react';
+import { Search, Filter, Sparkles, Film, Image as ImageIcon, Layers, Gift, ChevronDown } from 'lucide-react';
+
+const INITIAL_PAGE_SIZE = 12;
 
 interface ContentFeedPageProps {
   content: MediaItem[];
@@ -21,6 +23,12 @@ export const ContentFeedPage: React.FC<ContentFeedPageProps> = ({
   const [filterType, setFilterType] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sortBy, setSortBy] = useState<string>('latest');
+  const [visibleCount, setVisibleCount] = useState<number>(INITIAL_PAGE_SIZE);
+
+  // Reset pagination when filter or search changes
+  useEffect(() => {
+    setVisibleCount(INITIAL_PAGE_SIZE);
+  }, [filterType, searchQuery, sortBy]);
 
   const filteredContent = useMemo(() => {
     return content.filter((item) => {
@@ -49,6 +57,14 @@ export const ContentFeedPage: React.FC<ContentFeedPageProps> = ({
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
   }, [content, filterType, searchQuery, sortBy]);
+
+  const visibleItems = useMemo(() => {
+    return filteredContent.slice(0, visibleCount);
+  }, [filteredContent, visibleCount]);
+
+  const handleLoadMore = () => {
+    setVisibleCount(prev => Math.min(prev + INITIAL_PAGE_SIZE, filteredContent.length));
+  };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-8">
@@ -165,7 +181,7 @@ export const ContentFeedPage: React.FC<ContentFeedPageProps> = ({
 
       </div>
 
-      {/* Grid of Content Cards */}
+      {/* Grid of Content Cards (Progressive Mobile Batching) */}
       {filteredContent.length === 0 ? (
         <div className="py-20 text-center flex flex-col items-center justify-center">
           <div className="w-16 h-16 rounded-full bg-pink-100 flex items-center justify-center text-pink-600 mb-3 shadow-inner">
@@ -184,18 +200,41 @@ export const ContentFeedPage: React.FC<ContentFeedPageProps> = ({
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 sm:gap-6">
-          {filteredContent.map((item) => (
-            <ContentCard
-              key={item.id}
-              item={item}
-              isUnlocked={unlockedIds.includes(item.id)}
-              onOpen={onOpenMedia}
-              onBuy={onBuyMedia}
-              onOpenShare={onOpenShare}
-            />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 sm:gap-6">
+            {visibleItems.map((item, index) => (
+              <ContentCard
+                key={item.id}
+                item={item}
+                priority={index < 2}
+                isUnlocked={unlockedIds.includes(item.id)}
+                onOpen={onOpenMedia}
+                onBuy={onBuyMedia}
+                onOpenShare={onOpenShare}
+              />
+            ))}
+          </div>
+
+          {/* Mobile Load More Button */}
+          {visibleCount < filteredContent.length && (
+            <div className="pt-8 pb-4 text-center">
+              <button
+                id="feed-btn-load-more"
+                onClick={handleLoadMore}
+                className="w-full sm:w-auto px-8 py-3.5 rounded-2xl bg-white hover:bg-pink-50 text-purple-950 border border-purple-200 shadow-md font-black text-xs sm:text-sm inline-flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
+              >
+                <span>और लोड करें (Load More Photos)</span>
+                <span className="px-2 py-0.5 rounded-full bg-pink-100 text-pink-700 text-[10px]">
+                  +{Math.min(INITIAL_PAGE_SIZE, filteredContent.length - visibleCount)}
+                </span>
+                <ChevronDown className="w-4 h-4 text-pink-600 animate-bounce" />
+              </button>
+              <p className="text-[11px] text-purple-900/60 font-semibold mt-2">
+                Showing {visibleItems.length} of {filteredContent.length} exclusive posts
+              </p>
+            </div>
+          )}
+        </>
       )}
 
     </div>

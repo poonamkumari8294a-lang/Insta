@@ -1,10 +1,9 @@
-import React from 'react';
+import React, { useMemo, Suspense, lazy } from 'react';
 import { SiteSettings, MediaItem } from '../types';
 import { StoryHighlights } from '../components/StoryHighlights';
 import { ContentCard } from '../components/ContentCard';
-import { HowItWorks } from '../components/HowItWorks';
 import { PricingPacks } from '../components/PricingPacks';
-import { FAQSection } from '../components/FAQSection';
+import { getOptimizedImageUrl } from '../utils/imageOptimizer';
 import {
   BadgeCheck,
   Instagram,
@@ -20,6 +19,10 @@ import {
   Heart,
   Share2
 } from 'lucide-react';
+
+// Lazy load below-the-fold static sections
+const HowItWorks = lazy(() => import('../components/HowItWorks').then(m => ({ default: m.HowItWorks })));
+const FAQSection = lazy(() => import('../components/FAQSection').then(m => ({ default: m.FAQSection })));
 
 interface HomePageProps {
   settings: SiteSettings;
@@ -59,11 +62,11 @@ export const HomePage: React.FC<HomePageProps> = ({
   const videoLimit = cfg.latestVideos?.limit || 4;
   const photoLimit = cfg.latestPhotos?.limit || 4;
 
-  const featuredContent = content.filter((c) => c.featured).slice(0, featuredLimit);
-  const latestPhotos = content.filter((c) => c.type === 'photo').slice(0, photoLimit);
-  const latestVideos = content.filter((c) => c.type === 'video').slice(0, videoLimit);
-  const freeItems = content.filter((c) => c.access === 'free');
-  const vipPacks = content.filter((c) => c.type === 'pack');
+  const featuredContent = useMemo(() => content.filter((c) => c.featured).slice(0, featuredLimit), [content, featuredLimit]);
+  const latestPhotos = useMemo(() => content.filter((c) => c.type === 'photo').slice(0, photoLimit), [content, photoLimit]);
+  const latestVideos = useMemo(() => content.filter((c) => c.type === 'video').slice(0, videoLimit), [content, videoLimit]);
+  const freeItems = useMemo(() => content.filter((c) => c.access === 'free'), [content]);
+  const vipPacks = useMemo(() => content.filter((c) => c.type === 'pack'), [content]);
 
   // Render individual sections
   const renderSection = (sectionKey: string) => {
@@ -86,10 +89,13 @@ export const HomePage: React.FC<HomePageProps> = ({
                     <div className="w-28 h-28 sm:w-36 sm:h-36 md:w-44 md:h-44 rounded-full p-1 bg-gradient-to-tr from-yellow-300 via-pink-400 to-purple-500 shadow-2xl shadow-pink-500/25">
                       <div className="w-full h-full rounded-full p-1 bg-white overflow-hidden shadow-inner">
                         <img
-                          src={settings.profilePicUrl}
+                          src={getOptimizedImageUrl(settings.profilePicUrl, 240, 80)}
                           alt={settings.creatorName}
+                          width={180}
+                          height={180}
                           className="w-full h-full object-cover rounded-full"
                           loading="eager"
+                          fetchPriority="high"
                           decoding="async"
                           referrerPolicy="no-referrer"
                         />
@@ -246,10 +252,11 @@ export const HomePage: React.FC<HomePageProps> = ({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 sm:gap-6">
-              {featuredContent.map((item) => (
+              {featuredContent.map((item, idx) => (
                 <ContentCard
                   key={item.id}
                   item={item}
+                  priority={idx < 2}
                   isUnlocked={unlockedIds.includes(item.id)}
                   onOpen={onOpenMedia}
                   onBuy={onBuyMedia}
@@ -388,11 +395,23 @@ export const HomePage: React.FC<HomePageProps> = ({
 
       case 'howItWorks':
         if (cfg.howItWorks && !cfg.howItWorks.enabled) return null;
-        return <div key="howItWorks"><HowItWorks /></div>;
+        return (
+          <div key="howItWorks" className="render-fast">
+            <Suspense fallback={<div className="h-40 flex items-center justify-center text-purple-400 text-xs">Loading guide...</div>}>
+              <HowItWorks />
+            </Suspense>
+          </div>
+        );
 
       case 'faq':
         if (cfg.faq && !cfg.faq.enabled) return null;
-        return <div key="faq"><FAQSection /></div>;
+        return (
+          <div key="faq" className="render-fast">
+            <Suspense fallback={<div className="h-40 flex items-center justify-center text-purple-400 text-xs">Loading FAQ...</div>}>
+              <FAQSection />
+            </Suspense>
+          </div>
+        );
 
       default:
         return null;

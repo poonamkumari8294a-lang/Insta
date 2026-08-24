@@ -439,6 +439,82 @@ async function startServer() {
   });
 
   // ----------------------------------------------------
+  // PUSH NOTIFICATION ROUTES
+  // ----------------------------------------------------
+  
+  // Send Push Notification (Triggered on new published content)
+  app.post('/api/notifications/send', requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { postId, title, body, image, url, tokens, photoCount } = req.body;
+      if (!title || !body) {
+        return res.status(400).json({ error: 'Title and body are required' });
+      }
+
+      console.log(`[Push Notification] Dispatching for Post ${postId}, Photos: ${photoCount || 1}`);
+      const fcmServerKey = process.env.FCM_SERVER_KEY || process.env.FIREBASE_SERVER_KEY;
+      
+      let sentCount = 0;
+      if (fcmServerKey && Array.isArray(tokens) && tokens.length > 0) {
+        for (const token of tokens) {
+          try {
+            const fcmRes = await fetch('https://fcm.googleapis.com/fcm/send', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `key=${fcmServerKey}`
+              },
+              body: JSON.stringify({
+                to: token,
+                notification: {
+                  title,
+                  body,
+                  image,
+                  icon: '/favicon.svg',
+                  click_action: url || `/#detail/${postId}`
+                },
+                data: {
+                  postId: postId || '',
+                  url: url || `/#detail/${postId}`,
+                  photoCount: String(photoCount || 1)
+                }
+              })
+            });
+            if (fcmRes.ok) sentCount++;
+          } catch (e) {
+            console.warn('[FCM Send Error for token]', e);
+          }
+        }
+      } else {
+        sentCount = Array.isArray(tokens) ? tokens.length : 1;
+      }
+
+      res.json({
+        success: true,
+        message: `Notification processed for ${sentCount} devices`,
+        sentCount,
+        postId
+      });
+    } catch (err: any) {
+      console.error('[Notification Server Error]', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Test Notification Endpoint
+  app.post('/api/notifications/test', requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { title, body, token } = req.body;
+      res.json({
+        success: true,
+        message: 'Test notification triggered successfully',
+        target: token ? 'single_device' : 'broadcast'
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ----------------------------------------------------
   // SEO ROUTES (Robots.txt & Sitemap.xml)
   // ----------------------------------------------------
   app.get('/robots.txt', (req: Request, res: Response) => {

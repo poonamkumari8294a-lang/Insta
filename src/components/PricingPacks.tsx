@@ -53,16 +53,24 @@ export const PricingPacks: React.FC<PricingPacksProps> = ({
                   </span>
                 </div>
 
-                {/* Pack Image Preview */}
-                <div className="relative aspect-video rounded-2xl overflow-hidden mb-4 border border-purple-100 shadow-inner">
+                {/* Pack Image Preview (Preserves full aspect ratio with ambient blur background) */}
+                <div className="relative aspect-video rounded-2xl overflow-hidden mb-4 border border-purple-100 shadow-inner bg-purple-950/30 flex items-center justify-center">
+                  <img
+                    src={pack.thumbnailUrl}
+                    alt=""
+                    aria-hidden="true"
+                    className="absolute inset-0 w-full h-full object-cover filter blur-lg scale-110 opacity-50"
+                    referrerPolicy="no-referrer"
+                  />
                   <img
                     src={pack.thumbnailUrl}
                     alt={pack.title}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                    className="relative z-[1] w-full h-full object-contain group-hover:scale-105 transition-transform duration-500"
                     referrerPolicy="no-referrer"
                   />
-                  <div className="absolute inset-0 bg-gradient-to-t from-purple-950/80 via-transparent to-transparent" />
-                  <div className="absolute bottom-2 left-3 text-xs font-extrabold text-white">
+                  <div className="absolute inset-0 z-[2] bg-gradient-to-t from-purple-950/80 via-transparent to-transparent pointer-events-none" />
+                  <div className="absolute bottom-2 left-3 z-[3] text-xs font-extrabold text-white">
                     {pack.photoCount ? `${pack.photoCount} High-Res Items` : 'Full Uncut Video'}
                   </div>
                 </div>

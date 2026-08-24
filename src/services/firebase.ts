@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, Firestore } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, Firestore, setLogLevel } from 'firebase/firestore';
 import firebaseConfigData from '../../firebase-applet-config.json';
 
 const firebaseConfig = {
@@ -15,9 +15,28 @@ const firebaseConfig = {
 // Initialize Firebase App singleton
 export const firebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firestore with specific database ID if configured
-export const firestore: Firestore = firebaseConfigData.firestoreDatabaseId && firebaseConfigData.firestoreDatabaseId !== '(default)'
-  ? getFirestore(firebaseApp, firebaseConfigData.firestoreDatabaseId)
-  : getFirestore(firebaseApp);
+// Suppress non-critical Firestore connection noise in console
+try {
+  setLogLevel('error');
+} catch (_) {}
+
+const dbId = firebaseConfigData.firestoreDatabaseId && firebaseConfigData.firestoreDatabaseId !== '(default)'
+  ? firebaseConfigData.firestoreDatabaseId
+  : undefined;
+
+// Initialize Firestore with auto-detect long polling to prevent WebChannel 10s timeout in browser/iframe
+function createFirestoreInstance(): Firestore {
+  try {
+    return initializeFirestore(firebaseApp, {
+      experimentalAutoDetectLongPolling: true,
+      experimentalForceLongPolling: true
+    }, dbId);
+  } catch (_err) {
+    return dbId ? getFirestore(firebaseApp, dbId) : getFirestore(firebaseApp);
+  }
+}
+
+export const firestore: Firestore = createFirestoreInstance();
 
 export default firestore;
+

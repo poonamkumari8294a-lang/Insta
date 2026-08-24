@@ -64,6 +64,33 @@
         "createdAt": "string",
         "expiresAt": "string"
       }
+    },
+    "notificationTokens": {
+      "description": "Subscribed FCM device tokens for Web Push notifications",
+      "fields": {
+        "token": "string",
+        "platform": "string",
+        "browser": "string",
+        "enabled": "boolean",
+        "userAgent": "string",
+        "createdAt": "string",
+        "updatedAt": "string"
+      }
+    },
+    "sentNotifications": {
+      "description": "Notification dispatch logs and duplicate prevention ledger",
+      "fields": {
+        "id": "string",
+        "postId": "string",
+        "title": "string",
+        "body": "string",
+        "image": "string",
+        "url": "string",
+        "photoCount": "number",
+        "status": "string",
+        "recipientCount": "number",
+        "sentAt": "string"
+      }
     }
   }
 }

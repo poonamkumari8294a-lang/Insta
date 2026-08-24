@@ -31,6 +31,8 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   supportEmail: 'contact.rumakumari@gmail.com',
   supportTelegram: 'https://t.me/rumakumari_vip',
   paymentVerificationMode: 'manual_approval',
+  pushNotificationsEnabled: true,
+  notifyOnNewPost: true,
   homepageConfig: {
     hero: {
       enabled: true,

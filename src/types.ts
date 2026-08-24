@@ -94,6 +94,34 @@ export interface SiteSettings {
   adminPasscode?: string;
   storyHighlights: StoryHighlight[];
   homepageConfig?: HomepageSectionConfig;
+  // Push Notification settings
+  pushNotificationsEnabled?: boolean;
+  notifyOnNewPost?: boolean;
+  vapidKey?: string;
+}
+
+export interface NotificationToken {
+  token: string;
+  createdAt: string;
+  updatedAt: string;
+  platform: string;
+  browser: string;
+  enabled: boolean;
+  userAgent?: string;
+}
+
+export interface SentNotificationLog {
+  id: string;
+  postId: string;
+  title: string;
+  body: string;
+  image?: string;
+  url: string;
+  photoCount?: number;
+  status: 'sent' | 'failed' | 'simulated';
+  recipientCount: number;
+  sentAt: string;
+  error?: string;
 }
 
 export interface AdminStats {

@@ -22,6 +22,11 @@ import { StoryHighlightsManager } from '../components/StoryHighlightsManager';
 import { MediaUploadZone } from '../components/MediaUploadZone';
 import { MultiPhotoUploadZone } from '../components/MultiPhotoUploadZone';
 import {
+  sendNewPostNotification,
+  sendTestNotification,
+  getActiveSubscribersCount
+} from '../services/notificationService';
+import {
   Lock,
   LayoutDashboard,
   Film,
@@ -61,7 +66,11 @@ import {
   Calendar,
   DollarSign,
   Upload,
-  Download
+  Download,
+  Bell,
+  BellRing,
+  Send,
+  Radio
 } from 'lucide-react';
 
 interface AdminPageProps {
@@ -84,6 +93,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
   const [contentList, setContentList] = useState<MediaItem[]>([]);
   const [ordersList, setOrdersList] = useState<OrderItem[]>([]);
   const [siteSettings, setSiteSettings] = useState<SiteSettings | null>(null);
+  const [subscriberCount, setSubscriberCount] = useState<number>(0);
+  const [testNotificationLoading, setTestNotificationLoading] = useState(false);
 
   // Content Filtering, Search, Sorting, Bulk selection
   const [contentSearch, setContentSearch] = useState('');
@@ -175,6 +186,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
       setOrdersList(ordersData);
       setContentList(contentData);
       setSiteSettings(settingsData);
+
+      // Load push subscriber count
+      getActiveSubscribersCount()
+        .then((cnt) => setSubscriberCount(cnt))
+        .catch(() => {});
     } catch (err: any) {
       console.error(err);
       if (err.message?.includes('Unauthorized')) {
@@ -253,10 +269,41 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
         const created = await createAdminContent(payload);
         setContentList(prev => [created, ...prev]);
         showToast('✅ नई पोस्ट सफलतापूर्वक पब्लिश हो गई');
+
+        // Trigger Push Notification automatically if published (Single notification per post / album)
+        if (created && created.published !== false && siteSettings) {
+          try {
+            const notifResult = await sendNewPostNotification(created, siteSettings);
+            if (notifResult.success && notifResult.recipientCount !== undefined) {
+              showToast(`🔔 ${notifResult.message}`, 'info');
+            }
+          } catch (notifErr) {
+            console.warn('[FCM Notification Non-fatal]', notifErr);
+          }
+        }
       }
     } catch (err: any) {
       showToast(err.message || 'Failed to save content', 'error');
       loadAdminData();
+    }
+  };
+
+  const handleSendTestNotification = async () => {
+    if (!siteSettings) return;
+    setTestNotificationLoading(true);
+    try {
+      const res = await sendTestNotification(siteSettings, false);
+      if (res.success) {
+        showToast(`🚀 ${res.message}`);
+        const cnt = await getActiveSubscribersCount();
+        setSubscriberCount(cnt);
+      } else {
+        showToast(res.message, 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Test notification failed', 'error');
+    } finally {
+      setTestNotificationLoading(false);
     }
   };
 
@@ -1482,13 +1529,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                 announcementEnabled: formData.get('announcementEnabled') === 'on',
                 supportEmail: formData.get('supportEmail') as string,
                 supportTelegram: formData.get('supportTelegram') as string,
-                adminPasscode: (formData.get('adminPasscode') as string)?.trim() || siteSettings?.adminPasscode || 'Ashok#8899'
+                adminPasscode: (formData.get('adminPasscode') as string)?.trim() || siteSettings?.adminPasscode || 'Ashok#8899',
+                pushNotificationsEnabled: formData.get('pushNotificationsEnabled') === 'on',
+                notifyOnNewPost: formData.get('notifyOnNewPost') === 'on',
+                vapidKey: (formData.get('vapidKey') as string)?.trim() || siteSettings?.vapidKey || ''
               };
               try {
                 const res = await updateAdminSettings(updates);
                 setSiteSettings(res);
                 onSettingsUpdated(res);
-                showToast('✅ सेटिंग्स और प्रोफाइल फोटो सफलतापूर्वक अपडेट हो गए!');
+                showToast('✅ सेटिंग्स, नोटिफिकेशन और प्रोफाइल फोटो सफलतापूर्वक अपडेट हो गए!');
               } catch (err: any) {
                 showToast(err.message || 'Failed to update settings', 'error');
               }
@@ -1711,6 +1761,104 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                 defaultValue={siteSettings?.announcement || '✨ New VIP Backstage Reel is LIVE! Get 50% off this week only with instant UPI scan!'}
                 className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2.5 text-xs text-purple-950 shadow-sm font-medium"
               />
+            </div>
+
+            {/* Web Push Notification Settings & Management */}
+            <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-br from-purple-900/10 via-pink-500/5 to-purple-50/80 border-2 border-pink-200/80 space-y-4 shadow-xs">
+              <div className="flex items-center justify-between border-b border-pink-200/60 pb-2">
+                <div className="flex items-center gap-2">
+                  <Bell className="w-4 h-4 text-pink-600" />
+                  <span className="text-xs font-black text-purple-950 uppercase tracking-wider">
+                    Web Push Notifications (FCM / ब्राउज़र पुश नोटिफिकेशन)
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-pink-100 text-pink-700 text-[10px] font-black border border-pink-200">
+                  <Radio className="w-3 h-3 text-pink-600 animate-pulse" />
+                  <span>{subscriberCount} Subscribers</span>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 rounded-2xl bg-white border border-purple-100 shadow-xs">
+                  <div>
+                    <h4 className="text-xs font-bold text-purple-950">Master Push Notifications (मास्टर नोटिफिकेशन टॉगल)</h4>
+                    <p className="text-[11px] text-purple-900/70 font-medium">पूरे सिस्टम के लिए वेब पुश नोटिफिकेशन्स चालू या बंद रखें।</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      name="pushNotificationsEnabled"
+                      type="checkbox"
+                      defaultChecked={siteSettings?.pushNotificationsEnabled ?? true}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-purple-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-purple-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-pink-600" />
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-between p-3 rounded-2xl bg-white border border-purple-100 shadow-xs">
+                  <div>
+                    <h4 className="text-xs font-bold text-purple-950">New Post Auto-Notification (नया फोटो/एल्बम पब्लिश होते ही ऑटो-अलर्ट)</h4>
+                    <p className="text-[11px] text-purple-900/70 font-medium">जब भी आप नया Photo Album या Exclusive वीडियो पब्लिश करेंगे, सभी सब्सक्राइबर्स को तुरंत अलर्ट जाएगा।</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      name="notifyOnNewPost"
+                      type="checkbox"
+                      defaultChecked={siteSettings?.notifyOnNewPost ?? true}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-purple-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-purple-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-pink-600" />
+                  </label>
+                </div>
+
+                {/* Test Notification Trigger */}
+                <div className="p-3.5 rounded-2xl bg-pink-50/70 border border-pink-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-xs font-black text-purple-950 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-pink-600" />
+                      Live Notification Delivery Test (टेस्ट नोटिफिकेशन भेजें)
+                    </h4>
+                    <p className="text-[10px] text-purple-900/70">
+                      जांचें कि ब्राउज़र पर नोटिफिकेशन सही तरीके से आ रहा है या नहीं।
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSendTestNotification}
+                    disabled={testNotificationLoading}
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white text-xs font-black shadow-sm flex items-center justify-center gap-1.5 shrink-0 active:scale-95 transition-all cursor-pointer"
+                  >
+                    {testNotificationLoading ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <span>भेज रहे हैं...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-3.5 h-3.5" />
+                        <span>🚀 Send Test Notification</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Optional Custom VAPID Key for Netlify/Firebase Setup */}
+                <div>
+                  <label className="text-xs font-bold text-purple-950 block mb-1">
+                    Custom Web Push VAPID Public Key (Optional / वैकल्पिक)
+                  </label>
+                  <input
+                    name="vapidKey"
+                    type="text"
+                    defaultValue={siteSettings?.vapidKey || ''}
+                    placeholder="Firebase Console > Project Settings > Cloud Messaging > Web configuration Key Pair"
+                    className="w-full bg-white border border-purple-200 rounded-2xl px-3.5 py-2 text-xs font-mono text-purple-950 shadow-sm"
+                  />
+                  <p className="text-[10px] text-purple-900/60 mt-1">
+                    💡 यदि आप कस्टम Firebase प्रोजेक्ट उपयोग कर रहे हैं तो अपनी VAPID Key यहाँ पेस्ट करें। अन्यथा डिफ़ॉल्ट सिस्टम एक्टिव है।
+                  </p>
+                </div>
+              </div>
             </div>
 
             {/* Admin Security & Custom Passcode */}

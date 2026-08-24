@@ -64,8 +64,16 @@ export async function compressImageFile(
       ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(img, 0, 0, width, height);
 
-      // Fast JPEG compression to keep under 60-90KB
-      const compressed = canvas.toDataURL('image/jpeg', quality);
+      // Fast WebP / JPEG compression to keep image snappy under 30-60KB
+      let compressed = '';
+      try {
+        compressed = canvas.toDataURL('image/webp', quality);
+        if (!compressed.startsWith('data:image/webp')) {
+          compressed = canvas.toDataURL('image/jpeg', quality);
+        }
+      } catch {
+        compressed = canvas.toDataURL('image/jpeg', quality);
+      }
       resolve(compressed);
     };
     img.onerror = () => resolve(dataUrl);

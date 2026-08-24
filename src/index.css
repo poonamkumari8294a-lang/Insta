@@ -182,10 +182,83 @@
   scroll-behavior: smooth;
 }
 
-/* Content visibility helper for fast DOM rendering */
+/* Premium Lock Overlay Hardware-Accelerated Animations */
+@keyframes lock-pulse {
+  0%, 100% {
+    transform: scale(1) translateZ(0);
+    filter: drop-shadow(0 0 8px rgba(236, 72, 153, 0.45));
+  }
+  50% {
+    transform: scale(1.05) translateZ(0);
+    filter: drop-shadow(0 0 18px rgba(236, 72, 153, 0.85));
+  }
+}
+
+.animate-lock-pulse {
+  animation: lock-pulse 2.8s ease-in-out infinite;
+  will-change: transform, filter;
+  transform: translateZ(0);
+}
+
+@keyframes overlay-ambient {
+  0%, 100% {
+    opacity: 0.90;
+  }
+  50% {
+    opacity: 0.96;
+  }
+}
+
+.animate-overlay-ambient {
+  animation: overlay-ambient 4.5s ease-in-out infinite;
+  will-change: opacity;
+  transform: translateZ(0);
+}
+
+@keyframes btn-breathe {
+  0%, 100% {
+    transform: scale(1) translateZ(0);
+    box-shadow: 0 6px 18px -2px rgba(236, 72, 153, 0.45);
+  }
+  50% {
+    transform: scale(1.025) translateZ(0);
+    box-shadow: 0 10px 24px -2px rgba(236, 72, 153, 0.7);
+  }
+}
+
+.animate-btn-breathe {
+  animation: btn-breathe 2.5s ease-in-out infinite;
+  will-change: transform, box-shadow;
+  transform: translateZ(0);
+}
+
+@keyframes badge-glow {
+  0%, 100% {
+    box-shadow: 0 2px 10px rgba(245, 158, 11, 0.35);
+  }
+  50% {
+    box-shadow: 0 4px 18px rgba(245, 158, 11, 0.75);
+  }
+}
+
+.animate-badge-glow {
+  animation: badge-glow 3s ease-in-out infinite;
+}
+
+/* Content visibility helper for fast DOM rendering & zero layout lag on mobile */
 .render-fast {
   content-visibility: auto;
   contain-intrinsic-size: 1px 360px;
+}
+
+/* Reduced motion and battery saving mode */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Hide scrollbar for clean story / carousel rows */
