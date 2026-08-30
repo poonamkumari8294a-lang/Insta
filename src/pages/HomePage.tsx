@@ -1,8 +1,13 @@
-import React, { useMemo, Suspense, lazy } from 'react';
+import React, { useMemo, useState, useEffect, Suspense, lazy } from 'react';
 import { SiteSettings, MediaItem } from '../types';
 import { StoryHighlights } from '../components/StoryHighlights';
 import { ContentCard } from '../components/ContentCard';
 import { PricingPacks } from '../components/PricingPacks';
+import { HotDropCountdownBanner } from '../components/HotDropCountdownBanner';
+import { DailyRewardWheelModal } from '../components/DailyRewardWheelModal';
+import { HotFlashSaleStickyBanner } from '../components/HotFlashSaleStickyBanner';
+import { TeaserPeekModal } from '../components/TeaserPeekModal';
+import { StopUserExitModal } from '../components/StopUserExitModal';
 import { getOptimizedImageUrl } from '../utils/imageOptimizer';
 import {
   BadgeCheck,
@@ -17,7 +22,8 @@ import {
   ArrowRight,
   TrendingUp,
   Heart,
-  Share2
+  Share2,
+  Gift
 } from 'lucide-react';
 
 // Lazy load below-the-fold static sections
@@ -43,6 +49,43 @@ export const HomePage: React.FC<HomePageProps> = ({
   onOpenShare,
   onNavigate,
 }) => {
+  const [isWheelOpen, setIsWheelOpen] = useState(false);
+  const [isExitModalOpen, setIsExitModalOpen] = useState(false);
+  const [isPeekModalOpen, setIsPeekModalOpen] = useState(false);
+  const [peekItem, setPeekItem] = useState<MediaItem | null>(null);
+
+  // Exit intent & idle detection to stop leaving users with an irresistible hot offer
+  useEffect(() => {
+    const hasShownExit = sessionStorage.getItem('exit_modal_shown');
+    if (hasShownExit) return;
+
+    // Trigger after 25s of browsing if not shown yet
+    const idleTimer = setTimeout(() => {
+      const shown = sessionStorage.getItem('exit_modal_shown');
+      if (!shown) {
+        sessionStorage.setItem('exit_modal_shown', 'true');
+        setIsExitModalOpen(true);
+      }
+    }, 25000);
+
+    // Desktop mouseleave exit-intent
+    const handleMouseLeave = (e: MouseEvent) => {
+      if (e.clientY <= 10) {
+        const shown = sessionStorage.getItem('exit_modal_shown');
+        if (!shown) {
+          sessionStorage.setItem('exit_modal_shown', 'true');
+          setIsExitModalOpen(true);
+        }
+      }
+    };
+
+    document.addEventListener('mouseleave', handleMouseLeave);
+
+    return () => {
+      clearTimeout(idleTimer);
+      document.removeEventListener('mouseleave', handleMouseLeave);
+    };
+  }, []);
   const cfg = settings.homepageConfig || {
     hero: { enabled: true, title: settings.creatorName, description: settings.tagline, ctaText: 'View Premium Feed' },
     profile: { enabled: true, showStats: true, showBadge: true, showInstagramBtn: true },
@@ -78,7 +121,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             {/* Ambient Glows */}
             <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-80 bg-gradient-to-tr from-pink-300/30 via-purple-300/20 to-transparent blur-3xl pointer-events-none rounded-full" />
 
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 space-y-6">
               <div className="glass-card rounded-3xl p-6 sm:p-10 border border-white/80 shadow-2xl relative overflow-hidden">
                 {/* Background Pattern */}
                 <div className="absolute top-0 right-0 w-96 h-96 bg-pink-200/20 rounded-full blur-3xl pointer-events-none" />
@@ -174,6 +217,15 @@ export const HomePage: React.FC<HomePageProps> = ({
                         <ArrowRight className="w-4 h-4" />
                       </button>
 
+                      <button
+                        id="hero-btn-daily-spin"
+                        onClick={() => setIsWheelOpen(true)}
+                        className="px-5 py-3 rounded-2xl text-xs sm:text-sm font-black text-white bg-gradient-to-r from-amber-500 via-rose-500 to-pink-600 hover:brightness-110 transition-all flex items-center gap-2 shadow-lg shadow-rose-500/20 active:scale-95 cursor-pointer"
+                      >
+                        <Gift className="w-4 h-4 text-yellow-200 animate-bounce" />
+                        <span>डेली स्पिन & जीतें (Free Wheel)</span>
+                      </button>
+
                       {(cfg.profile?.showInstagramBtn ?? true) && (
                         <a
                           id="hero-btn-instagram"
@@ -218,6 +270,15 @@ export const HomePage: React.FC<HomePageProps> = ({
                   </div>
                 )}
               </div>
+
+              {/* VIP Engagement & Retention Section: Hot Drops Banner */}
+              <div>
+                <HotDropCountdownBanner
+                  onOpenWheel={() => setIsWheelOpen(true)}
+                  onExploreVip={() => onNavigate('content')}
+                />
+              </div>
+
             </div>
           </section>
         );
@@ -260,6 +321,10 @@ export const HomePage: React.FC<HomePageProps> = ({
                   isUnlocked={unlockedIds.includes(item.id)}
                   onOpen={onOpenMedia}
                   onBuy={onBuyMedia}
+                  onPeek={(peeked) => {
+                    setPeekItem(peeked);
+                    setIsPeekModalOpen(true);
+                  }}
                   onOpenShare={onOpenShare}
                 />
               ))}
@@ -312,6 +377,10 @@ export const HomePage: React.FC<HomePageProps> = ({
                   isUnlocked={unlockedIds.includes(item.id)}
                   onOpen={onOpenMedia}
                   onBuy={onBuyMedia}
+                  onPeek={(peeked) => {
+                    setPeekItem(peeked);
+                    setIsPeekModalOpen(true);
+                  }}
                   onOpenShare={onOpenShare}
                 />
               ))}
@@ -350,6 +419,10 @@ export const HomePage: React.FC<HomePageProps> = ({
                   isUnlocked={unlockedIds.includes(item.id)}
                   onOpen={onOpenMedia}
                   onBuy={onBuyMedia}
+                  onPeek={(peeked) => {
+                    setPeekItem(peeked);
+                    setIsPeekModalOpen(true);
+                  }}
                   onOpenShare={onOpenShare}
                 />
               ))}
@@ -421,8 +494,55 @@ export const HomePage: React.FC<HomePageProps> = ({
   const sectionOrder = cfg.sectionOrder || ['hero', 'featured', 'vipPacks', 'latestVideos', 'latestPhotos', 'freeSamples', 'howItWorks', 'faq'];
 
   return (
-    <div className="space-y-12 sm:space-y-16 pb-16">
+    <div className="space-y-12 sm:space-y-16 pb-16 relative">
+      {/* Top Hot Flash Sale Urgency Banner */}
+      <HotFlashSaleStickyBanner
+        onUnlockFlashSale={() => {
+          const target = featuredContent[0] || content[0];
+          if (target) onBuyMedia(target);
+        }}
+      />
+
       {sectionOrder.map((secKey) => renderSection(secKey))}
+
+      {/* Floating Daily Reward Gift Button (Sticky at Bottom Right) */}
+      <button
+        id="floating-daily-reward-btn"
+        onClick={() => setIsWheelOpen(true)}
+        className="fixed bottom-20 right-4 sm:bottom-6 sm:right-6 z-40 p-3.5 sm:p-4 rounded-full bg-gradient-to-r from-amber-500 via-rose-500 to-pink-600 text-white shadow-2xl shadow-rose-600/40 border-2 border-yellow-300 hover:scale-110 active:scale-95 transition-all flex items-center gap-2 group cursor-pointer animate-pulse"
+        title="स्पिन करें और डेली कूपन जीतें!"
+      >
+        <Gift className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-200 animate-spin" />
+        <span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 whitespace-nowrap text-xs font-black text-white">
+          🎁 डेली स्पिन व्हील
+        </span>
+      </button>
+
+      {/* Daily Reward Wheel Modal */}
+      <DailyRewardWheelModal
+        isOpen={isWheelOpen}
+        onClose={() => setIsWheelOpen(false)}
+      />
+
+      {/* 1-Sec VIP Sneak Peek Preview Modal */}
+      <TeaserPeekModal
+        item={peekItem}
+        isOpen={isPeekModalOpen}
+        onClose={() => {
+          setIsPeekModalOpen(false);
+          setPeekItem(null);
+        }}
+        onUnlock={(item) => onBuyMedia(item)}
+      />
+
+      {/* Special Exit-Intent Retention & Discount Modal */}
+      <StopUserExitModal
+        isOpen={isExitModalOpen}
+        onClose={() => setIsExitModalOpen(false)}
+        onUnlockItem={(item) => onBuyMedia(item)}
+        onOpenWheel={() => setIsWheelOpen(true)}
+        featuredItem={featuredContent[0] || content[0]}
+      />
     </div>
   );
 };

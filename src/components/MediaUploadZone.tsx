@@ -87,7 +87,7 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
           setShowCropperModal(true);
         } else {
           // Compress directly if crop is disabled
-          const compressedDataUrl = await compressImageFile(file, 1600, 1600, 0.88);
+          const compressedDataUrl = await compressImageFile(file, 900, 900, 0.74);
           onChange(compressedDataUrl);
         }
       } else if (isVideoFile) {

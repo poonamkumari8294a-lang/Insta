@@ -24,7 +24,7 @@ const dbId = firebaseConfigData.firestoreDatabaseId && firebaseConfigData.firest
   ? firebaseConfigData.firestoreDatabaseId
   : undefined;
 
-// Initialize Firestore with auto-detect long polling to prevent WebChannel 10s timeout in browser/iframe
+// Initialize Firestore with auto-detect long polling to prevent WebChannel 10s backend timeout in browser/iframe
 function createFirestoreInstance(): Firestore {
   try {
     return initializeFirestore(firebaseApp, {

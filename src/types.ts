@@ -18,6 +18,8 @@ export interface MediaItem {
   likes: number;
   duration?: string; // e.g. "0:45", "1:30"
   photoCount?: number; // for packs / photo sets
+  badge?: string;
+  customNote?: string;
   published: boolean;
   featured?: boolean;
   createdAt: string;
@@ -34,6 +36,8 @@ export interface OrderItem {
   status: OrderStatus;
   upiId: string;
   payerUpi?: string;
+  customerName?: string;
+  customerPhone?: string;
   transactionRef?: string;
   screenshotUrl?: string;
   qrString: string;
@@ -43,6 +47,16 @@ export interface OrderItem {
   createdAt: string;
   paidAt?: string;
   expiresAt: string;
+}
+
+export interface VipUserProfile {
+  name: string;
+  phone: string;
+  email?: string;
+  memberSince?: string;
+  streakDays?: number;
+  lastVisit?: string;
+  unlockedCount?: number;
 }
 
 export interface StoryHighlight {

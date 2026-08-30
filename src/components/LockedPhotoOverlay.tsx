@@ -6,69 +6,66 @@ import {
   Sparkles,
   Layers,
   Film,
-  Image as ImageIcon,
+  Flame,
   ShieldCheck,
-  Zap
+  Zap,
+  Eye,
+  Crown
 } from 'lucide-react';
 
 interface LockedPhotoOverlayProps {
   item: MediaItem;
   onUnlock: () => void;
+  onPeek?: () => void;
   variant?: 'card' | 'detail';
 }
 
 export const LockedPhotoOverlay: React.FC<LockedPhotoOverlayProps> = ({
   item,
   onUnlock,
+  onPeek,
   variant = 'card',
 }) => {
   const photoCount = item.galleryUrls?.length || item.photoCount || 1;
   const isMultiPhoto = item.type === 'pack' || photoCount > 1;
   const isVideo = item.type === 'video';
 
+  const originalPrice = Math.max(item.price * 3, item.price + 150);
+  const liveViewers = 800 + (parseInt(item.id.replace(/\D/g, '') || '42', 10) % 750);
+
   const getHeaderBadge = () => {
     if (isVideo) {
       return (
-        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] sm:text-xs font-black tracking-wider uppercase bg-pink-500/20 text-pink-300 border border-pink-500/40 shadow-sm">
-          <Film className="w-3.5 h-3.5 text-pink-400" />
-          <span>LOCKED VIP VIDEO</span>
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] sm:text-xs font-black tracking-wider uppercase bg-gradient-to-r from-rose-600/90 to-pink-600/90 text-white border border-rose-400 shadow-md shadow-rose-600/30">
+          <Film className="w-3.5 h-3.5 text-yellow-300" />
+          <span>🔥 18+ PRIVATE VIP VIDEO</span>
         </span>
       );
     }
     if (isMultiPhoto) {
       return (
-        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] sm:text-xs font-black tracking-wider uppercase bg-gradient-to-r from-amber-500/20 to-pink-500/20 text-amber-300 border border-amber-500/40 shadow-sm">
-          <Layers className="w-3.5 h-3.5 text-amber-400" />
-          <span>LOCKED VIP ALBUM • {photoCount} PHOTOS</span>
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] sm:text-xs font-black tracking-wider uppercase bg-gradient-to-r from-amber-500/90 to-rose-600/90 text-white border border-amber-300 shadow-md shadow-amber-500/30">
+          <Layers className="w-3.5 h-3.5 text-yellow-200" />
+          <span>💋 VIP ALBUM • {photoCount} HD PHOTOS</span>
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] sm:text-xs font-black tracking-wider uppercase bg-pink-500/20 text-pink-300 border border-pink-500/40 shadow-sm">
-        <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
-        <span>LOCKED PREMIUM PHOTO</span>
+      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] sm:text-xs font-black tracking-wider uppercase bg-gradient-to-r from-pink-600/90 to-purple-600/90 text-white border border-pink-400 shadow-md shadow-pink-600/30">
+        <Crown className="w-3.5 h-3.5 text-yellow-300" />
+        <span>🔥 18+ UNCENSORED VIP SHOOT</span>
       </span>
     );
   };
 
   const getSubtitle = () => {
     if (isVideo) {
-      return 'यह exclusive video unlock करने के लिए खरीदें';
+      return 'एक्सक्लूसिव प्राइवेट वीडियो तुरंत अनलॉक करने के लिए टैप करें';
     }
     if (isMultiPhoto) {
-      return `पूरा album (${photoCount} HD Photos) unlock करने के लिए खरीदें`;
+      return `पूरा प्राइवेट एल्बम (${photoCount} फ़ोटो) तुरंत अनलॉक करें`;
     }
-    return 'यह photo unlock करने के लिए खरीदें';
-  };
-
-  const getCtaText = () => {
-    if (isVideo) {
-      return `Unlock Video • ${formatINR(item.price)}`;
-    }
-    if (isMultiPhoto) {
-      return `Unlock ${photoCount} Photos • ${formatINR(item.price)}`;
-    }
-    return `Unlock Now • ${formatINR(item.price)}`;
+    return '100% प्राइवेट व अनसेंसर्ड फ़ोटो तुरंत अनलॉक करें';
   };
 
   return (
@@ -77,67 +74,104 @@ export const LockedPhotoOverlay: React.FC<LockedPhotoOverlayProps> = ({
         e.stopPropagation();
         onUnlock();
       }}
-      className="absolute inset-0 z-10 flex flex-col items-center justify-between p-4 sm:p-6 bg-gradient-to-b from-black/85 via-black/75 to-black/92 backdrop-blur-md animate-overlay-ambient select-none cursor-pointer transition-colors hover:bg-black/80"
+      className="absolute inset-0 z-10 flex flex-col items-center justify-between p-3.5 sm:p-5 bg-gradient-to-b from-black/90 via-black/80 to-purple-950/95 backdrop-blur-[6px] select-none cursor-pointer transition-all duration-300 hover:backdrop-blur-sm group"
     >
-      {/* Top Header Tag */}
-      <div className="w-full flex items-center justify-center pt-1">
-        {getHeaderBadge()}
+      {/* Top Header Tag & Live Viewer Counter */}
+      <div className="w-full flex items-center justify-between gap-2 pt-0.5">
+        <div className="shrink-0">{getHeaderBadge()}</div>
+        <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-black/60 border border-white/20 text-white text-[10px] font-bold shadow-sm">
+          <Flame className="w-3 h-3 text-orange-400 animate-flame" />
+          <span>{liveViewers} Live</span>
+        </div>
       </div>
 
-      {/* Center Icon & Info with Subtle Pulse Animation */}
-      <div className="flex flex-col items-center text-center my-auto py-2">
-        {/* Pulsing Lock Icon Ring */}
-        <div className="relative mb-3.5 animate-lock-pulse">
-          {/* Ambient glow */}
-          <div className="absolute -inset-2.5 rounded-full bg-gradient-to-tr from-pink-600 via-purple-600 to-amber-400 opacity-60 blur-md" />
+      {/* Center Icon & Seductive Info */}
+      <div className="flex flex-col items-center text-center my-auto py-1">
+        {/* Pulsing Seductive Neon Lock Ring */}
+        <div className="relative mb-2.5">
+          {/* Ambient intense hot glow */}
+          <div className="absolute -inset-3 rounded-full bg-gradient-to-tr from-rose-600 via-pink-600 to-amber-400 opacity-75 blur-lg animate-pulse" />
           
-          <div className="relative w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-zinc-950/90 border-2 border-pink-500/80 backdrop-blur-xl flex items-center justify-center shadow-2xl shadow-pink-500/40">
-            <Lock className="w-7 h-7 sm:w-8 sm:h-8 text-pink-400" />
+          <div className="relative w-13 h-13 sm:w-15 sm:h-15 rounded-full bg-zinc-950/90 border-2 border-pink-400/90 backdrop-blur-xl flex items-center justify-center shadow-2xl shadow-pink-500/60 group-hover:scale-110 transition-transform">
+            <Lock className="w-6 h-6 sm:w-7 sm:h-7 text-pink-300 animate-bounce" style={{ animationDuration: '2.5s' }} />
           </div>
 
           {/* Sparkle badge */}
-          <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-amber-400 text-amber-950 font-black text-[11px] shadow-md animate-bounce" style={{ animationDuration: '3s' }}>
-            ✦
+          <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-r from-amber-400 to-yellow-300 text-purple-950 font-black text-[11px] shadow-lg">
+            🔥
           </span>
         </div>
 
-        {/* Title / Description */}
-        <h4 className="font-display font-black text-sm sm:text-base text-white line-clamp-1 max-w-[260px] drop-shadow-md">
+        {/* Title */}
+        <h4 className="font-display font-black text-sm sm:text-base text-white line-clamp-1 max-w-[270px] drop-shadow-lg tracking-tight">
           {item.title}
         </h4>
 
-        <p className="text-xs text-purple-200/90 mt-1 max-w-[240px] font-medium leading-tight">
+        <p className="text-[11px] sm:text-xs text-pink-200/90 mt-0.5 max-w-[250px] font-semibold leading-tight drop-shadow-sm">
           {getSubtitle()}
         </p>
 
-        {/* Glowing Price Tag */}
-        <div className="mt-2.5 inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-amber-500/20 border border-amber-400/50 text-amber-300 text-sm font-black animate-badge-glow">
-          <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-          <span>{formatINR(item.price)}</span>
+        {/* Glowing Price Tag with Seductive Strikethrough & 85% OFF */}
+        <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gradient-to-r from-amber-500/25 via-pink-500/25 to-purple-500/25 border border-amber-400/60 shadow-lg shadow-amber-500/20">
+          <span className="text-[11px] text-pink-300/80 line-through font-semibold">
+            ₹{originalPrice}
+          </span>
+          <span className="text-base sm:text-lg font-black text-yellow-300 font-display flex items-center gap-1">
+            <Zap className="w-3.5 h-3.5 text-yellow-300 fill-yellow-400 animate-pulse" />
+            {formatINR(item.price)}
+          </span>
+          <span className="text-[9px] font-black uppercase bg-gradient-to-r from-rose-600 to-pink-600 text-white px-1.5 py-0.5 rounded shadow-xs">
+            85% OFF
+          </span>
         </div>
       </div>
 
       {/* Bottom CTA Button */}
-      <div className="w-full flex flex-col items-center gap-1.5 pb-1">
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onUnlock();
-          }}
-          className={`w-full max-w-[280px] glow-pink-btn animate-btn-breathe py-3 px-4 rounded-2xl text-xs sm:text-sm font-black text-white flex items-center justify-center gap-2 shadow-xl shadow-pink-600/35 active:scale-95 transition-transform cursor-pointer border border-pink-300/40 ${
-            variant === 'detail' ? 'sm:py-3.5 sm:text-base' : ''
-          }`}
-        >
-          <Lock className="w-4 h-4 text-pink-200" />
-          <span className="truncate tracking-wide">{getCtaText()}</span>
-        </button>
+      <div className="w-full flex flex-col items-center gap-1.5 pb-0.5">
+        <div className="w-full max-w-[290px] flex items-center gap-1.5">
+          {onPeek && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onPeek();
+              }}
+              className="py-2.5 px-3 rounded-2xl text-[11px] font-black text-rose-200 bg-white/10 hover:bg-white/20 border border-pink-400/50 backdrop-blur-md flex items-center justify-center gap-1 transition-all cursor-pointer shrink-0 active:scale-95 shadow-md"
+              title="1 सेकंड की झलक देखें"
+            >
+              <Eye className="w-3.5 h-3.5 text-yellow-300" />
+              <span>झलक देखें</span>
+            </button>
+          )}
 
-        <span className="text-[10px] text-purple-200/60 font-semibold flex items-center gap-1">
-          <Zap className="w-2.5 h-2.5 text-amber-400 fill-amber-400" />
-          Instant UPI Unlock • One-time payment
-        </span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onUnlock();
+            }}
+            className={`flex-1 hot-vip-btn py-3 sm:py-3.5 px-3 rounded-2xl text-xs sm:text-sm font-black text-white flex items-center justify-center gap-1.5 shadow-2xl shadow-rose-600/50 active:scale-95 transition-all cursor-pointer border border-white/40 ${
+              variant === 'detail' ? 'sm:py-4 sm:text-base' : ''
+            }`}
+          >
+            <Lock className="w-4 h-4 text-yellow-200 shrink-0" />
+            <span className="truncate tracking-wide uppercase font-display font-black">
+              ⚡ अनलॉक • {formatINR(item.price)}
+            </span>
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 text-[10px] text-pink-200/80 font-bold">
+          <span className="flex items-center gap-0.5">
+            <Zap className="w-3 h-3 text-amber-400 fill-amber-400" /> तुरंत 0-सेकंड UPI अनलॉक
+          </span>
+          <span>•</span>
+          <span className="flex items-center gap-0.5 text-emerald-300">
+            <ShieldCheck className="w-3 h-3 text-emerald-400" /> 100% गोपनीय
+          </span>
+        </div>
       </div>
     </div>
   );
 };
+

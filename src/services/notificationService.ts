@@ -14,6 +14,7 @@ import {
 } from 'firebase/firestore';
 import { firestore } from './firebase';
 import { MediaItem, SiteSettings, NotificationToken, SentNotificationLog } from '../types';
+import { isCloudQuotaExhausted } from '../utils/api';
 import firebaseConfigData from '../../firebase-applet-config.json';
 
 // Local storage keys
@@ -229,6 +230,7 @@ export async function saveTokenToFirestore(token: string): Promise<void> {
  * Get Total Active Subscriber Count efficiently without downloading all token documents
  */
 export async function getActiveSubscribersCount(): Promise<number> {
+  if (isCloudQuotaExhausted()) return 0;
   try {
     const tokensRef = collection(firestore, 'notificationTokens');
     const q = query(tokensRef, where('enabled', '==', true));
@@ -237,6 +239,7 @@ export async function getActiveSubscribersCount(): Promise<number> {
   } catch (err) {
     console.warn('[FCM] getCountFromServer error, falling back:', err);
     try {
+      if (isCloudQuotaExhausted()) return 0;
       const tokensRef = collection(firestore, 'notificationTokens');
       const snap = await getDocs(tokensRef);
       return snap.size;
@@ -250,6 +253,7 @@ export async function getActiveSubscribersCount(): Promise<number> {
  * Fetch all active tokens for dispatch
  */
 export async function getAllActiveTokens(): Promise<string[]> {
+  if (isCloudQuotaExhausted()) return [];
   try {
     const tokensRef = collection(firestore, 'notificationTokens');
     const q = query(tokensRef, where('enabled', '==', true));
@@ -272,6 +276,7 @@ export async function getAllActiveTokens(): Promise<string[]> {
  * Invalidate or remove dead FCM token
  */
 export async function markTokenInactive(token: string): Promise<void> {
+  if (isCloudQuotaExhausted()) return;
   try {
     const docId = getDocIdFromToken(token);
     const docRef = doc(firestore, 'notificationTokens', docId);
@@ -285,6 +290,7 @@ export async function markTokenInactive(token: string): Promise<void> {
  * Check if a notification has already been sent for this post (Duplicate Prevention)
  */
 export async function checkNotificationAlreadySent(postId: string, type = 'new_post'): Promise<boolean> {
+  if (isCloudQuotaExhausted()) return false;
   try {
     const logId = `${postId}_${type}`;
     const logRef = doc(firestore, 'sentNotifications', logId);

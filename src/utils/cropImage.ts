@@ -58,9 +58,9 @@ export async function getCroppedImg(
   pixelCrop: Area,
   rotation = 0,
   flip = { horizontal: false, vertical: false },
-  maxOutputWidth = 1080,
-  maxOutputHeight = 1080,
-  quality = 0.82
+  maxOutputWidth = 900,
+  maxOutputHeight = 900,
+  quality = 0.76
 ): Promise<string> {
   const image = await createImage(imageSrc);
   const canvas = document.createElement('canvas');

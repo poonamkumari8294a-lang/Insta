@@ -23,13 +23,26 @@ export function readFileAsDataURL(file: File): Promise<string> {
 }
 
 /**
- * Compresses/resizes an image file using an offscreen canvas to keep payload snappy
+ * Calculates byte size of a base64 string or JSON object
+ */
+export function getApproximateByteSize(data: any): number {
+  try {
+    const str = typeof data === 'string' ? data : JSON.stringify(data);
+    return new Blob([str]).size;
+  } catch (_) {
+    return 0;
+  }
+}
+
+/**
+ * Compresses/resizes an image file using an offscreen canvas to keep payload snappy (< 40KB)
+ * Optimized specifically for instant Cloud Firestore synchronization across all mobile devices
  */
 export async function compressImageFile(
   file: File,
-  maxWidth = 1080,
-  maxHeight = 1080,
-  quality = 0.82
+  maxWidth = 900,
+  maxHeight = 900,
+  quality = 0.74
 ): Promise<string> {
   // If it's a GIF or SVG, do not re-encode through canvas to preserve animation/vector
   if (file.type === 'image/gif' || file.type === 'image/svg+xml') {
@@ -64,7 +77,7 @@ export async function compressImageFile(
       ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(img, 0, 0, width, height);
 
-      // Fast WebP / JPEG compression to keep image snappy under 30-60KB
+      // Fast WebP / JPEG compression to keep image ultra-lightweight (~25KB - 40KB)
       let compressed = '';
       try {
         compressed = canvas.toDataURL('image/webp', quality);
@@ -121,14 +134,25 @@ export function processVideoFile(file: File): Promise<VideoMetadata> {
       clearTimeout(timer);
       try {
         const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth || 720;
-        canvas.height = video.videoHeight || 1280;
+        const targetWidth = Math.min(video.videoWidth || 720, 640);
+        const ratio = targetWidth / (video.videoWidth || 720);
+        const targetHeight = Math.round((video.videoHeight || 1280) * ratio);
+
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
         const ctx = canvas.getContext('2d');
         let thumbUrl = '';
 
         if (ctx && canvas.width > 0 && canvas.height > 0) {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          thumbUrl = canvas.toDataURL('image/jpeg', 0.85);
+          try {
+            thumbUrl = canvas.toDataURL('image/webp', 0.72);
+            if (!thumbUrl.startsWith('data:image/webp')) {
+              thumbUrl = canvas.toDataURL('image/jpeg', 0.75);
+            }
+          } catch {
+            thumbUrl = canvas.toDataURL('image/jpeg', 0.75);
+          }
         }
 
         const durSec = Math.round(video.duration || 0);

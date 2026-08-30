@@ -1,3 +1,5 @@
+import { getAdaptiveImageParams } from './networkSpeedOptimizer';
+
 /**
  * Extreme Mobile-First Image Optimization Helper
  * 
@@ -8,13 +10,18 @@
 /**
  * Transforms image URLs to requested mobile dimensions and WebP/AVIF format
  * Defaults to 480px width for crisp mobile card display with tiny payload (<35KB).
+ * Automatically adapts on 2G/3G slow networks.
  */
 export function getOptimizedImageUrl(
   url: string | undefined | null,
-  width = 480,
-  quality = 75
+  width?: number,
+  quality?: number
 ): string {
   if (!url) return '';
+
+  const adaptive = getAdaptiveImageParams(width || 480, quality || 75);
+  const targetWidth = width ?? adaptive.width;
+  const targetQuality = quality ?? adaptive.quality;
 
   // Base64 Data URLs and local blobs cannot be CDN-transformed
   if (url.startsWith('data:') || url.startsWith('blob:')) {
@@ -25,29 +32,29 @@ export function getOptimizedImageUrl(
   if (url.includes('images.unsplash.com')) {
     try {
       const urlObj = new URL(url);
-      urlObj.searchParams.set('w', width.toString());
-      urlObj.searchParams.set('q', quality.toString());
+      urlObj.searchParams.set('w', targetWidth.toString());
+      urlObj.searchParams.set('q', targetQuality.toString());
       urlObj.searchParams.set('auto', 'format');
       urlObj.searchParams.set('fm', 'webp');
       urlObj.searchParams.set('fit', 'max');
       return urlObj.toString();
     } catch {
       const cleanUrl = url.split('?')[0];
-      return `${cleanUrl}?w=${width}&q=${quality}&auto=format&fm=webp&fit=max`;
+      return `${cleanUrl}?w=${targetWidth}&q=${targetQuality}&auto=format&fm=webp&fit=max`;
     }
   }
 
   // 2. Cloudinary Dynamic CDN (c_limit preserves aspect ratio without cropping)
   if (url.includes('res.cloudinary.com')) {
-    return url.replace('/upload/', `/upload/w_${width},q_${quality},f_auto,c_limit/`);
+    return url.replace('/upload/', `/upload/w_${targetWidth},q_${targetQuality},f_auto,c_limit/`);
   }
 
   // 3. Imgix / Fastly CDNs
   if (url.includes('imgix.net')) {
     try {
       const urlObj = new URL(url);
-      urlObj.searchParams.set('w', width.toString());
-      urlObj.searchParams.set('q', quality.toString());
+      urlObj.searchParams.set('w', targetWidth.toString());
+      urlObj.searchParams.set('q', targetQuality.toString());
       urlObj.searchParams.set('auto', 'format,compress');
       urlObj.searchParams.set('fit', 'max');
       return urlObj.toString();
@@ -58,7 +65,7 @@ export function getOptimizedImageUrl(
 
   // 4. Firebase Storage / Google User Content (w=width, preserve aspect ratio without -c crop)
   if (url.includes('googleusercontent.com')) {
-    return `${url.split('=')[0]}=w${width}-rw`;
+    return `${url.split('=')[0]}=w${targetWidth}-rw`;
   }
 
   return url;

@@ -21,15 +21,15 @@ export const PricingPacks: React.FC<PricingPacksProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
         <div className="text-center max-w-2xl mx-auto mb-10">
-          <span className="px-3.5 py-1.5 rounded-full text-xs font-extrabold bg-pink-100/80 border border-pink-200 text-pink-700 uppercase tracking-wider inline-flex items-center gap-1.5 mb-3 shadow-sm">
-            <Star className="w-3.5 h-3.5 text-pink-600 fill-pink-600" />
-            VIP Bundle Deals
+          <span className="px-4 py-1.5 rounded-full text-xs font-black bg-gradient-to-r from-rose-600 to-amber-500 text-white uppercase tracking-wider inline-flex items-center gap-1.5 mb-3 shadow-lg shadow-rose-600/30 animate-pulse">
+            <Star className="w-3.5 h-3.5 text-yellow-200 fill-yellow-200" />
+            🔥 VIP ऑल-एक्सेस मेगा बंडल डील्स
           </span>
           <h2 className="font-display font-black text-2xl sm:text-3xl lg:text-4xl text-purple-950 tracking-tight">
-            Exclusive Premium Combos
+            Ruma के <span className="hot-neon-text">सबसे बोल्ड और प्राइवेट</span> VIP पैक्स
           </h2>
-          <p className="text-sm sm:text-base text-purple-900/70 mt-2 font-medium">
-            Get multi-photo sets and uncut master videos bundled together at heavy discounts.
+          <p className="text-sm sm:text-base text-purple-900/70 mt-2 font-semibold">
+            पूरे अनकट मास्टर वीडियो और अनसेंसर्ड 4K HD फोटो सेट्स को 85% भारी डिस्काउंट पर 1-क्लिक में तुरंत अनलॉक करें।
           </p>
         </div>
 
@@ -44,12 +44,12 @@ export const PricingPacks: React.FC<PricingPacksProps> = ({
               >
                 {/* Top ribbon */}
                 <div className="flex items-center justify-between mb-4">
-                  <span className="px-3 py-1 rounded-full text-[11px] font-black bg-gradient-to-r from-pink-500 to-purple-600 text-white uppercase tracking-wider shadow-md shadow-pink-500/20">
-                    VIP Special
+                  <span className="px-3 py-1 rounded-full text-[11px] font-black bg-gradient-to-r from-rose-600 to-amber-500 text-white uppercase tracking-wider shadow-md shadow-rose-600/30 flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5 text-yellow-200" />
+                    <span>🔥 18+ VIP ऑल-एक्सेस</span>
                   </span>
-                  <span className="text-xs text-pink-700 font-bold flex items-center gap-1">
-                    <Sparkles className="w-3.5 h-3.5 text-pink-600" />
-                    Instant UPI Unlock
+                  <span className="text-xs text-rose-600 font-black flex items-center gap-1">
+                    ⚡ 0-Sec UPI तुरंत अनलॉक
                   </span>
                 </div>
 
@@ -119,17 +119,17 @@ export const PricingPacks: React.FC<PricingPacksProps> = ({
                   {isUnlocked ? (
                     <button
                       onClick={() => onOpen(pack)}
-                      className="py-2.5 px-5 rounded-2xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition-all shadow-md cursor-pointer"
+                      className="py-2.5 px-5 rounded-2xl text-xs font-black text-white bg-emerald-600 hover:bg-emerald-500 transition-all shadow-md cursor-pointer flex items-center gap-1.5"
                     >
-                      View Pack 🎉
+                      <span>पैक देखें 🎉</span>
                     </button>
                   ) : (
                     <button
                       onClick={() => onBuy(pack)}
-                      className="glow-pink-btn py-3 px-5 rounded-2xl text-xs font-black text-white flex items-center gap-1.5 shadow-lg shadow-pink-500/25 cursor-pointer hover:scale-105 active:scale-95 transition-all"
+                      className="hot-vip-btn py-3 px-5 rounded-2xl text-xs font-black text-white flex items-center gap-1.5 shadow-xl shadow-rose-600/40 cursor-pointer hover:scale-105 active:scale-95 transition-all uppercase tracking-wide font-display border border-white/40"
                     >
-                      <Lock className="w-3.5 h-3.5" />
-                      <span>Unlock VIP Pack</span>
+                      <Lock className="w-3.5 h-3.5 text-yellow-300" />
+                      <span>⚡ 1-क्लिक VIP अनलॉक</span>
                     </button>
                   )}
                 </div>

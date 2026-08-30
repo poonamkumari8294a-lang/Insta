@@ -23,6 +23,7 @@ interface ContentCardProps {
   isUnlocked: boolean;
   onOpen: (item: MediaItem) => void;
   onBuy: (item: MediaItem) => void;
+  onPeek?: (item: MediaItem) => void;
   onOpenShare?: (item: MediaItem) => void;
   priority?: boolean;
 }
@@ -32,6 +33,7 @@ const ContentCardComponent: React.FC<ContentCardProps> = ({
   isUnlocked,
   onOpen,
   onBuy,
+  onPeek,
   onOpenShare,
   priority = false,
 }) => {
@@ -155,6 +157,7 @@ const ContentCardComponent: React.FC<ContentCardProps> = ({
           <LockedPhotoOverlay
             item={item}
             onUnlock={() => onBuy(item)}
+            onPeek={onPeek ? () => onPeek(item) : undefined}
             variant="card"
           />
         ) : (
@@ -223,10 +226,10 @@ const ContentCardComponent: React.FC<ContentCardProps> = ({
             <button
               id={`btn-unlock-${item.id}`}
               onClick={() => onBuy(item)}
-              className="flex-1 glow-pink-btn py-2.5 px-3 rounded-2xl text-xs sm:text-sm font-black text-white flex items-center justify-center gap-1.5 shadow-md shadow-pink-500/20 cursor-pointer"
+              className="flex-1 hot-vip-btn py-2.5 sm:py-3 px-3 rounded-2xl text-xs sm:text-sm font-black text-white flex items-center justify-center gap-1.5 shadow-lg shadow-rose-600/30 cursor-pointer uppercase tracking-wider font-display"
             >
-              <Lock className="w-3.5 h-3.5" />
-              <span className="truncate">Unlock • {formatINR(item.price)}</span>
+              <Lock className="w-3.5 h-3.5 text-yellow-300" />
+              <span className="truncate">⚡ अनलॉक • {formatINR(item.price)}</span>
             </button>
           )}
 

@@ -5,7 +5,8 @@ import {
   fetchContentList,
   getCachedSiteSettingsSync,
   getCachedContentListSync,
-  getStoredTokens
+  getStoredTokens,
+  isCloudQuotaExhausted
 } from './utils/api';
 import { Header } from './components/Header';
 import { Footer } from './components/Footer';
@@ -16,6 +17,8 @@ import { PricingPacks } from './components/PricingPacks';
 import { HowItWorks } from './components/HowItWorks';
 import { NotificationPermissionBanner } from './components/NotificationPermissionBanner';
 import { ForegroundNotificationToast, ForegroundNotificationData } from './components/ForegroundNotificationToast';
+import { LiveUnlockActivityToast } from './components/LiveUnlockActivityToast';
+import { NetworkSpeedBanner } from './components/NetworkSpeedBanner';
 import { setupForegroundMessageListener } from './services/notificationService';
 import { Sparkles, RefreshCw } from 'lucide-react';
 
@@ -153,13 +156,13 @@ export default function App() {
       }
     };
 
-    // Periodic silent refresh (throttled to 90s to save 4G battery and mobile data)
+    // Periodic silent refresh (throttled to 5 minutes to prevent Firestore quota exhaustion)
     const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'visible' && !isCloudQuotaExhausted()) {
         lastRefreshTime = Date.now();
-        loadData(true);
+        loadData(false);
       }
-    }, 90000);
+    }, 300000);
 
     // Listen for hash & URL changes (e.g. typing #admin in URL bar)
     const handleUrlChange = () => {
@@ -277,6 +280,9 @@ export default function App() {
       <div className="fixed top-[40%] right-[10%] w-[450px] h-[450px] bg-blue-300/20 rounded-full blur-[120px] pointer-events-none -z-10" />
       <div className="fixed top-[65%] left-[5%] w-[400px] h-[400px] bg-pink-300/20 rounded-full blur-[130px] pointer-events-none -z-10" />
 
+      {/* Adaptive 2G/3G Low-Speed & Offline Speed Banner */}
+      <NetworkSpeedBanner />
+
       {/* Main Sticky Header */}
       {settings && (
         <Header
@@ -374,6 +380,14 @@ export default function App() {
           </Suspense>
         )}
       </main>
+
+      {/* Live Social Proof Real-Time Unlock Activity Toast */}
+      {content.length > 0 && currentRoute !== 'admin' && !purchasingItem && (
+        <LiveUnlockActivityToast
+          items={content}
+          onItemClick={(item) => handleBuyMedia(item)}
+        />
+      )}
 
       {/* Footer */}
       {settings && (

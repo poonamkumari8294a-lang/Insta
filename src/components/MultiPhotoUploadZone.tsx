@@ -59,7 +59,7 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
         if (!file.type.startsWith('image/')) continue;
 
         setProcessingProgress(`फोटो प्रोसेस हो रही है (${i + 1}/${total})...`);
-        const compressed = await compressImageFile(file, 1200, 1200, 0.82);
+        const compressed = await compressImageFile(file, 850, 850, 0.74);
         newPhotoUrls.push(compressed);
       }
 

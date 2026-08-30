@@ -70,7 +70,9 @@ import {
   Bell,
   BellRing,
   Send,
-  Radio
+  Radio,
+  User,
+  Phone
 } from 'lucide-react';
 
 interface AdminPageProps {
@@ -1360,6 +1362,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                 <thead>
                   <tr className="border-b border-purple-100 bg-white/60 text-purple-900/60 uppercase text-[10px] font-black">
                     <th className="py-3 px-4">Order ID</th>
+                    <th className="py-3 px-4">👤 Customer (Lead)</th>
                     <th className="py-3 px-4">Content</th>
                     <th className="py-3 px-4">Amount</th>
                     <th className="py-3 px-4">Status</th>
@@ -1372,7 +1375,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                 <tbody className="divide-y divide-purple-100">
                   {filteredOrders.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="text-center py-8 text-purple-900/40 font-medium">
+                      <td colSpan={9} className="text-center py-8 text-purple-900/40 font-medium">
                         No orders matching filters.
                       </td>
                     </tr>
@@ -1389,7 +1392,31 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
                         <td className="py-3.5 px-4 font-mono font-bold text-pink-700">
                           {o.orderId}
                         </td>
-                        <td className="py-3.5 px-4 font-bold text-purple-950 max-w-[180px] truncate">
+                        <td className="py-3.5 px-4">
+                          {o.customerName || o.customerPhone ? (
+                            <div className="space-y-0.5">
+                              <div className="font-bold text-purple-950 flex items-center gap-1 text-[11px]">
+                                <User className="w-3 h-3 text-pink-600" />
+                                <span>{o.customerName || 'VIP Buyer'}</span>
+                              </div>
+                              {o.customerPhone && (
+                                <a
+                                  href={`https://wa.me/91${o.customerPhone.replace(/[^0-9]/g, '')}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[11px] text-emerald-700 font-mono font-bold hover:underline flex items-center gap-1 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 w-fit"
+                                  title="WhatsApp पर चैट करें"
+                                >
+                                  <Phone className="w-2.5 h-2.5 text-emerald-600" />
+                                  <span>+91 {o.customerPhone}</span>
+                                </a>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-purple-900/40 text-[11px]">Direct Guest</span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 font-bold text-purple-950 max-w-[160px] truncate">
                           {o.contentTitle}
                         </td>
                         <td className="py-3.5 px-4 font-black text-purple-950">
