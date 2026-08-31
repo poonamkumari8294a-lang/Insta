@@ -6,6 +6,7 @@ import {
   getCachedSiteSettingsSync,
   getCachedContentListSync,
   getStoredTokens,
+  hasLocalSettingsCache,
   isCloudQuotaExhausted
 } from './utils/api';
 import { Header } from './components/Header';
@@ -77,10 +78,11 @@ export default function App() {
   const [currentRoute, setCurrentRoute] = useState<string>(initialUrlRoute.route);
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(initialUrlRoute.mediaId || null);
 
-  // Instant SWR Hydration (0ms First Contentful Paint)
+  const initialHasCache = hasLocalSettingsCache();
+  // Instant SWR Hydration (0ms First Contentful Paint if cached, clean loader if new device/incognito)
   const [settings, setSettings] = useState<SiteSettings>(() => getCachedSiteSettingsSync());
   const [content, setContent] = useState<MediaItem[]>(() => getCachedContentListSync());
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<boolean>(!initialHasCache);
   const [error, setError] = useState<string | null>(null);
 
   // Unlocked Access Tokens state
@@ -125,27 +127,27 @@ export default function App() {
 
   // Initial Data Load & Background Refresh
   const loadData = async (silent = false) => {
-    if (!silent && !settings) setLoading(true);
+    if (!silent) setLoading(true);
     setError(null);
     try {
       refreshTokens();
       const [settingsData, contentData] = await Promise.all([
-        fetchSiteSettings(silent),
-        fetchContentList(silent)
+        fetchSiteSettings(true),
+        fetchContentList(true)
       ]);
       setSettings(settingsData);
       setContent(contentData);
     } catch (err: any) {
       console.warn('App sync error:', err);
-      if (!silent && !settings) setError(err.message || 'Failed to connect to backend service');
+      if (!silent) setError(err.message || 'Failed to connect to backend service');
     } finally {
-      if (!silent) setLoading(false);
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    // Initial fetch in background
-    loadData(true);
+    // Initial fetch from live Firestore
+    loadData(!initialHasCache ? false : true);
 
     // Smart visibility listener: Refresh only when user returns to app and screen is active
     let lastRefreshTime = Date.now();
@@ -160,7 +162,7 @@ export default function App() {
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible' && !isCloudQuotaExhausted()) {
         lastRefreshTime = Date.now();
-        loadData(false);
+        loadData(true);
       }
     }, 300000);
 
@@ -268,7 +270,7 @@ export default function App() {
   }
 
   const activeContentItem = selectedMediaId
-    ? content.find((c) => c.id === selectedMediaId) || content[0]
+    ? content.find((c) => c.id === selectedMediaId) || null
     : null;
 
   return (

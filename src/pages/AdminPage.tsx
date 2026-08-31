@@ -11,6 +11,7 @@ import {
   createAdminContent,
   updateAdminContent,
   deleteAdminContent,
+  purgeDemoContent,
   updateAdminSettings,
   verifyAdminOrder,
   adminApproveOrder,
@@ -324,6 +325,22 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
       await loadAdminData();
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handlePurgeAllDemoData = async () => {
+    if (!window.confirm('क्या आप सभी डेमो पोस्ट्स हटाना चाहते हैं ताकि वेबसाइट पर सिर्फ आपके द्वारा अपलोड किए गए असली फोटो दिखें?')) {
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await purgeDemoContent();
+      showToast(`✨ ${res.message}`);
+      await loadAdminData();
+    } catch (err: any) {
+      showToast(err.message || 'डेमो हटाने में विफल', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1003,7 +1020,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
       {activeTab === 'content' && (
         <div className="space-y-6 animate-in fade-in duration-200">
           
-          {/* Header & New Content Button */}
+          {/* Header & Action Buttons */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h2 className="font-display font-black text-xl text-purple-950">Content Management & Library</h2>
@@ -1012,32 +1029,44 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
               </p>
             </div>
 
-            <button
-              onClick={() => {
-                setEditingItem(null);
-                setContentFormData({
-                  title: '',
-                  description: '',
-                  type: 'photo',
-                  access: 'premium',
-                  price: 99,
-                  thumbnailUrl: '',
-                  mediaUrl: '',
-                  previewUrl: '',
-                  galleryUrls: [],
-                  photoCount: 1,
-                  tags: ['Exclusive', 'VIP'],
-                  duration: '1:30',
-                  published: true,
-                  featured: false
-                });
-                setShowContentModal(true);
-              }}
-              className="glow-pink-btn px-5 py-2.5 rounded-2xl text-xs font-black text-white flex items-center gap-1.5 shadow-md shadow-pink-500/20 active:scale-95 transition-transform"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add New Content Item</span>
-            </button>
+            <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+              <button
+                type="button"
+                onClick={handlePurgeAllDemoData}
+                className="px-4 py-2.5 rounded-2xl text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                title="सभी डिफ़ॉल्ट डेमो पोस्ट्स हटाएं"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                <span>डेमो पोस्ट हटाएं (Clear Demo Data)</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setEditingItem(null);
+                  setContentFormData({
+                    title: '',
+                    description: '',
+                    type: 'photo',
+                    access: 'premium',
+                    price: 99,
+                    thumbnailUrl: '',
+                    mediaUrl: '',
+                    previewUrl: '',
+                    galleryUrls: [],
+                    photoCount: 1,
+                    tags: ['Exclusive', 'VIP'],
+                    duration: '1:30',
+                    published: true,
+                    featured: false
+                  });
+                  setShowContentModal(true);
+                }}
+                className="glow-pink-btn px-5 py-2.5 rounded-2xl text-xs font-black text-white flex items-center gap-1.5 shadow-md shadow-pink-500/20 active:scale-95 transition-transform cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add New Content Item</span>
+              </button>
+            </div>
           </div>
 
           {/* Search, Filter & Sort Controls Toolbar */}

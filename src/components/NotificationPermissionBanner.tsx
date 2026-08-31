@@ -43,17 +43,24 @@ export const NotificationPermissionBanner: React.FC<NotificationPermissionBanner
       if (res.success && res.token) {
         setStatus('success');
         if (onSubscribed) onSubscribed(res.token);
+        // Quick auto-dismiss so user isn't stuck waiting
         setTimeout(() => {
           setIsVisible(false);
-        }, 2200);
+        }, 900);
       } else if (getPushPermissionState() === 'denied') {
         setStatus('denied');
         setTimeout(() => {
           setIsVisible(false);
-        }, 3000);
+        }, 1200);
+      } else {
+        // Dismiss quickly if skipped or cancelled
+        setIsVisible(false);
       }
     } catch {
       setStatus('denied');
+      setTimeout(() => {
+        setIsVisible(false);
+      }, 1200);
     } finally {
       setLoading(false);
     }

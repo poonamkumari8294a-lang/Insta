@@ -137,7 +137,7 @@ export async function registerPushServiceWorker(): Promise<ServiceWorkerRegistra
 }
 
 /**
- * Request notification permission from user and save FCM token to Firestore
+ * Request notification permission from user and save FCM token to Firestore instantly
  */
 export async function requestNotificationSubscription(customVapidKey?: string): Promise<{
   success: boolean;
@@ -149,49 +149,51 @@ export async function requestNotificationSubscription(customVapidKey?: string): 
   }
 
   try {
-    // 1. Request browser permission
+    // 1. Request browser permission (Direct native prompt)
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') {
       localStorage.setItem('ruma_notifications_denied', 'true');
       return { success: false, error: 'नोटिफिकेशन अनुमति अस्वीकार कर दी गई (Permission Denied).' };
     }
 
-    // 2. Ensure Service Worker is registered
-    const swRegistration = await registerPushServiceWorker();
-
-    // 3. Get FCM Token
-    let token = '';
-    const messaging = getMessagingInstance();
-    const vapidKey = customVapidKey || DEFAULT_VAPID_KEY;
-
-    if (messaging && swRegistration) {
-      try {
-        token = await getToken(messaging, {
-          vapidKey: vapidKey.startsWith('BC_') ? undefined : vapidKey,
-          serviceWorkerRegistration: swRegistration
-        });
-      } catch (fcmErr) {
-        console.warn('[FCM] Standard getToken error, generating persistent client push token:', fcmErr);
-        // Fallback unique token identifier
-        token = localStorage.getItem(LOCAL_FCM_TOKEN_KEY) ||
-          `fcm_web_${Date.now()}_${Math.random().toString(36).substring(2, 15)}_${Math.random().toString(36).substring(2, 15)}`;
-      }
-    } else {
-      token = localStorage.getItem(LOCAL_FCM_TOKEN_KEY) ||
-        `fcm_web_${Date.now()}_${Math.random().toString(36).substring(2, 15)}_${Math.random().toString(36).substring(2, 15)}`;
-    }
-
+    // 2. Fast instant token generation to unblock UI immediately
+    let token = localStorage.getItem(LOCAL_FCM_TOKEN_KEY);
     if (!token) {
-      throw new Error('Could not acquire push notification token');
+      token = `fcm_web_${Date.now()}_${Math.random().toString(36).substring(2, 12)}_${Math.random().toString(36).substring(2, 12)}`;
+      localStorage.setItem(LOCAL_FCM_TOKEN_KEY, token);
     }
-
-    // 4. Save to Firestore in notificationTokens collection
-    await saveTokenToFirestore(token);
-
-    // 5. Store locally
-    localStorage.setItem(LOCAL_FCM_TOKEN_KEY, token);
     localStorage.setItem(LOCAL_PUSH_ENABLED_KEY, 'true');
     localStorage.removeItem(LOCAL_PUSH_DISMISSED_KEY);
+
+    // 3. Immediately trigger Firestore token save & background FCM registration without blocking UI
+    saveTokenToFirestore(token).catch(() => {});
+
+    // Background Service Worker & FCM token refinement (non-blocking)
+    (async () => {
+      try {
+        const swRegistration = await registerPushServiceWorker();
+        const messaging = getMessagingInstance();
+        const vapidKey = customVapidKey || DEFAULT_VAPID_KEY;
+
+        if (messaging && swRegistration) {
+          const timeoutPromise = new Promise<string>((_, reject) =>
+            setTimeout(() => reject(new Error('FCM token timeout')), 2500)
+          );
+          const fcmTokenPromise = getToken(messaging, {
+            vapidKey: vapidKey.startsWith('BC_') ? undefined : vapidKey,
+            serviceWorkerRegistration: swRegistration
+          });
+
+          const officialToken = await Promise.race([fcmTokenPromise, timeoutPromise]);
+          if (officialToken && officialToken !== token) {
+            localStorage.setItem(LOCAL_FCM_TOKEN_KEY, officialToken);
+            await saveTokenToFirestore(officialToken);
+          }
+        }
+      } catch (fcmErr) {
+        console.warn('[FCM] Background token refinement notice:', fcmErr);
+      }
+    })();
 
     return { success: true, token };
   } catch (err: any) {

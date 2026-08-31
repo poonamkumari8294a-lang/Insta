@@ -258,15 +258,24 @@ async function ensureFirestoreSeeded(): Promise<void> {
 const SETTINGS_CACHE_KEY = 'ruma_cached_settings_v2';
 const CONTENT_CACHE_KEY = 'ruma_cached_content_v2';
 
+export function hasLocalSettingsCache(): boolean {
+  try {
+    return Boolean(localStorage.getItem(SETTINGS_CACHE_KEY));
+  } catch (_) {
+    return false;
+  }
+}
+
 let memorySiteSettings: SiteSettings | null = null;
+let memorySettingsTimestamp = 0;
 let memoryContentList: MediaItem[] | null = null;
 let memoryContentTimestamp = 0;
 let activeContentPromise: Promise<MediaItem[]> | null = null;
 let activeSettingsPromise: Promise<SiteSettings> | null = null;
-const CACHE_TTL_MS = 60000; // 1 minute fresh cache
+const CACHE_TTL_MS = 10000; // 10s fresh cache for instant responsiveness
 
 /**
- * Synchronously retrieves cached settings from localStorage for 0ms initial render
+ * Synchronously retrieves cached settings from localStorage for fast initial render
  */
 export function getCachedSiteSettingsSync(): SiteSettings {
   if (memorySiteSettings) return memorySiteSettings;
@@ -282,7 +291,7 @@ export function getCachedSiteSettingsSync(): SiteSettings {
 }
 
 /**
- * Synchronously retrieves cached content list from localStorage for 0ms initial render
+ * Synchronously retrieves cached content list from localStorage for fast initial render
  */
 export function getCachedContentListSync(): MediaItem[] {
   if (memoryContentList && memoryContentList.length > 0) return memoryContentList;
@@ -290,7 +299,7 @@ export function getCachedContentListSync(): MediaItem[] {
     const raw = localStorage.getItem(CONTENT_CACHE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as MediaItem[];
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         memoryContentList = parsed;
         return parsed;
       }
@@ -308,7 +317,7 @@ function applyUserAccessTokens(items: MediaItem[]): MediaItem[] {
       ...item,
       mediaUrl: isUnlocked ? item.mediaUrl : (item.previewUrl || item.thumbnailUrl),
       galleryUrls: isUnlocked 
-        ? item.galleryUrls 
+        ? (item.galleryUrls && item.galleryUrls.length > 0 ? item.galleryUrls : (item.mediaUrl ? [item.mediaUrl] : [item.thumbnailUrl]))
         : (item.previewUrl ? [item.previewUrl] : [item.thumbnailUrl])
     };
   });
@@ -318,13 +327,9 @@ function applyUserAccessTokens(items: MediaItem[]): MediaItem[] {
 // 1. Fetch Site Settings (Live Cloud Sync with In-Memory Acceleration & Deduplication)
 // ----------------------------------------------------------------------------
 export async function fetchSiteSettings(forceFresh = false): Promise<SiteSettings> {
-  if (!forceFresh && memorySiteSettings) {
+  const now = Date.now();
+  if (!forceFresh && memorySiteSettings && (now - memorySettingsTimestamp < CACHE_TTL_MS)) {
     return memorySiteSettings;
-  }
-
-  // If quota is genuinely exhausted, return cached settings
-  if (isCloudQuotaExhausted()) {
-    return memorySiteSettings || getCachedSiteSettingsSync();
   }
 
   if (activeSettingsPromise) {
@@ -334,18 +339,34 @@ export async function fetchSiteSettings(forceFresh = false): Promise<SiteSetting
   activeSettingsPromise = (async () => {
     try {
       const settingsRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
-      const snap = await withTimeout(getDoc(settingsRef), 6000);
+      const snap = await withTimeout(getDoc(settingsRef), 7000);
       if (snap.exists()) {
-        const data = snap.data() as SiteSettings;
-        memorySiteSettings = { ...CLIENT_SITE_SETTINGS, ...data };
+        const data = snap.data() as Partial<SiteSettings>;
+        // Prioritize live Firestore data completely
+        const merged: SiteSettings = {
+          ...CLIENT_SITE_SETTINGS,
+          ...data,
+          profilePicUrl: data.profilePicUrl !== undefined ? data.profilePicUrl : CLIENT_SITE_SETTINGS.profilePicUrl,
+          bannerUrl: data.bannerUrl !== undefined ? data.bannerUrl : CLIENT_SITE_SETTINGS.bannerUrl,
+          creatorName: data.creatorName || CLIENT_SITE_SETTINGS.creatorName,
+          upiId: data.upiId || CLIENT_SITE_SETTINGS.upiId,
+          tagline: data.tagline !== undefined ? data.tagline : CLIENT_SITE_SETTINGS.tagline,
+          bio: data.bio !== undefined ? data.bio : CLIENT_SITE_SETTINGS.bio
+        };
+        memorySiteSettings = merged;
+        memorySettingsTimestamp = Date.now();
         try {
-          localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(memorySiteSettings));
+          localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(merged));
         } catch (_) {}
-        return memorySiteSettings;
+        return merged;
       } else {
-        // Seed if missing
-        await ensureFirestoreSeeded();
-        return memorySiteSettings || getCachedSiteSettingsSync();
+        // Document does not exist yet in Firestore - create initial
+        const initial = sanitizeFirestorePayload(CLIENT_SITE_SETTINGS);
+        try {
+          await setDoc(settingsRef, initial);
+        } catch (_) {}
+        memorySiteSettings = initial;
+        return initial;
       }
     } catch (err) {
       handleFirestoreError('fetchSiteSettings', err);
@@ -359,18 +380,12 @@ export async function fetchSiteSettings(forceFresh = false): Promise<SiteSetting
 }
 
 // ----------------------------------------------------------------------------
-// 2. Fetch Content List (Live Cloud Sync with Deduplication & Query Limiting)
+// 2. Fetch Content List (Live Cloud Sync with Robust In-Memory Sorting)
 // ----------------------------------------------------------------------------
 export async function fetchContentList(forceFresh = false): Promise<MediaItem[]> {
   const now = Date.now();
   if (!forceFresh && memoryContentList && (now - memoryContentTimestamp < CACHE_TTL_MS)) {
     return applyUserAccessTokens(memoryContentList);
-  }
-
-  // If quota is genuinely exhausted, return cached content with tokens applied
-  if (isCloudQuotaExhausted()) {
-    const cached = memoryContentList || getCachedContentListSync();
-    return applyUserAccessTokens(cached);
   }
 
   if (activeContentPromise) {
@@ -380,16 +395,8 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
   activeContentPromise = (async () => {
     try {
       const contentRef = collection(firestore, 'content');
-      // Fetch latest 60 items sorted by createdAt desc
-      const contentQuery = query(contentRef, orderBy('createdAt', 'desc'), firestoreLimit(60));
-      const snap = await withTimeout(getDocs(contentQuery), 6500);
-
-      if (snap.empty) {
-        // First run: seed Firestore and return initial list
-        await ensureFirestoreSeeded();
-        const fallback = memoryContentList || getCachedContentListSync();
-        return applyUserAccessTokens(fallback);
-      }
+      // Fetch all docs from live Firestore
+      const snap = await withTimeout(getDocs(contentRef), 7500);
 
       const items: MediaItem[] = [];
 
@@ -400,7 +407,13 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
         }
       });
 
-      items.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      // Sort by creation date (newest first)
+      items.sort((a, b) => {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeB - timeA;
+      });
+
       memoryContentList = items;
       memoryContentTimestamp = Date.now();
 
@@ -422,13 +435,15 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
 }
 
 // ----------------------------------------------------------------------------
-// 3. Fetch Single Content Item
+// 3. Fetch Single Content Item (Guaranteed Live Firestore & Fallback Resolution)
 // ----------------------------------------------------------------------------
 export async function fetchContentDetail(id: string): Promise<MediaItem> {
+  if (!id) throw new Error('Invalid content ID');
+
   if (!isCloudQuotaExhausted()) {
     try {
       const itemRef = doc(firestore, 'content', id);
-      const snap = await withTimeout(getDoc(itemRef), 3000);
+      const snap = await withTimeout(getDoc(itemRef), 4000);
       if (snap.exists()) {
         const item = { ...snap.data(), id: snap.id } as MediaItem;
         const userTokens = getStoredTokens();
@@ -437,7 +452,7 @@ export async function fetchContentDetail(id: string): Promise<MediaItem> {
           ...item,
           mediaUrl: isUnlocked ? item.mediaUrl : (item.previewUrl || item.thumbnailUrl),
           galleryUrls: isUnlocked 
-            ? item.galleryUrls 
+            ? (item.galleryUrls && item.galleryUrls.length > 0 ? item.galleryUrls : (item.mediaUrl ? [item.mediaUrl] : [item.thumbnailUrl]))
             : (item.previewUrl ? [item.previewUrl] : [item.thumbnailUrl])
         };
       }
@@ -448,7 +463,9 @@ export async function fetchContentDetail(id: string): Promise<MediaItem> {
 
   const list = memoryContentList || getCachedContentListSync();
   const fallback = list.find(c => c.id === id) || CLIENT_CONTENT_LIST.find(c => c.id === id);
-  if (!fallback) throw new Error('Content not found');
+  if (!fallback) {
+    throw new Error('Content not found');
+  }
 
   const userTokens = getStoredTokens();
   const isUnlocked = fallback.access === 'free' || Boolean(userTokens[fallback.id]);
@@ -456,8 +473,38 @@ export async function fetchContentDetail(id: string): Promise<MediaItem> {
     ...fallback,
     mediaUrl: isUnlocked ? fallback.mediaUrl : (fallback.previewUrl || fallback.thumbnailUrl),
     galleryUrls: isUnlocked 
-      ? fallback.galleryUrls 
+      ? (fallback.galleryUrls && fallback.galleryUrls.length > 0 ? fallback.galleryUrls : (fallback.mediaUrl ? [fallback.mediaUrl] : [fallback.thumbnailUrl]))
       : (fallback.previewUrl ? [fallback.previewUrl] : [fallback.thumbnailUrl])
+  };
+}
+
+// ----------------------------------------------------------------------------
+// 3.5. Purge Demo Content (Clears placeholder seed items so only creator uploads remain)
+// ----------------------------------------------------------------------------
+export async function purgeDemoContent(): Promise<{ deletedCount: number; message: string }> {
+  const demoIds = ['rk-001', 'rk-002', 'rk-003', 'rk-004', 'rk-005', 'rk-006', 'rk-007'];
+  let deletedCount = 0;
+
+  for (const id of demoIds) {
+    try {
+      const itemRef = doc(firestore, 'content', id);
+      await deleteDoc(itemRef);
+      deletedCount++;
+    } catch (_) {}
+  }
+
+  // Update local memory & cache
+  if (memoryContentList) {
+    memoryContentList = memoryContentList.filter(c => !demoIds.includes(c.id));
+    memoryContentTimestamp = Date.now();
+    try {
+      localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(memoryContentList));
+    } catch (_) {}
+  }
+
+  return {
+    deletedCount,
+    message: `सफलतापूर्वक ${deletedCount} डेमो पोस्ट हटा दिए गए। अब केवल आपका असली कंटेंट दिखेगा।`
   };
 }
 

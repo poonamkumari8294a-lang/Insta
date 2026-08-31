@@ -20,23 +20,22 @@ try {
   setLogLevel('error');
 } catch (_) {}
 
+// Initialize Firestore instance cleanly with mobile long-polling compatibility
 const dbId = firebaseConfigData.firestoreDatabaseId && firebaseConfigData.firestoreDatabaseId !== '(default)'
   ? firebaseConfigData.firestoreDatabaseId
   : undefined;
 
-// Initialize Firestore with auto-detect long polling to prevent WebChannel 10s backend timeout in browser/iframe
-function createFirestoreInstance(): Firestore {
+function getFirestoreInstance(): Firestore {
   try {
     return initializeFirestore(firebaseApp, {
-      experimentalAutoDetectLongPolling: true,
-      experimentalForceLongPolling: true
+      experimentalAutoDetectLongPolling: true
     }, dbId);
   } catch (_err) {
     return dbId ? getFirestore(firebaseApp, dbId) : getFirestore(firebaseApp);
   }
 }
 
-export const firestore: Firestore = createFirestoreInstance();
+export const firestore: Firestore = getFirestoreInstance();
 
 export default firestore;
 
