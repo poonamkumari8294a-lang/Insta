@@ -59,6 +59,17 @@ export interface VipUserProfile {
   unlockedCount?: number;
 }
 
+export interface VipLeadItem {
+  id: string;
+  name: string;
+  phone: string;
+  contentId?: string;
+  contentTitle?: string;
+  amount?: number;
+  createdAt: string;
+  source?: string;
+}
+
 export interface StoryHighlight {
   id: string;
   title: string;

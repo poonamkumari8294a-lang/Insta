@@ -14,7 +14,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { compressImageToBlob, formatFileSize } from '../utils/mediaUpload';
-import { uploadFileToStorage, uploadDataUrlToStorage, isFirebaseStorageUrl } from '../services/storage';
+import { uploadFileToStorage, uploadDataUrlToStorage } from '../services/storage';
 import { ImageCropperModal } from './ImageCropperModal';
 
 interface MultiPhotoUploadZoneProps {
@@ -57,9 +57,7 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
     setUploadError(null);
     setUploadPercent(0);
 
-    const newPhotoUrls: string[] = [];
     const validFiles: File[] = [];
-
     for (let i = 0; i < files.length; i++) {
       if (files[i].type.startsWith('image/')) {
         validFiles.push(files[i]);
@@ -72,37 +70,84 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
       return;
     }
 
-    try {
-      for (let i = 0; i < total; i++) {
-        const file = validFiles[i];
-        setProcessingProgress(`Firebase Storage में अपलोड हो रहा है (${i + 1}/${total})...`);
-        
-        // 1. Optimize image to Blob
-        const { blob, mimeType } = await compressImageToBlob(file, 1600, 1600, 0.82);
-        
-        // 2. Upload directly to Firebase Storage
-        const uploadResult = await uploadFileToStorage(
-          blob,
-          'photos',
-          `album_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 7)}.${mimeType.includes('webp') ? 'webp' : 'jpg'}`,
-          (pct) => {
-            const overallPct = Math.round(((i / total) * 100) + (pct / total));
-            setUploadPercent(overallPct);
-          }
-        );
+    setProcessingProgress(`Cloud में ${total} फ़ोटो अपलोड हो रही हैं...`);
 
-        newPhotoUrls.push(uploadResult.downloadUrl);
+    try {
+      // Controlled Parallel Concurrency (3 files at once)
+      const CONCURRENCY = 3;
+      const fileProgressMap = new Array<number>(total).fill(0);
+      const successfulUrls: string[] = [];
+      const failedIndices: number[] = [];
+
+      const updateAggregateProgress = (index: number, pct: number) => {
+        fileProgressMap[index] = pct;
+        const totalProgress = Math.round(
+          fileProgressMap.reduce((acc, curr) => acc + curr, 0) / total
+        );
+        setUploadPercent(totalProgress);
+      };
+
+      const uploadSingleFile = async (file: File, index: number): Promise<string | null> => {
+        try {
+          // 1. Fast zero-copy Blob compression
+          const { blob, mimeType } = await compressImageToBlob(file, 1920, 1920, 0.85);
+          
+          // 2. Upload to Firebase Storage
+          const uploadResult = await uploadFileToStorage(
+            blob,
+            'photos',
+            `album_${Date.now()}_${index}_${Math.random().toString(36).substring(2, 7)}.${mimeType.includes('webp') ? 'webp' : 'jpg'}`,
+            (pct) => {
+              updateAggregateProgress(index, pct);
+            }
+          );
+
+          updateAggregateProgress(index, 100);
+          return uploadResult.downloadUrl;
+        } catch (fileErr: any) {
+          console.warn(`[MultiPhoto Upload Failed for file ${index}]`, fileErr);
+          failedIndices.push(index);
+          updateAggregateProgress(index, 100); // Allow aggregate to complete
+          return null;
+        }
+      };
+
+      // Execute with controlled concurrency
+      const executing: Promise<void>[] = [];
+      for (let i = 0; i < total; i++) {
+        const p = uploadSingleFile(validFiles[i], i).then((url) => {
+          if (url) successfulUrls.push(url);
+        });
+
+        const e: Promise<void> = p.then(() => {
+          const idx = executing.indexOf(e);
+          if (idx !== -1) executing.splice(idx, 1);
+        });
+        executing.push(e);
+
+        if (executing.length >= CONCURRENCY) {
+          await Promise.race(executing);
+        }
       }
 
+      await Promise.all(executing);
+
       setUploadPercent(100);
-      if (newPhotoUrls.length > 0) {
-        const updatedList = [...photos, ...newPhotoUrls];
+
+      if (successfulUrls.length > 0) {
+        const updatedList = [...photos, ...successfulUrls];
         onChange(updatedList);
 
         // If no cover set yet, set the first photo as cover
         if (!currentCover && onCoverChange && updatedList.length > 0) {
           onCoverChange(updatedList[0]);
         }
+      }
+
+      if (failedIndices.length > 0) {
+        setUploadError(
+          `${successfulUrls.length} फ़ोटो अपलोड हो गईं, लेकिन ${failedIndices.length} फ़ोटो में नेटवर्क समस्या आई।`
+        );
       }
     } catch (err: any) {
       console.error('[MultiPhoto Upload Error]', err);
@@ -224,7 +269,7 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
         <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2 text-rose-700 text-xs">
           <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
           <div className="flex-1 min-w-0">
-            <span className="font-bold">अपलोड त्रुटि: </span>
+            <span className="font-bold">अपलोड सूचना: </span>
             <span>{uploadError}</span>
           </div>
           <button
@@ -285,7 +330,7 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
                 />
               </div>
               <p className="text-[10px] text-purple-900/60 font-medium">
-                फ़ोटो Firebase Storage में स्थायी रूप से सेव हो रही हैं
+                फ़ोटो Firebase Storage में समानांतर (Parallel) अपलोड हो रही हैं
               </p>
             </div>
           ) : (
@@ -294,7 +339,7 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
                 <span>📸 एक साथ कई फोटो चुनें (Select Multiple Photos for Album)</span>
               </p>
               <p className="text-[11px] text-purple-900/60 mt-0.5">
-                गैलरी से 1 से लेकर 20+ फ़ोटो एक साथ चुनें • Direct Firebase Storage Sync
+                गैलरी से 1 से लेकर 20+ फ़ोटो एक साथ चुनें • Direct Fast Parallel Firebase Storage Sync
               </p>
               <button
                 type="button"

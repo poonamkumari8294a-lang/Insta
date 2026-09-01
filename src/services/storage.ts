@@ -15,6 +15,7 @@ export interface StorageUploadResult {
   storagePath: string;
   bytesTransferred: number;
   totalBytes: number;
+  durationMs?: number;
 }
 
 /**
@@ -78,7 +79,8 @@ export function dataURLtoBlob(dataUrl: string): { blob: Blob; mimeType: string; 
 }
 
 /**
- * Uploads a native File or Blob directly to Firebase Storage with real-time progress callbacks
+ * Uploads a native File or Blob directly to Firebase Storage with real-time progress callbacks.
+ * Configured with caching headers for lightning-fast worldwide delivery.
  */
 export function uploadFileToStorage(
   fileOrBlob: File | Blob,
@@ -86,6 +88,8 @@ export function uploadFileToStorage(
   customFilename?: string,
   onProgress?: (progressPercent: number, statusText: string) => void
 ): Promise<StorageUploadResult> {
+  const startTime = performance.now();
+
   return new Promise((resolve, reject) => {
     try {
       const mimeType = fileOrBlob.type || 'application/octet-stream';
@@ -112,8 +116,11 @@ export function uploadFileToStorage(
       const storagePath = `uploads/${folder}/${filename}`;
 
       const storageRef = ref(storage, storagePath);
+      
+      // Optimal HTTP Cache headers for long-term edge CDN caching
       const metadata = {
         contentType: mimeType,
+        cacheControl: 'public, max-age=31536000, immutable',
         customMetadata: {
           uploadedAt: new Date().toISOString(),
           appSource: 'ruma_creator_app'
@@ -139,12 +146,16 @@ export function uploadFileToStorage(
         async () => {
           try {
             const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
-            console.log('[Firebase Storage] Upload complete, permanent URL:', downloadUrl);
+            const durationMs = Math.round(performance.now() - startTime);
+            if (process.env.NODE_ENV !== 'production') {
+              console.log(`[Firebase Storage] Uploaded ${folder}/${filename} (${uploadTask.snapshot.totalBytes} bytes) in ${durationMs}ms`);
+            }
             resolve({
               downloadUrl,
               storagePath,
               bytesTransferred: uploadTask.snapshot.bytesTransferred,
-              totalBytes: uploadTask.snapshot.totalBytes
+              totalBytes: uploadTask.snapshot.totalBytes,
+              durationMs
             });
           } catch (urlErr: any) {
             console.error('[Firebase Storage getDownloadURL Error]', urlErr);
@@ -160,7 +171,7 @@ export function uploadFileToStorage(
 }
 
 /**
- * Uploads a Data URL (e.g. from canvas or file reader) to Firebase Storage
+ * Uploads a Data URL (e.g. from cropper canvas) to Firebase Storage
  */
 export async function uploadDataUrlToStorage(
   dataUrl: string,
@@ -168,7 +179,7 @@ export async function uploadDataUrlToStorage(
   customFilename?: string,
   onProgress?: (progressPercent: number, statusText: string) => void
 ): Promise<StorageUploadResult> {
-  // If already an HTTP/HTTPS URL, return as-is
+  // If already an HTTP/HTTPS URL, return as-is immediately
   if (!isDataUrl(dataUrl)) {
     return {
       downloadUrl: dataUrl,
@@ -214,7 +225,6 @@ export async function deleteStorageFile(urlOrPath: string): Promise<boolean> {
   try {
     const storageRef: StorageReference = ref(storage, urlOrPath);
     await deleteObject(storageRef);
-    console.log('[Firebase Storage] Deleted file:', urlOrPath);
     return true;
   } catch (err: any) {
     console.warn('[Firebase Storage Delete Non-fatal]', err.message);
@@ -223,8 +233,40 @@ export async function deleteStorageFile(urlOrPath: string): Promise<boolean> {
 }
 
 /**
+ * Controlled Concurrency Pool for parallel tasks
+ */
+async function asyncPool<T, R>(
+  concurrency: number,
+  items: T[],
+  task: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  const executing: Promise<void>[] = [];
+
+  for (let i = 0; i < items.length; i++) {
+    const p = task(items[i], i).then((res) => {
+      results[i] = res;
+    });
+
+    const e: Promise<void> = p.then(() => {
+      const idx = executing.indexOf(e);
+      if (idx !== -1) executing.splice(idx, 1);
+    });
+    executing.push(e);
+
+    if (executing.length >= concurrency) {
+      await Promise.race(executing);
+    }
+  }
+
+  await Promise.all(executing);
+  return results;
+}
+
+/**
  * Ensures all media fields in a MediaItem (mediaUrl, thumbnailUrl, previewUrl, galleryUrls)
  * are stored as permanent Firebase Storage HTTPS URLs and not bloated Base64 strings.
+ * Fast, non-blocking passthrough if URLs are already on Firebase Storage.
  */
 export async function ensureMediaItemStorageUrls(
   item: Partial<MediaItem>,
@@ -267,33 +309,33 @@ export async function ensureMediaItemStorageUrls(
     }
   }
 
-  // 4. Process multi-photo galleryUrls
+  // 4. Process multi-photo galleryUrls in controlled parallel concurrency (3 files at once)
   if (Array.isArray(result.galleryUrls) && result.galleryUrls.length > 0) {
-    const updatedGallery: string[] = [];
-    for (let i = 0; i < result.galleryUrls.length; i++) {
-      const photo = result.galleryUrls[i];
-      if (isDataUrl(photo)) {
-        if (onStatusUpdate) {
-          onStatusUpdate(`Uploading gallery photo ${i + 1}/${result.galleryUrls.length} to Firebase Storage...`);
-        }
-        try {
-          const uploadRes = await uploadDataUrlToStorage(photo, 'photos');
-          updatedGallery.push(uploadRes.downloadUrl);
-        } catch (err: any) {
-          console.error(`Failed to upload gallery item ${i}:`, err);
-          throw new Error(`Gallery photo upload failed: ${err.message}`);
-        }
-      } else {
-        updatedGallery.push(photo);
+    const hasDataUrls = result.galleryUrls.some(u => isDataUrl(u));
+    if (hasDataUrls) {
+      if (onStatusUpdate) {
+        onStatusUpdate('Uploading gallery photos to Firebase Storage in parallel...');
       }
+
+      result.galleryUrls = await asyncPool(
+        3,
+        result.galleryUrls,
+        async (photoUrl) => {
+          if (isDataUrl(photoUrl)) {
+            const uploadRes = await uploadDataUrlToStorage(photoUrl, 'photos');
+            return uploadRes.downloadUrl;
+          }
+          return photoUrl;
+        }
+      );
     }
-    result.galleryUrls = updatedGallery;
-    if (updatedGallery.length > 0) {
+
+    if (result.galleryUrls.length > 0) {
       if (!result.mediaUrl || isDataUrl(result.mediaUrl)) {
-        result.mediaUrl = updatedGallery[0];
+        result.mediaUrl = result.galleryUrls[0];
       }
       if (!result.thumbnailUrl || isDataUrl(result.thumbnailUrl)) {
-        result.thumbnailUrl = updatedGallery[0];
+        result.thumbnailUrl = result.galleryUrls[0];
       }
     }
   }

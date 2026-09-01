@@ -373,6 +373,8 @@ export default function App() {
         {currentRoute === 'admin' && (
           <Suspense fallback={<FallbackLoader />}>
             <AdminPage
+              initialContent={content}
+              initialSettings={settings}
               onBackToSite={() => {
                 loadData(true);
                 navigateTo('home');

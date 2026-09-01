@@ -1,5 +1,18 @@
-import React, { useState, useRef } from 'react';
-import { Upload, Film, Image as ImageIcon, CheckCircle2, X, Link as LinkIcon, RefreshCw, Eye, Crop, CloudUpload, FileText, AlertCircle } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  Upload,
+  Film,
+  Image as ImageIcon,
+  CheckCircle2,
+  X,
+  Link as LinkIcon,
+  RefreshCw,
+  Eye,
+  Crop,
+  CloudUpload,
+  FileText,
+  AlertCircle
+} from 'lucide-react';
 import { compressImageToBlob, processVideoFile, formatFileSize } from '../utils/mediaUpload';
 import { uploadFileToStorage, uploadDataUrlToStorage, isDataUrl, isFirebaseStorageUrl } from '../services/storage';
 import { ImageCropperModal, CropAspectRatio } from './ImageCropperModal';
@@ -83,7 +96,7 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
     if (!file) return;
     setIsUploading(true);
     setUploadProgress(0);
-    setUploadStatus('फ़ाइल तैयार हो रही है...');
+    setUploadStatus('Cloud में अपलोड शुरू हो रहा है...');
     setUploadError(null);
 
     const isVideoFile = file.type.startsWith('video/');
@@ -98,10 +111,10 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
 
     try {
       if (isImageFile) {
-        setUploadStatus('फ़ाइल कंप्रेस और ऑप्टिमाइज़ हो रही है...');
-        const { blob, mimeType } = await compressImageToBlob(file, 1600, 1600, 0.82);
+        // Fast, zero-copy Image compression to Blob
+        const { blob, mimeType } = await compressImageToBlob(file, 1920, 1920, 0.85);
         
-        setUploadStatus('Firebase Storage में अपलोड हो रहा है (0%)...');
+        setUploadStatus('Firebase Storage में अपलोड हो रहा है...');
         const uploadResult = await uploadFileToStorage(
           blob,
           determinedFolder,
@@ -117,32 +130,37 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
         onChange(uploadResult.downloadUrl);
 
       } else if (isVideoFile) {
-        setUploadStatus('वीडियो मेटाडेटा और थंबनेल तैयार हो रहा है...');
-        
-        // 1. Process thumbnail & duration in parallel
+        // High-Performance Parallel Video Upload:
+        // 1. Start main video file upload immediately
+        // 2. Extract thumbnail & duration in parallel without blocking main upload
         let extractedPosterUrl = '';
-        try {
-          const meta = await processVideoFile(file);
-          if (meta.durationFormatted && onDurationExtracted) {
-            onDurationExtracted(meta.durationFormatted);
-          }
-          if (meta.posterBlob) {
-            const thumbUpload = await uploadFileToStorage(
-              meta.posterBlob,
-              'thumbnails',
-              `thumb_${Date.now()}_video.webp`
-            );
-            extractedPosterUrl = thumbUpload.downloadUrl;
-            if (onThumbnailExtracted) {
-              onThumbnailExtracted(extractedPosterUrl);
-            }
-          }
-        } catch (thumbErr) {
-          console.warn('[Video Meta Extract Non-fatal]', thumbErr);
-        }
+        let videoDuration = '0:30';
 
-        // 2. Upload actual video file
-        setUploadStatus('Firebase Storage में वीडियो अपलोड हो रहा है (0%)...');
+        const thumbPromise = (async () => {
+          try {
+            const meta = await processVideoFile(file);
+            if (meta.durationFormatted) {
+              videoDuration = meta.durationFormatted;
+              if (onDurationExtracted) onDurationExtracted(meta.durationFormatted);
+            }
+            if (meta.posterBlob) {
+              const thumbUpload = await uploadFileToStorage(
+                meta.posterBlob,
+                'thumbnails',
+                `thumb_${Date.now()}_video.webp`
+              );
+              extractedPosterUrl = thumbUpload.downloadUrl;
+              if (onThumbnailExtracted) {
+                onThumbnailExtracted(extractedPosterUrl);
+              }
+            }
+          } catch (thumbErr) {
+            console.warn('[Video Meta Extract Non-fatal]', thumbErr);
+          }
+        })();
+
+        // Start video upload right away
+        setUploadStatus('Firebase Storage में वीडियो अपलोड हो रहा है...');
         const uploadResult = await uploadFileToStorage(
           file,
           'videos',
@@ -153,15 +171,19 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
           }
         );
 
+        // Await thumbnail if still finalizing
+        await thumbPromise;
+
         setUploadProgress(100);
         setUploadStatus('✅ वीडियो अपलोड पूर्ण!');
         onChange(uploadResult.downloadUrl, {
-          thumbnail: extractedPosterUrl
+          thumbnail: extractedPosterUrl,
+          duration: videoDuration
         });
 
       } else {
         // Document / PDF / other
-        setUploadStatus('Firebase Storage में दस्तावेज़ अपलोड हो रहा है (0%)...');
+        setUploadStatus('Firebase Storage में दस्तावेज़ अपलोड हो रहा है...');
         const uploadResult = await uploadFileToStorage(
           file,
           'documents',

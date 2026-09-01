@@ -862,26 +862,102 @@ export async function fetchAdminStats(
 }
 
 // ----------------------------------------------------------------------------
-// 9. Admin Orders
+// 9. Admin Orders & VIP Leads
 // ----------------------------------------------------------------------------
 export async function fetchAdminOrders(): Promise<OrderItem[]> {
-  if (isCloudQuotaExhausted()) {
-    return [];
+  const ordersMap = new Map<string, OrderItem>();
+
+  if (!isCloudQuotaExhausted()) {
+    try {
+      const ordersRef = collection(firestore, 'orders');
+      let snap;
+      try {
+        const q = query(ordersRef, orderBy('createdAt', 'desc'));
+        snap = await withTimeout(getDocs(q), 6000);
+      } catch (_) {
+        // Fallback without ordering in case index or compound query issue occurs
+        snap = await withTimeout(getDocs(ordersRef), 6000);
+      }
+
+      snap.forEach(d => {
+        const o = d.data() as OrderItem;
+        if (o && o.orderId) {
+          ordersMap.set(o.orderId, o);
+        }
+      });
+    } catch (err) {
+      handleFirestoreError('fetchAdminOrders', err);
+    }
   }
 
+  // Also merge with stored local orders if available
   try {
-    const ordersRef = collection(firestore, 'orders');
-    const q = query(ordersRef, orderBy('createdAt', 'desc'));
-    const snap = await withTimeout(getDocs(q), 3500);
-    const orders: OrderItem[] = [];
-    snap.forEach(d => {
-      orders.push(d.data() as OrderItem);
-    });
-    return orders;
-  } catch (err) {
-    handleFirestoreError('fetchAdminOrders', err);
-    return [];
+    const storedIds = getStoredOrders();
+    for (const id of storedIds) {
+      if (!ordersMap.has(id)) {
+        // Create standard fallback entry
+        ordersMap.set(id, {
+          orderId: id,
+          contentId: 'rk-001',
+          contentTitle: 'VIP Unlocked Post',
+          contentType: 'photo',
+          thumbnailUrl: CLIENT_CONTENT_LIST[0].thumbnailUrl,
+          amount: 49,
+          currency: 'INR',
+          status: 'paid',
+          upiId: '6202292319pnb@ybl',
+          qrString: '',
+          customerSessionId: getOrCreateSessionId(),
+          createdAt: new Date().toISOString(),
+          expiresAt: new Date().toISOString()
+        });
+      }
+    }
+  } catch (_) {}
+
+  const orders = Array.from(ordersMap.values());
+  orders.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  return orders;
+}
+
+export async function fetchVipLeads(): Promise<any[]> {
+  const leads: any[] = [];
+  if (!isCloudQuotaExhausted()) {
+    try {
+      const leadsRef = collection(firestore, 'vip_leads');
+      let snap;
+      try {
+        const q = query(leadsRef, orderBy('createdAt', 'desc'));
+        snap = await withTimeout(getDocs(q), 6000);
+      } catch (_) {
+        snap = await withTimeout(getDocs(leadsRef), 6000);
+      }
+      snap.forEach(d => {
+        leads.push({ ...d.data(), id: d.id });
+      });
+    } catch (err) {
+      handleFirestoreError('fetchVipLeads', err);
+    }
   }
+
+  // Also include current user profile if phone exists and not already in leads
+  const storedUser = getStoredUserProfile();
+  if (storedUser && storedUser.phone) {
+    const cleanP = storedUser.phone.replace(/[^0-9]/g, '');
+    if (!leads.some(l => (l.phone || '').replace(/[^0-9]/g, '').includes(cleanP))) {
+      leads.unshift({
+        id: `local_${cleanP}`,
+        name: storedUser.name || 'VIP Registered Visitor',
+        phone: cleanP,
+        contentTitle: 'VIP Registration & Portal Access',
+        amount: 0,
+        createdAt: new Date().toISOString(),
+        source: 'local_registration'
+      });
+    }
+  }
+
+  return leads.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 }
 
 export async function verifyAdminOrder(orderId: string, transactionRef?: string): Promise<OrderItem> {
@@ -1059,32 +1135,43 @@ export async function fetchAdminContent(forceFresh = false): Promise<MediaItem[]
   }
 
   if (isCloudQuotaExhausted()) {
-    return memoryContentList || getCachedContentListSync();
+    const list = memoryContentList || getCachedContentListSync();
+    return list && list.length > 0 ? list : CLIENT_CONTENT_LIST;
   }
 
   try {
     const contentRef = collection(firestore, 'content');
     const snap = await withTimeout(getDocs(contentRef), 6500);
     
-    if (snap.empty) {
-      await ensureFirestoreSeeded();
-      return memoryContentList || getCachedContentListSync();
-    }
-
     const items: MediaItem[] = [];
     snap.forEach(d => {
       items.push({ ...d.data(), id: d.id } as MediaItem);
     });
-    items.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-    memoryContentList = items;
+
+    if (items.length === 0) {
+      const settings = memorySiteSettings || await fetchSiteSettings();
+      if (!settings.demoPurged) {
+        for (const starter of CLIENT_CONTENT_LIST) {
+          try {
+            await setDoc(doc(firestore, 'content', starter.id), sanitizeFirestorePayload(starter));
+          } catch (_) {}
+          items.push(starter);
+        }
+      }
+    }
+
+    const finalList = items.length > 0 ? items : (memoryContentList || getCachedContentListSync() || CLIENT_CONTENT_LIST);
+    finalList.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    memoryContentList = finalList;
     memoryContentTimestamp = now;
     try {
-      localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(items));
+      localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(finalList));
     } catch (_) {}
-    return items;
+    return finalList;
   } catch (err) {
     handleFirestoreError('fetchAdminContent', err);
-    return memoryContentList || getCachedContentListSync();
+    const fallback = memoryContentList || getCachedContentListSync() || CLIENT_CONTENT_LIST;
+    return fallback;
   }
 }
 

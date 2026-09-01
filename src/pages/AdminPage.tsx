@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MediaItem, OrderItem, SiteSettings, AdminStats } from '../types';
+import { MediaItem, OrderItem, SiteSettings, AdminStats, VipLeadItem } from '../types';
 import {
   adminLogin,
   getAdminToken,
@@ -8,6 +8,7 @@ import {
   fetchAdminOrders,
   fetchAdminContent,
   fetchSiteSettings,
+  fetchVipLeads,
   createAdminContent,
   updateAdminContent,
   deleteAdminContent,
@@ -73,30 +74,43 @@ import {
   Send,
   Radio,
   User,
-  Phone
+  Phone,
+  MessageCircle,
+  Users
 } from 'lucide-react';
 
 interface AdminPageProps {
   onBackToSite: () => void;
   onSettingsUpdated: (newSettings: SiteSettings) => void;
   onContentUpdated?: (content: MediaItem[]) => void;
+  initialContent?: MediaItem[];
+  initialSettings?: SiteSettings;
 }
 
-export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUpdated, onContentUpdated }) => {
+export const AdminPage: React.FC<AdminPageProps> = ({
+  onBackToSite,
+  onSettingsUpdated,
+  onContentUpdated,
+  initialContent,
+  initialSettings
+}) => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!!getAdminToken());
   const [passcode, setPasscode] = useState('');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Active Tab
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'content' | 'highlights' | 'homepage' | 'orders' | 'settings' | 'setup'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'content' | 'highlights' | 'homepage' | 'orders' | 'leads' | 'settings' | 'setup'>('dashboard');
 
-  // Data states
+  // Data states (pre-populated instantly with initial site data)
   const [stats, setStats] = useState<AdminStats | null>(null);
-  const [contentList, setContentList] = useState<MediaItem[]>([]);
+  const [contentList, setContentList] = useState<MediaItem[]>(() => (initialContent && initialContent.length > 0 ? initialContent : []));
   const [ordersList, setOrdersList] = useState<OrderItem[]>([]);
-  const [siteSettings, setSiteSettings] = useState<SiteSettings | null>(null);
+  const [siteSettings, setSiteSettings] = useState<SiteSettings | null>(() => initialSettings || null);
+  const [vipLeads, setVipLeads] = useState<VipLeadItem[]>([]);
+  const [leadSearch, setLeadSearch] = useState('');
   const [subscriberCount, setSubscriberCount] = useState<number>(0);
   const [testNotificationLoading, setTestNotificationLoading] = useState(false);
 
@@ -176,25 +190,35 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
     }
   };
 
-  // Load Admin Data
-  const loadAdminData = async () => {
-    setLoading(true);
+  // Load Admin Data (with live sync)
+  const loadAdminData = async (silent = false) => {
+    if (!silent) setLoading(true);
+    setIsSyncing(true);
     try {
-      const [ordersData, contentData, settingsData] = await Promise.all([
+      const [ordersData, contentData, settingsData, leadsData] = await Promise.all([
         fetchAdminOrders(),
         fetchAdminContent(true),
-        fetchSiteSettings(true)
+        fetchSiteSettings(true),
+        fetchVipLeads()
       ]);
-      const statsData = await fetchAdminStats(contentData, ordersData, settingsData);
+      const validContent = contentData && contentData.length > 0 ? contentData : (initialContent && initialContent.length > 0 ? initialContent : []);
+      const validSettings = settingsData || initialSettings;
+
+      const statsData = await fetchAdminStats(validContent, ordersData, validSettings);
       setStats(statsData);
       setOrdersList(ordersData);
-      setContentList(contentData);
-      setSiteSettings(settingsData);
+      setContentList(validContent);
+      if (validSettings) setSiteSettings(validSettings);
+      setVipLeads(leadsData);
 
       // Load push subscriber count
       getActiveSubscribersCount()
         .then((cnt) => setSubscriberCount(cnt))
         .catch(() => {});
+
+      if (silent) {
+        showToast('✅ सभी लाइव डेटा सिंक हो गया है (Data synced successfully)');
+      }
     } catch (err: any) {
       console.error(err);
       if (err.message?.includes('Unauthorized')) {
@@ -203,6 +227,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
       }
     } finally {
       setLoading(false);
+      setIsSyncing(false);
     }
   };
 
@@ -627,6 +652,17 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
 
         <div className="flex items-center gap-2 flex-wrap">
           <button
+            type="button"
+            onClick={() => loadAdminData(true)}
+            disabled={isSyncing}
+            className="px-3.5 py-2 rounded-2xl bg-white hover:bg-purple-50 text-purple-900 text-xs font-bold border border-purple-200 shadow-sm flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+            title="Refresh and sync all data directly from website and database"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-pink-600 ${isSyncing ? 'animate-spin' : ''}`} />
+            <span>{isSyncing ? 'सिंक हो रहा है...' : 'डेटा रिफ्रेश (Sync Data)'}</span>
+          </button>
+
+          <button
             onClick={copySecretLink}
             className="px-3.5 py-2 rounded-2xl bg-purple-100 hover:bg-purple-200 text-purple-900 text-xs font-bold border border-purple-200 shadow-sm flex items-center gap-1.5 transition-all"
             title="Copy Secret Admin Bookmark Link"
@@ -716,6 +752,23 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
           {ordersList.filter(o => o.status === 'waiting_verification').length > 0 && (
             <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black animate-pulse shadow-sm">
               {ordersList.filter(o => o.status === 'waiting_verification').length} Pending
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('leads')}
+          className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap ${
+            activeTab === 'leads'
+              ? 'bg-pink-600 text-white shadow-md shadow-pink-500/25'
+              : 'text-purple-900/70 hover:text-purple-950 hover:bg-white/60'
+          }`}
+        >
+          <Phone className="w-4 h-4" />
+          <span>VIP Leads & Contacts ({vipLeads.length})</span>
+          {vipLeads.length > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-white text-[10px] font-black shadow-xs">
+              {vipLeads.length}
             </span>
           )}
         </button>
@@ -1565,6 +1618,155 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
             </div>
           </div>
 
+        </div>
+      )}
+
+      {/* ---------------------------------------------------- */}
+      {/* TAB: VIP LEADS & CUSTOMER CONTACTS */}
+      {/* ---------------------------------------------------- */}
+      {activeTab === 'leads' && (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="font-display font-black text-xl text-purple-950 flex items-center gap-2">
+                <Users className="w-5 h-5 text-pink-600" />
+                <span>VIP Leads & Customer Inquiries ({vipLeads.length})</span>
+              </h2>
+              <p className="text-xs text-purple-900/70 font-medium">
+                All visitor contact details, registered VIP phone numbers, and unlock inquiries captured from the website.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  if (vipLeads.length === 0) {
+                    showToast('कोई लीड उपलब्ध नहीं है (No leads to export)', 'info');
+                    return;
+                  }
+                  const csvRows = ['Name,Phone,Content,Date,Source'];
+                  vipLeads.forEach(l => {
+                    csvRows.push(`"${l.name || 'VIP User'}","${l.phone || ''}","${l.contentTitle || 'VIP Registration'}","${new Date(l.createdAt).toLocaleString()}","${l.source || 'website'}"`);
+                  });
+                  const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `vip_leads_${Date.now()}.csv`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                  showToast('✅ सभी लीड्स CSV फाइल में डाउनलोड हो गए (Exported to CSV)');
+                }}
+                className="px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black shadow-md shadow-emerald-600/20 flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>Export Contacts (CSV)</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Lead Search & Filter */}
+          <div className="p-4 rounded-3xl bg-white/80 backdrop-blur-xl border border-white/90 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-purple-900/40 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={leadSearch}
+                onChange={(e) => setLeadSearch(e.target.value)}
+                placeholder="Search by name, phone number or content title..."
+                className="w-full bg-white border border-purple-200 rounded-2xl pl-9 pr-3 py-2 text-xs text-purple-950 placeholder-purple-900/40 shadow-xs font-medium"
+              />
+            </div>
+          </div>
+
+          {/* Leads Table */}
+          <div className="glass-card rounded-3xl border border-white/80 overflow-hidden shadow-md">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-purple-950">
+                <thead className="bg-purple-100/60 text-purple-950/80 font-black uppercase text-[10px] tracking-wider border-b border-purple-200">
+                  <tr>
+                    <th className="py-3 px-4">Customer Name</th>
+                    <th className="py-3 px-4">Mobile / WhatsApp Number</th>
+                    <th className="py-3 px-4">Interested Content / Action</th>
+                    <th className="py-3 px-4">Date & Time</th>
+                    <th className="py-3 px-4 text-right">Quick Contact Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-purple-100 bg-white/60">
+                  {vipLeads.filter(l => {
+                    if (!leadSearch.trim()) return true;
+                    const q = leadSearch.toLowerCase();
+                    return (l.name || '').toLowerCase().includes(q) || (l.phone || '').includes(q) || (l.contentTitle || '').toLowerCase().includes(q);
+                  }).length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-12 text-center text-purple-900/60 font-medium">
+                        <Users className="w-8 h-8 text-purple-300 mx-auto mb-2" />
+                        No customer leads match the current search.
+                      </td>
+                    </tr>
+                  ) : (
+                    vipLeads
+                      .filter(l => {
+                        if (!leadSearch.trim()) return true;
+                        const q = leadSearch.toLowerCase();
+                        return (l.name || '').toLowerCase().includes(q) || (l.phone || '').includes(q) || (l.contentTitle || '').toLowerCase().includes(q);
+                      })
+                      .map((lead, idx) => {
+                        const cleanPhone = (lead.phone || '').replace(/[^0-9]/g, '');
+                        const waNumber = cleanPhone.startsWith('91') ? cleanPhone : `91${cleanPhone}`;
+                        return (
+                          <tr key={lead.id || idx} className="hover:bg-purple-50/70 transition-colors">
+                            <td className="py-3.5 px-4 font-bold text-purple-950">
+                              <div className="flex items-center gap-2">
+                                <div className="w-7 h-7 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center font-black text-xs">
+                                  {(lead.name || 'V').charAt(0).toUpperCase()}
+                                </div>
+                                <span>{lead.name || 'VIP Visitor'}</span>
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4 font-black text-purple-900 tracking-wide">
+                              {cleanPhone ? `+91 ${cleanPhone.slice(-10)}` : 'N/A'}
+                            </td>
+                            <td className="py-3.5 px-4 text-purple-900/80 font-medium">
+                              <span className="px-2 py-0.5 rounded-md bg-purple-100 text-purple-800 text-[11px] font-bold">
+                                {lead.contentTitle || 'VIP Gallery Access'}
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-4 text-purple-900/60 font-medium text-[11px]">
+                              {lead.createdAt ? new Date(lead.createdAt).toLocaleString() : 'Recent'}
+                            </td>
+                            <td className="py-3.5 px-4 text-right">
+                              {cleanPhone ? (
+                                <div className="flex items-center justify-end gap-2">
+                                  <a
+                                    href={`https://wa.me/${waNumber}?text=${encodeURIComponent(`Hi ${lead.name || ''}! Ruma Cute Girl VIP Gallery mein aapka swagat hai. Kya aapko kisi content unlock mein help chahiye?`)}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-bold flex items-center gap-1 shadow-sm transition-transform active:scale-95"
+                                  >
+                                    <MessageCircle className="w-3.5 h-3.5" />
+                                    <span>WhatsApp</span>
+                                  </a>
+                                  <a
+                                    href={`tel:+91${cleanPhone.slice(-10)}`}
+                                    className="px-3 py-1.5 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 text-[11px] font-bold flex items-center gap-1 transition-colors"
+                                  >
+                                    <Phone className="w-3.5 h-3.5 text-purple-700" />
+                                    <span>Call</span>
+                                  </a>
+                                </div>
+                              ) : (
+                                <span className="text-purple-400 text-xs">No Phone</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 
