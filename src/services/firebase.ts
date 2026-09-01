@@ -1,5 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { initializeFirestore, getFirestore, Firestore, setLogLevel } from 'firebase/firestore';
+import { getStorage, FirebaseStorage } from 'firebase/storage';
 import firebaseConfigData from '../../firebase-applet-config.json';
 
 const firebaseConfig = {
@@ -36,6 +37,10 @@ function getFirestoreInstance(): Firestore {
 }
 
 export const firestore: Firestore = getFirestoreInstance();
+
+// Initialize Firebase Storage instance
+const defaultBucket = firebaseConfigData.storageBucket || `${firebaseConfigData.projectId}.firebasestorage.app`;
+export const storage: FirebaseStorage = getStorage(firebaseApp, defaultBucket);
 
 export default firestore;
 

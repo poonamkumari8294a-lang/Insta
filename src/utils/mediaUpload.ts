@@ -1,9 +1,10 @@
 /**
- * Media upload & processing utility for Gallery / Device file picking
+ * Media upload & processing utility for Gallery / Device file picking & Firebase Storage
  */
 
 export interface VideoMetadata {
   thumbnailDataUrl: string;
+  posterBlob?: Blob;
   durationFormatted: string;
   durationSeconds: number;
   width: number;
@@ -35,16 +36,86 @@ export function getApproximateByteSize(data: any): number {
 }
 
 /**
- * Compresses/resizes an image file using an offscreen canvas to keep payload snappy (< 40KB)
- * Optimized specifically for instant Cloud Firestore synchronization across all mobile devices
+ * Compresses an image File or Blob and returns an optimized native Blob for Firebase Storage upload
+ */
+export async function compressImageToBlob(
+  file: File | Blob,
+  maxWidth = 1600,
+  maxHeight = 1600,
+  quality = 0.82
+): Promise<{ blob: Blob; mimeType: string }> {
+  // If it's a GIF or SVG, preserve exact binary
+  if (file.type === 'image/gif' || file.type === 'image/svg+xml') {
+    return { blob: file, mimeType: file.type };
+  }
+
+  const dataUrl = file instanceof File
+    ? await readFileAsDataURL(file)
+    : await new Promise<string>((res) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result as string);
+        r.readAsDataURL(file);
+      });
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      let width = img.naturalWidth || img.width;
+      let height = img.naturalHeight || img.height;
+
+      if (width > maxWidth || height > maxHeight) {
+        const ratio = Math.min(maxWidth / width, maxHeight / height);
+        width = Math.max(1, Math.round(width * ratio));
+        height = Math.max(1, Math.round(height * ratio));
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+      if (!ctx) {
+        resolve({ blob: file, mimeType: file.type || 'image/jpeg' });
+        return;
+      }
+
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // Prefer WebP with fallback to JPEG
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            resolve({ blob, mimeType: blob.type || 'image/webp' });
+          } else {
+            canvas.toBlob(
+              (jpgBlob) => {
+                resolve({ blob: jpgBlob || file, mimeType: 'image/jpeg' });
+              },
+              'image/jpeg',
+              quality
+            );
+          }
+        },
+        'image/webp',
+        quality
+      );
+    };
+    img.onerror = () => resolve({ blob: file, mimeType: file.type || 'image/jpeg' });
+    img.src = dataUrl;
+  });
+}
+
+/**
+ * Compresses/resizes an image file using an offscreen canvas to keep payload snappy
  */
 export async function compressImageFile(
   file: File,
-  maxWidth = 900,
-  maxHeight = 900,
-  quality = 0.74
+  maxWidth = 1200,
+  maxHeight = 1200,
+  quality = 0.80
 ): Promise<string> {
-  // If it's a GIF or SVG, do not re-encode through canvas to preserve animation/vector
   if (file.type === 'image/gif' || file.type === 'image/svg+xml') {
     return readFileAsDataURL(file);
   }
@@ -77,7 +148,6 @@ export async function compressImageFile(
       ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(img, 0, 0, width, height);
 
-      // Fast WebP / JPEG compression to keep image ultra-lightweight (~25KB - 40KB)
       let compressed = '';
       try {
         compressed = canvas.toDataURL('image/webp', quality);
@@ -106,10 +176,8 @@ export function processVideoFile(file: File): Promise<VideoMetadata> {
     video.muted = true;
     video.playsInline = true;
 
-    // Timeout fallback in case video fails to decode
     const timer = setTimeout(async () => {
       try {
-        const fallbackData = await readFileAsDataURL(file);
         URL.revokeObjectURL(videoUrl);
         resolve({
           thumbnailDataUrl: '',
@@ -125,7 +193,6 @@ export function processVideoFile(file: File): Promise<VideoMetadata> {
     }, 8000);
 
     video.onloadedmetadata = () => {
-      // Seek slightly into the video for a good frame (0.5s or 10%)
       const seekTime = Math.min(1, Math.max(0.2, video.duration * 0.1));
       video.currentTime = seekTime;
     };
@@ -134,7 +201,7 @@ export function processVideoFile(file: File): Promise<VideoMetadata> {
       clearTimeout(timer);
       try {
         const canvas = document.createElement('canvas');
-        const targetWidth = Math.min(video.videoWidth || 720, 640);
+        const targetWidth = Math.min(video.videoWidth || 720, 720);
         const ratio = targetWidth / (video.videoWidth || 720);
         const targetHeight = Math.round((video.videoHeight || 1280) * ratio);
 
@@ -146,12 +213,12 @@ export function processVideoFile(file: File): Promise<VideoMetadata> {
         if (ctx && canvas.width > 0 && canvas.height > 0) {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
           try {
-            thumbUrl = canvas.toDataURL('image/webp', 0.72);
+            thumbUrl = canvas.toDataURL('image/webp', 0.80);
             if (!thumbUrl.startsWith('data:image/webp')) {
-              thumbUrl = canvas.toDataURL('image/jpeg', 0.75);
+              thumbUrl = canvas.toDataURL('image/jpeg', 0.80);
             }
           } catch {
-            thumbUrl = canvas.toDataURL('image/jpeg', 0.75);
+            thumbUrl = canvas.toDataURL('image/jpeg', 0.80);
           }
         }
 
@@ -160,14 +227,18 @@ export function processVideoFile(file: File): Promise<VideoMetadata> {
         const secs = durSec % 60;
         const formatted = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
 
-        URL.revokeObjectURL(videoUrl);
-        resolve({
-          thumbnailDataUrl: thumbUrl,
-          durationFormatted: formatted,
-          durationSeconds: durSec,
-          width: video.videoWidth,
-          height: video.videoHeight
-        });
+        // Also extract blob if possible
+        canvas.toBlob((posterBlob) => {
+          URL.revokeObjectURL(videoUrl);
+          resolve({
+            thumbnailDataUrl: thumbUrl,
+            posterBlob: posterBlob || undefined,
+            durationFormatted: formatted,
+            durationSeconds: durSec,
+            width: video.videoWidth,
+            height: video.videoHeight
+          });
+        }, 'image/webp', 0.80);
       } catch (err) {
         URL.revokeObjectURL(videoUrl);
         resolve({

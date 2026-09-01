@@ -186,6 +186,9 @@ export default function App() {
 
   // Handle URL changes & browser history
   const navigateTo = (route: string, mediaId?: string) => {
+    if (currentRoute === 'admin' && route !== 'admin') {
+      loadData(true);
+    }
     setCurrentRoute(route);
     if (mediaId) {
       setSelectedMediaId(mediaId);
@@ -376,6 +379,10 @@ export default function App() {
               }}
               onSettingsUpdated={(newSettings) => {
                 setSettings(newSettings);
+                loadData(true);
+              }}
+              onContentUpdated={(newContent) => {
+                setContent(newContent);
                 loadData(true);
               }}
             />

@@ -112,6 +112,8 @@ export interface SiteSettings {
   pushNotificationsEnabled?: boolean;
   notifyOnNewPost?: boolean;
   vapidKey?: string;
+  demoPurged?: boolean;
+  isSeeded?: boolean;
 }
 
 export interface NotificationToken {

@@ -105,7 +105,10 @@ export const HomePage: React.FC<HomePageProps> = ({
   const videoLimit = cfg.latestVideos?.limit || 4;
   const photoLimit = cfg.latestPhotos?.limit || 4;
 
-  const featuredContent = useMemo(() => content.filter((c) => c.featured).slice(0, featuredLimit), [content, featuredLimit]);
+  const featuredContent = useMemo(() => {
+    const featured = content.filter((c) => c.featured);
+    return (featured.length > 0 ? featured : content).slice(0, featuredLimit);
+  }, [content, featuredLimit]);
   const latestPhotos = useMemo(() => content.filter((c) => c.type === 'photo').slice(0, photoLimit), [content, photoLimit]);
   const latestVideos = useMemo(() => content.filter((c) => c.type === 'video').slice(0, videoLimit), [content, videoLimit]);
   const freeItems = useMemo(() => content.filter((c) => c.access === 'free'), [content]);

@@ -1,0 +1,16 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Allow public read access to all uploaded photos, videos, and thumbnails so clients & devices can load them
+    match /uploads/{folder}/{allPaths=**} {
+      allow read: if true;
+      // Allow upload and deletion for app operations
+      allow write: if true;
+    }
+    
+    // Global fallback
+    match /{allPaths=**} {
+      allow read, write: if true;
+    }
+  }
+}

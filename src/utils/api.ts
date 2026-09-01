@@ -3,6 +3,13 @@ import { CLIENT_SITE_SETTINGS, CLIENT_CONTENT_LIST } from '../data/defaultData';
 import QRCode from 'qrcode';
 import { firestore } from '../services/firebase';
 import {
+  ensureMediaItemStorageUrls,
+  ensureSiteSettingsStorageUrls,
+  cleanupMediaItemStorage,
+  uploadMediaToStorage,
+  isDataUrl
+} from '../services/storage';
+import {
   collection,
   doc,
   getDoc,
@@ -226,17 +233,23 @@ async function ensureFirestoreSeeded(): Promise<void> {
       const settingsSnap = await getDoc(settingsRef);
       
       if (!settingsSnap.exists()) {
-        console.log('[Firebase Cloud] First-time setup: Seeding Cloud Settings and Content...');
+        console.log('[Firebase Cloud] First-time setup: Initializing Cloud Settings...');
         await setDoc(settingsRef, sanitizeFirestorePayload({
           ...CLIENT_SITE_SETTINGS,
           isSeeded: true
         }));
+      } else {
+        const data = settingsSnap.data();
+        if (data?.demoPurged) {
+          // If demo content has been purged by admin, never re-seed demo items
+          return;
+        }
       }
 
-      // 2. Check/seed initial content
+      // 2. Check/seed initial content if content collection is currently empty and not explicitly purged
       const contentRef = collection(firestore, 'content');
       const contentSnap = await getDocs(query(contentRef, firestoreLimit(1)));
-      if (contentSnap.empty) {
+      if (contentSnap.empty && !settingsSnap.data()?.demoPurged) {
         console.log('[Firebase Cloud] Content collection empty. Seeding initial posts to Cloud Firestore...');
         for (const item of CLIENT_CONTENT_LIST) {
           const itemRef = doc(firestore, 'content', item.id);
@@ -299,7 +312,7 @@ export function getCachedContentListSync(): MediaItem[] {
     const raw = localStorage.getItem(CONTENT_CACHE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as MediaItem[];
-      if (Array.isArray(parsed)) {
+      if (Array.isArray(parsed) && parsed.length > 0) {
         memoryContentList = parsed;
         return parsed;
       }
@@ -407,6 +420,20 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
         }
       });
 
+      // If no custom content exists yet in Firestore and not explicitly purged, seed starter content
+      if (items.length === 0) {
+        const settings = memorySiteSettings || await fetchSiteSettings();
+        if (!settings.demoPurged) {
+          console.log('[Firebase Cloud] Content collection empty. Populating with initial catalog...');
+          for (const starter of CLIENT_CONTENT_LIST) {
+            try {
+              await setDoc(doc(firestore, 'content', starter.id), sanitizeFirestorePayload(starter));
+            } catch (_) {}
+            items.push(starter);
+          }
+        }
+      }
+
       // Sort by creation date (newest first)
       items.sort((a, b) => {
         const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
@@ -493,6 +520,12 @@ export async function purgeDemoContent(): Promise<{ deletedCount: number; messag
     } catch (_) {}
   }
 
+  // Persist demoPurged flag to Firestore settings so demo items never re-seed
+  try {
+    const settingsRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
+    await setDoc(settingsRef, { demoPurged: true }, { merge: true });
+  } catch (_) {}
+
   // Update local memory & cache
   if (memoryContentList) {
     memoryContentList = memoryContentList.filter(c => !demoIds.includes(c.id));
@@ -504,7 +537,7 @@ export async function purgeDemoContent(): Promise<{ deletedCount: number; messag
 
   return {
     deletedCount,
-    message: `सफलतापूर्वक ${deletedCount} डेमो पोस्ट हटा दिए गए। अब केवल आपका असली कंटेंट दिखेगा।`
+    message: `सफलतापूर्वक ${deletedCount} डेमो पोस्ट हटा दिए गए। अब सभी डिवाइसेस पर केवल आपका असली कंटेंट दिखेगा।`
   };
 }
 
@@ -914,6 +947,15 @@ export async function submitPaymentUtr(
   const finalName = customerName || storedUser?.name;
   const finalPhone = customerPhone || storedUser?.phone;
 
+  let finalScreenshot = screenshotUrl;
+  if (finalScreenshot && isDataUrl(finalScreenshot)) {
+    try {
+      finalScreenshot = await uploadMediaToStorage(finalScreenshot, 'documents');
+    } catch (e) {
+      console.warn('Screenshot upload to storage non-fatal:', e);
+    }
+  }
+
   if (!isCloudQuotaExhausted()) {
     try {
       const orderRef = doc(firestore, 'orders', orderId);
@@ -928,7 +970,7 @@ export async function submitPaymentUtr(
           customerName: finalName || current.customerName,
           customerPhone: finalPhone || current.customerPhone,
           payerUpi: payerUpi || current.payerUpi,
-          screenshotUrl: screenshotUrl || current.screenshotUrl,
+          screenshotUrl: finalScreenshot || current.screenshotUrl,
           paidAt: isInstant ? paidAt : current.paidAt,
           accessToken: isInstant ? token : current.accessToken
         };
@@ -1048,47 +1090,47 @@ export async function fetchAdminContent(forceFresh = false): Promise<MediaItem[]
 
 export async function createAdminContent(itemData: Partial<MediaItem>): Promise<MediaItem> {
   const newId = `rk-${Date.now()}`;
+  
+  // Convert any remaining base64 payload to permanent Firebase Storage download URLs
+  const storagePrepared = await ensureMediaItemStorageUrls(itemData);
+
   const rawItem: MediaItem = {
     id: newId,
-    title: itemData.title?.trim() || 'New Exclusive Post',
-    description: itemData.description?.trim() || '',
-    type: itemData.type || 'photo',
-    access: itemData.access || 'premium',
-    price: itemData.price !== undefined ? Number(itemData.price) : 49,
-    thumbnailUrl: itemData.thumbnailUrl || CLIENT_CONTENT_LIST[0].thumbnailUrl,
-    mediaUrl: itemData.mediaUrl || itemData.thumbnailUrl || '',
-    previewUrl: itemData.previewUrl || itemData.thumbnailUrl || '',
-    galleryUrls: Array.isArray(itemData.galleryUrls) ? itemData.galleryUrls : [],
-    photoCount: itemData.photoCount || (Array.isArray(itemData.galleryUrls) && itemData.galleryUrls.length > 0 ? itemData.galleryUrls.length : 1),
-    tags: Array.isArray(itemData.tags) && itemData.tags.length > 0 ? itemData.tags : ['VIP'],
-    views: typeof itemData.views === 'number' ? itemData.views : 1,
-    likes: typeof itemData.likes === 'number' ? itemData.likes : 0,
-    published: itemData.published !== false,
-    featured: Boolean(itemData.featured),
+    title: storagePrepared.title?.trim() || 'New Exclusive Post',
+    description: storagePrepared.description?.trim() || '',
+    type: storagePrepared.type || 'photo',
+    access: storagePrepared.access || 'premium',
+    price: storagePrepared.price !== undefined ? Number(storagePrepared.price) : 49,
+    thumbnailUrl: storagePrepared.thumbnailUrl || CLIENT_CONTENT_LIST[0].thumbnailUrl,
+    mediaUrl: storagePrepared.mediaUrl || storagePrepared.thumbnailUrl || '',
+    previewUrl: storagePrepared.previewUrl || storagePrepared.thumbnailUrl || '',
+    galleryUrls: Array.isArray(storagePrepared.galleryUrls) ? storagePrepared.galleryUrls : [],
+    photoCount: storagePrepared.photoCount || (Array.isArray(storagePrepared.galleryUrls) && storagePrepared.galleryUrls.length > 0 ? storagePrepared.galleryUrls.length : 1),
+    tags: Array.isArray(storagePrepared.tags) && storagePrepared.tags.length > 0 ? storagePrepared.tags : ['VIP'],
+    views: typeof storagePrepared.views === 'number' ? storagePrepared.views : 1,
+    likes: typeof storagePrepared.likes === 'number' ? storagePrepared.likes : 0,
+    published: storagePrepared.published !== false,
+    featured: Boolean(storagePrepared.featured),
     createdAt: new Date().toISOString(),
   };
 
-  if (itemData.duration) rawItem.duration = itemData.duration;
-  if (itemData.badge) rawItem.badge = itemData.badge;
-  if (itemData.customNote) rawItem.customNote = itemData.customNote;
+  if (storagePrepared.duration) rawItem.duration = storagePrepared.duration;
+  if (storagePrepared.badge) rawItem.badge = storagePrepared.badge;
+  if (storagePrepared.customNote) rawItem.customNote = storagePrepared.customNote;
 
   const cleanItem = sanitizeFirestorePayload(rawItem);
-
-  // Measure payload size to prevent Firestore 1MB document limit issues
-  try {
-    const approximateSize = new Blob([JSON.stringify(cleanItem)]).size;
-    if (approximateSize > 900000) {
-      throw new Error('फ़ाइल का साइज़ बहुत बड़ा है (1MB सीमा)। कृपया कम या कंप्रेस की गई फोटो चुनें।');
-    }
-  } catch (sizeErr: any) {
-    if (sizeErr.message?.includes('1MB')) throw sizeErr;
-  }
 
   // 1. Direct Cloud Firestore Write (Ensures post is stored on cloud for all users)
   try {
     const docRef = doc(firestore, 'content', newId);
     await setDoc(docRef, cleanItem);
     console.log('[Firebase Cloud] Successfully stored post in Firestore for all devices:', newId);
+    
+    // Also mark demoPurged in settings so demo data is never re-seeded
+    try {
+      const settingsRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
+      await setDoc(settingsRef, { demoPurged: true }, { merge: true });
+    } catch (_) {}
   } catch (err: any) {
     console.error('[Firebase Cloud Write Error]', err);
     if (isQuotaError(err)) {
@@ -1111,7 +1153,9 @@ export async function createAdminContent(itemData: Partial<MediaItem>): Promise<
 }
 
 export async function updateAdminContent(id: string, updates: Partial<MediaItem>): Promise<MediaItem> {
-  const cleanUpdates = sanitizeFirestorePayload(updates);
+  // Convert any remaining base64 payload to permanent Firebase Storage download URLs
+  const storagePrepared = await ensureMediaItemStorageUrls(updates);
+  const cleanUpdates = sanitizeFirestorePayload(storagePrepared);
 
   // 1. Update in Cloud Firestore
   try {
@@ -1144,6 +1188,10 @@ export async function updateAdminContent(id: string, updates: Partial<MediaItem>
 }
 
 export async function deleteAdminContent(id: string): Promise<boolean> {
+  // Find item if exists to clean up its storage media
+  const currentList = memoryContentList || getCachedContentListSync();
+  const targetItem = currentList.find(i => i.id === id);
+
   // 1. Delete from Cloud Firestore
   try {
     const docRef = doc(firestore, 'content', id);
@@ -1154,8 +1202,12 @@ export async function deleteAdminContent(id: string): Promise<boolean> {
     throw new Error(`क्लाउड से डिलीट विफल: ${err.message || 'नेटवर्क त्रुटि'}`);
   }
 
-  // 2. Remove from local memory & cache
-  const currentList = memoryContentList || getCachedContentListSync();
+  // 2. Clean up storage files in background if available
+  if (targetItem) {
+    cleanupMediaItemStorage(targetItem).catch(err => console.warn('[Storage Cleanup Non-fatal]', err));
+  }
+
+  // 3. Remove from local memory & cache
   memoryContentList = currentList.filter(i => i.id !== id);
   memoryContentTimestamp = Date.now();
   try {
@@ -1169,9 +1221,12 @@ export async function deleteAdminContent(id: string): Promise<boolean> {
 // 11. Update Site Settings (Writes to Cloud Firestore & Memory Cache)
 // ----------------------------------------------------------------------------
 export async function updateAdminSettings(settings: Partial<SiteSettings>): Promise<SiteSettings> {
+  // Ensure profile picture and banner are uploaded to Firebase Storage
+  const storagePrepared = await ensureSiteSettingsStorageUrls(settings);
+
   const merged: SiteSettings = {
     ...(memorySiteSettings || getCachedSiteSettingsSync()),
-    ...settings
+    ...storagePrepared
   };
 
   const cleanSettings = sanitizeFirestorePayload(merged);

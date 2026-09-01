@@ -9,9 +9,12 @@ import {
   Star,
   Trash2,
   Sparkles,
-  Layers
+  Layers,
+  CloudUpload,
+  AlertCircle
 } from 'lucide-react';
-import { compressImageFile, readFileAsDataURL, formatFileSize } from '../utils/mediaUpload';
+import { compressImageToBlob, formatFileSize } from '../utils/mediaUpload';
+import { uploadFileToStorage, uploadDataUrlToStorage, isFirebaseStorageUrl } from '../services/storage';
 import { ImageCropperModal } from './ImageCropperModal';
 
 interface MultiPhotoUploadZoneProps {
@@ -37,6 +40,8 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingProgress, setProcessingProgress] = useState<string | null>(null);
+  const [uploadPercent, setUploadPercent] = useState<number>(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
   // Cropper State for single item in the gallery
@@ -49,20 +54,47 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
   const handleFiles = async (files: FileList | File[]) => {
     if (!files || files.length === 0) return;
     setIsProcessing(true);
+    setUploadError(null);
+    setUploadPercent(0);
 
     const newPhotoUrls: string[] = [];
-    const total = files.length;
+    const validFiles: File[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      if (files[i].type.startsWith('image/')) {
+        validFiles.push(files[i]);
+      }
+    }
+
+    const total = validFiles.length;
+    if (total === 0) {
+      setIsProcessing(false);
+      return;
+    }
 
     try {
       for (let i = 0; i < total; i++) {
-        const file = files[i];
-        if (!file.type.startsWith('image/')) continue;
+        const file = validFiles[i];
+        setProcessingProgress(`Firebase Storage में अपलोड हो रहा है (${i + 1}/${total})...`);
+        
+        // 1. Optimize image to Blob
+        const { blob, mimeType } = await compressImageToBlob(file, 1600, 1600, 0.82);
+        
+        // 2. Upload directly to Firebase Storage
+        const uploadResult = await uploadFileToStorage(
+          blob,
+          'photos',
+          `album_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 7)}.${mimeType.includes('webp') ? 'webp' : 'jpg'}`,
+          (pct) => {
+            const overallPct = Math.round(((i / total) * 100) + (pct / total));
+            setUploadPercent(overallPct);
+          }
+        );
 
-        setProcessingProgress(`फोटो प्रोसेस हो रही है (${i + 1}/${total})...`);
-        const compressed = await compressImageFile(file, 850, 850, 0.74);
-        newPhotoUrls.push(compressed);
+        newPhotoUrls.push(uploadResult.downloadUrl);
       }
 
+      setUploadPercent(100);
       if (newPhotoUrls.length > 0) {
         const updatedList = [...photos, ...newPhotoUrls];
         onChange(updatedList);
@@ -73,7 +105,8 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
         }
       }
     } catch (err: any) {
-      alert('Error uploading photos: ' + (err.message || 'Unknown error'));
+      console.error('[MultiPhoto Upload Error]', err);
+      setUploadError(err.message || 'Photos upload failed. Please try again.');
     } finally {
       setIsProcessing(false);
       setProcessingProgress(null);
@@ -109,20 +142,37 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
     setShowCropperModal(true);
   };
 
-  const handleCropComplete = (croppedDataUrl: string) => {
-    if (cropTargetIndex !== null && cropTargetIndex >= 0 && cropTargetIndex < photos.length) {
-      const updated = [...photos];
-      const oldUrl = updated[cropTargetIndex];
-      updated[cropTargetIndex] = croppedDataUrl;
-      onChange(updated);
-
-      if (oldUrl === currentCover && onCoverChange) {
-        onCoverChange(croppedDataUrl);
-      }
-    }
+  const handleCropComplete = async (croppedDataUrl: string) => {
     setShowCropperModal(false);
+    const targetIdx = cropTargetIndex;
     setCropTargetIndex(null);
     setRawImageForCrop(null);
+
+    if (targetIdx !== null && targetIdx >= 0 && targetIdx < photos.length) {
+      setIsProcessing(true);
+      setProcessingProgress('क्रॉप की गई फोटो Cloud Storage में अपलोड हो रही है...');
+      try {
+        const uploadResult = await uploadDataUrlToStorage(
+          croppedDataUrl,
+          'photos',
+          `crop_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.webp`
+        );
+        const updated = [...photos];
+        const oldUrl = updated[targetIdx];
+        updated[targetIdx] = uploadResult.downloadUrl;
+        onChange(updated);
+
+        if (oldUrl === currentCover && onCoverChange) {
+          onCoverChange(uploadResult.downloadUrl);
+        }
+      } catch (err: any) {
+        console.error('[Crop Upload Error]', err);
+        setUploadError(err.message || 'Cropped image upload failed');
+      } finally {
+        setIsProcessing(false);
+        setProcessingProgress(null);
+      }
+    }
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -158,7 +208,7 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
         {photos.length > 0 && (
           <span className="text-[11px] font-black bg-pink-100 text-pink-700 border border-pink-200 px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
             <Sparkles className="w-3 h-3 text-pink-600" />
-            <span>{photos.length} Photos Selected</span>
+            <span>{photos.length} Photos Cloud Synced</span>
           </span>
         )}
       </div>
@@ -167,6 +217,24 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
         <p className="text-[11px] text-purple-900/70 font-medium">
           {helperText}
         </p>
+      )}
+
+      {/* Error alert */}
+      {uploadError && (
+        <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2 text-rose-700 text-xs">
+          <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+          <div className="flex-1 min-w-0">
+            <span className="font-bold">अपलोड त्रुटि: </span>
+            <span>{uploadError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setUploadError(null)}
+            className="text-rose-500 hover:text-rose-800 p-1"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
       )}
 
       {/* Hidden Multi-file input */}
@@ -186,38 +254,57 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
-        className={`relative border-2 border-dashed rounded-2xl p-4 transition-all duration-200 cursor-pointer text-center select-none ${
-          isDragging
-            ? 'border-pink-500 bg-pink-50/80 scale-[1.01]'
-            : 'border-purple-200/80 bg-white/70 hover:bg-pink-50/40 hover:border-pink-300'
+        onClick={() => !isProcessing && fileInputRef.current?.click()}
+        className={`relative border-2 border-dashed rounded-2xl p-4 transition-all duration-200 select-none text-center ${
+          isProcessing
+            ? 'border-pink-500 bg-pink-50/50 cursor-wait'
+            : isDragging
+            ? 'border-pink-500 bg-pink-50/80 scale-[1.01] cursor-pointer'
+            : 'border-purple-200/80 bg-white/70 hover:bg-pink-50/40 hover:border-pink-300 cursor-pointer'
         }`}
       >
-        <div className="flex flex-col items-center justify-center space-y-1.5">
+        <div className="flex flex-col items-center justify-center space-y-2">
           <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-500/20 to-purple-500/20 text-pink-600 flex items-center justify-center shadow-xs">
             {isProcessing ? (
-              <div className="w-5 h-5 border-2 border-pink-600 border-t-transparent rounded-full animate-spin" />
+              <CloudUpload className="w-5 h-5 animate-pulse text-pink-600" />
             ) : (
-              <Upload className="w-5 h-5" />
+              <CloudUpload className="w-5 h-5" />
             )}
           </div>
 
-          <div>
-            <p className="text-xs font-black text-purple-950 flex items-center justify-center gap-1.5">
-              <span>{isProcessing ? processingProgress : '📸 एक साथ कई फोटो चुनें (Select Multiple Photos)'}</span>
-            </p>
-            <p className="text-[11px] text-purple-900/60 mt-0.5">
-              गैलरी से 1 से लेकर 20+ फ़ोटो एक साथ सेलेक्ट करें या ड्रैग करें
-            </p>
-          </div>
-
-          <button
-            type="button"
-            className="mt-1 px-4 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-[11px] font-black shadow-md shadow-pink-500/20 flex items-center gap-1.5 pointer-events-none"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>फ़ोटो जोड़ें (+ Add Photos)</span>
-          </button>
+          {isProcessing ? (
+            <div className="w-full max-w-xs space-y-1.5">
+              <div className="flex items-center justify-between text-xs font-black text-purple-950">
+                <span>{processingProgress}</span>
+                <span className="text-pink-600">{uploadPercent}%</span>
+              </div>
+              <div className="w-full h-2.5 bg-purple-100 rounded-full overflow-hidden border border-purple-200">
+                <div
+                  className="h-full bg-gradient-to-r from-pink-500 to-rose-500 rounded-full transition-all duration-300"
+                  style={{ width: `${Math.max(5, uploadPercent)}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-purple-900/60 font-medium">
+                फ़ोटो Firebase Storage में स्थायी रूप से सेव हो रही हैं
+              </p>
+            </div>
+          ) : (
+            <div>
+              <p className="text-xs font-black text-purple-950 flex items-center justify-center gap-1.5">
+                <span>📸 एक साथ कई फोटो चुनें (Select Multiple Photos for Album)</span>
+              </p>
+              <p className="text-[11px] text-purple-900/60 mt-0.5">
+                गैलरी से 1 से लेकर 20+ फ़ोटो एक साथ चुनें • Direct Firebase Storage Sync
+              </p>
+              <button
+                type="button"
+                className="mt-2 px-4 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-[11px] font-black shadow-md shadow-pink-500/20 flex items-center gap-1.5 mx-auto"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>फ़ोटो जोड़ें (+ Add to Cloud Album)</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -256,6 +343,7 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
                     src={photoUrl}
                     alt={`Item ${idx + 1}`}
                     className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
                   />
 
                   {/* Photo Index / Cover Badge */}
@@ -278,7 +366,7 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
                       <button
                         type="button"
                         onClick={(e) => handleRemovePhoto(idx, e)}
-                        className="p-1 rounded-md bg-rose-600 text-white hover:bg-rose-500 transition-colors shadow-xs"
+                        className="p-1 rounded-md bg-rose-600 text-white hover:bg-rose-500 transition-colors shadow-xs cursor-pointer"
                         title="हटाएं (Remove)"
                       >
                         <Trash2 className="w-3 h-3" />
@@ -289,7 +377,7 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
                       <button
                         type="button"
                         onClick={(e) => handleOpenCropForPhoto(idx, e)}
-                        className="w-full py-0.5 rounded-md bg-white/90 hover:bg-white text-purple-950 font-bold text-[9px] flex items-center justify-center gap-1 shadow-xs"
+                        className="w-full py-0.5 rounded-md bg-white/90 hover:bg-white text-purple-950 font-bold text-[9px] flex items-center justify-center gap-1 shadow-xs cursor-pointer"
                       >
                         <Crop className="w-2.5 h-2.5 text-pink-600" />
                         <span>क्रॉप</span>
@@ -299,7 +387,7 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
                         <button
                           type="button"
                           onClick={(e) => handleSetCover(photoUrl, e)}
-                          className="w-full py-0.5 rounded-md bg-pink-600 hover:bg-pink-500 text-white font-bold text-[9px] flex items-center justify-center gap-1 shadow-xs"
+                          className="w-full py-0.5 rounded-md bg-pink-600 hover:bg-pink-500 text-white font-bold text-[9px] flex items-center justify-center gap-1 shadow-xs cursor-pointer"
                         >
                           <Star className="w-2.5 h-2.5" />
                           <span>कवर बनाएं</span>

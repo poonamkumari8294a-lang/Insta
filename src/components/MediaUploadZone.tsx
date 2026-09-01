@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
-import { Upload, Film, Image as ImageIcon, CheckCircle2, X, Link as LinkIcon, RefreshCw, Eye, Crop } from 'lucide-react';
-import { compressImageFile, processVideoFile, readFileAsDataURL, formatFileSize } from '../utils/mediaUpload';
+import { Upload, Film, Image as ImageIcon, CheckCircle2, X, Link as LinkIcon, RefreshCw, Eye, Crop, CloudUpload, FileText, AlertCircle } from 'lucide-react';
+import { compressImageToBlob, processVideoFile, formatFileSize } from '../utils/mediaUpload';
+import { uploadFileToStorage, uploadDataUrlToStorage, isDataUrl, isFirebaseStorageUrl } from '../services/storage';
 import { ImageCropperModal, CropAspectRatio } from './ImageCropperModal';
 
 interface MediaUploadZoneProps {
@@ -8,13 +9,14 @@ interface MediaUploadZoneProps {
   label: string;
   value: string;
   onChange: (url: string, metadata?: { duration?: string; thumbnail?: string }) => void;
-  accept?: 'image' | 'video' | 'any';
+  accept?: 'image' | 'video' | 'document' | 'any';
   helperText?: string;
   required?: boolean;
   aspectRatio?: 'square' | 'video' | 'banner' | 'auto';
   onThumbnailExtracted?: (thumbUrl: string) => void;
   onDurationExtracted?: (duration: string) => void;
   enableCrop?: boolean;
+  storageFolder?: 'photos' | 'videos' | 'thumbnails' | 'documents' | 'settings';
 }
 
 export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
@@ -29,12 +31,16 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
   onThumbnailExtracted,
   onDurationExtracted,
   enableCrop = true,
+  storageFolder
 }) => {
   const [mode, setMode] = useState<'gallery' | 'url'>(
-    value && (value.startsWith('http://') || value.startsWith('https://')) && !value.startsWith('data:') ? 'url' : 'gallery'
+    value && (value.startsWith('http://') || value.startsWith('https://')) && !value.includes('firebasestorage.googleapis.com') && !value.startsWith('data:') ? 'url' : 'gallery'
   );
   const [isDragging, setIsDragging] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [uploadStatus, setUploadStatus] = useState<string>('');
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [fileDetails, setFileDetails] = useState<{ name: string; size: string; type: string } | null>(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   
@@ -49,12 +55,20 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
       ? 'image/jpeg,image/png,image/webp,image/gif,image/jpg'
       : accept === 'video'
       ? 'video/mp4,video/webm,video/quicktime,video/mov'
-      : 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime';
+      : accept === 'document'
+      ? 'application/pdf,image/jpeg,image/png'
+      : 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime,application/pdf';
 
   const isVideo = (url: string) => {
     if (!url) return false;
     if (url.startsWith('data:video/')) return true;
     return url.match(/\.(mp4|webm|mov|m4v)(\?.*)?$/i) !== null;
+  };
+
+  const isPdf = (url: string) => {
+    if (!url) return false;
+    if (url.startsWith('data:application/pdf')) return true;
+    return url.match(/\.pdf(\?.*)?$/i) !== null;
   };
 
   const getInitialCropAspect = (): CropAspectRatio => {
@@ -63,69 +77,148 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
     return 'free';
   };
 
+  const determinedFolder = storageFolder || (accept === 'video' ? 'videos' : accept === 'document' ? 'documents' : 'photos');
+
   const handleFile = async (file: File) => {
     if (!file) return;
-    setIsProcessing(true);
+    setIsUploading(true);
+    setUploadProgress(0);
+    setUploadStatus('फ़ाइल तैयार हो रही है...');
+    setUploadError(null);
+
+    const isVideoFile = file.type.startsWith('video/');
+    const isImageFile = file.type.startsWith('image/');
+    const isPdfFile = file.type === 'application/pdf';
+
+    setFileDetails({
+      name: file.name,
+      size: formatFileSize(file.size),
+      type: isVideoFile ? 'Video' : isPdfFile ? 'PDF Document' : 'Photo',
+    });
 
     try {
-      const isVideoFile = file.type.startsWith('video/');
-      const isImageFile = file.type.startsWith('image/');
-
-      setFileDetails({
-        name: file.name,
-        size: formatFileSize(file.size),
-        type: isVideoFile ? 'Video' : 'Photo',
-      });
-
       if (isImageFile) {
-        // Read image data
-        const rawData = await readFileAsDataURL(file);
+        setUploadStatus('फ़ाइल कंप्रेस और ऑप्टिमाइज़ हो रही है...');
+        const { blob, mimeType } = await compressImageToBlob(file, 1600, 1600, 0.82);
         
-        if (enableCrop) {
-          // Open the interactive Crop Modal immediately for the user
-          setRawImageForCrop(rawData);
-          setShowCropperModal(true);
-        } else {
-          // Compress directly if crop is disabled
-          const compressedDataUrl = await compressImageFile(file, 900, 900, 0.74);
-          onChange(compressedDataUrl);
-        }
-      } else if (isVideoFile) {
-        // Process video, extract duration and frame
-        const videoDataUrl = await readFileAsDataURL(file);
-        onChange(videoDataUrl);
+        setUploadStatus('Firebase Storage में अपलोड हो रहा है (0%)...');
+        const uploadResult = await uploadFileToStorage(
+          blob,
+          determinedFolder,
+          `img_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${mimeType.includes('webp') ? 'webp' : 'jpg'}`,
+          (pct) => {
+            setUploadProgress(pct);
+            setUploadStatus(`Firebase Storage में अपलोड हो रहा है (${pct}%)...`);
+          }
+        );
 
+        setUploadProgress(100);
+        setUploadStatus('✅ अपलोड पूर्ण!');
+        onChange(uploadResult.downloadUrl);
+
+      } else if (isVideoFile) {
+        setUploadStatus('वीडियो मेटाडेटा और थंबनेल तैयार हो रहा है...');
+        
+        // 1. Process thumbnail & duration in parallel
+        let extractedPosterUrl = '';
         try {
           const meta = await processVideoFile(file);
           if (meta.durationFormatted && onDurationExtracted) {
             onDurationExtracted(meta.durationFormatted);
           }
-          if (meta.thumbnailDataUrl && onThumbnailExtracted) {
-            onThumbnailExtracted(meta.thumbnailDataUrl);
+          if (meta.posterBlob) {
+            const thumbUpload = await uploadFileToStorage(
+              meta.posterBlob,
+              'thumbnails',
+              `thumb_${Date.now()}_video.webp`
+            );
+            extractedPosterUrl = thumbUpload.downloadUrl;
+            if (onThumbnailExtracted) {
+              onThumbnailExtracted(extractedPosterUrl);
+            }
           }
-        } catch (e) {
-          console.warn('Could not extract video metadata', e);
+        } catch (thumbErr) {
+          console.warn('[Video Meta Extract Non-fatal]', thumbErr);
         }
+
+        // 2. Upload actual video file
+        setUploadStatus('Firebase Storage में वीडियो अपलोड हो रहा है (0%)...');
+        const uploadResult = await uploadFileToStorage(
+          file,
+          'videos',
+          `video_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`,
+          (pct) => {
+            setUploadProgress(pct);
+            setUploadStatus(`Firebase Storage में वीडियो अपलोड हो रहा है (${pct}%)...`);
+          }
+        );
+
+        setUploadProgress(100);
+        setUploadStatus('✅ वीडियो अपलोड पूर्ण!');
+        onChange(uploadResult.downloadUrl, {
+          thumbnail: extractedPosterUrl
+        });
+
       } else {
-        const rawData = await readFileAsDataURL(file);
-        onChange(rawData);
+        // Document / PDF / other
+        setUploadStatus('Firebase Storage में दस्तावेज़ अपलोड हो रहा है (0%)...');
+        const uploadResult = await uploadFileToStorage(
+          file,
+          'documents',
+          `doc_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`,
+          (pct) => {
+            setUploadProgress(pct);
+            setUploadStatus(`Firebase Storage में दस्तावेज़ अपलोड हो रहा है (${pct}%)...`);
+          }
+        );
+
+        setUploadProgress(100);
+        setUploadStatus('✅ अपलोड पूर्ण!');
+        onChange(uploadResult.downloadUrl);
       }
     } catch (err: any) {
-      alert('Error reading file: ' + (err.message || 'Unknown error'));
+      console.error('[Upload Error]', err);
+      const errMsg = err.message || 'Firebase Storage upload failed. Please try again.';
+      setUploadError(errMsg);
     } finally {
-      setIsProcessing(false);
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
-  const handleCropComplete = (croppedDataUrl: string) => {
-    onChange(croppedDataUrl);
+  const handleCropComplete = async (croppedDataUrl: string) => {
     setShowCropperModal(false);
     setRawImageForCrop(null);
+    setIsUploading(true);
+    setUploadProgress(0);
+    setUploadStatus('क्रॉप की गई फ़ोटो Firebase Storage में अपलोड हो रही है...');
+    setUploadError(null);
+
+    try {
+      const uploadResult = await uploadDataUrlToStorage(
+        croppedDataUrl,
+        determinedFolder,
+        `crop_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.webp`,
+        (pct) => {
+          setUploadProgress(pct);
+          setUploadStatus(`Firebase Storage में सेव हो रहा है (${pct}%)...`);
+        }
+      );
+      setUploadProgress(100);
+      onChange(uploadResult.downloadUrl);
+    } catch (err: any) {
+      console.error('[Crop Upload Error]', err);
+      setUploadError(err.message || 'Cropped image upload failed');
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const handleManualCropOpen = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!value || isVideo(value)) return;
+    if (!value || isVideo(value) || isPdf(value)) return;
     setRawImageForCrop(value);
     setShowCropperModal(true);
   };
@@ -156,6 +249,7 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
     e.stopPropagation();
     onChange('');
     setFileDetails(null);
+    setUploadError(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -165,7 +259,13 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
     <div className="space-y-1.5" id={id}>
       <div className="flex items-center justify-between">
         <label className="font-bold text-purple-950 text-xs flex items-center gap-1.5">
-          {accept === 'video' ? <Film className="w-3.5 h-3.5 text-pink-600" /> : <ImageIcon className="w-3.5 h-3.5 text-pink-600" />}
+          {accept === 'video' ? (
+            <Film className="w-3.5 h-3.5 text-pink-600" />
+          ) : accept === 'document' ? (
+            <FileText className="w-3.5 h-3.5 text-pink-600" />
+          ) : (
+            <ImageIcon className="w-3.5 h-3.5 text-pink-600" />
+          )}
           <span>{label}</span>
           {required && <span className="text-pink-600 font-black">*</span>}
         </label>
@@ -181,8 +281,8 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
                 : 'text-purple-900/70 hover:text-purple-950'
             }`}
           >
-            <Upload className="w-3 h-3" />
-            <span>Gallery / Device</span>
+            <CloudUpload className="w-3 h-3" />
+            <span>Cloud Storage</span>
           </button>
           <button
             type="button"
@@ -237,7 +337,7 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
                 </div>
               </div>
 
-              {!isVideo(value) && enableCrop && (
+              {!isVideo(value) && !isPdf(value) && enableCrop && (
                 <button
                   type="button"
                   onClick={handleManualCropOpen}
@@ -251,7 +351,7 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
           )}
         </div>
       ) : (
-        /* Gallery / Device Upload Mode */
+        /* Cloud Storage Gallery / Device Upload Mode */
         <div>
           <input
             ref={fileInputRef}
@@ -265,29 +365,72 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
             className="hidden"
           />
 
-          {!value ? (
-            /* Upload Drop Area */
+          {uploadError && (
+            <div className="mb-2 p-2.5 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2 text-rose-700 text-xs">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+              <div className="flex-1 min-w-0">
+                <span className="font-bold">अपलोड त्रुटि: </span>
+                <span>{uploadError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setUploadError(null)}
+                className="text-rose-500 hover:text-rose-800 p-1"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {!value || isUploading ? (
+            /* Upload Drop Area & Real-Time Progress */
             <div
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
-              className={`relative border-2 border-dashed rounded-2xl p-4 sm:p-5 transition-all text-center cursor-pointer group ${
-                isDragging
-                  ? 'border-pink-500 bg-pink-50/80 scale-[0.99]'
-                  : 'border-purple-200/90 hover:border-pink-400 bg-white/70 hover:bg-pink-50/30'
+              onClick={() => !isUploading && fileInputRef.current?.click()}
+              className={`relative border-2 border-dashed rounded-2xl p-4 sm:p-5 transition-all text-center group ${
+                isUploading
+                  ? 'border-pink-500 bg-pink-50/50 cursor-wait'
+                  : isDragging
+                  ? 'border-pink-500 bg-pink-50/80 scale-[0.99] cursor-pointer'
+                  : 'border-purple-200/90 hover:border-pink-400 bg-white/70 hover:bg-pink-50/30 cursor-pointer'
               }`}
             >
-              {isProcessing ? (
-                <div className="flex flex-col items-center justify-center py-4 space-y-2">
-                  <RefreshCw className="w-7 h-7 text-pink-600 animate-spin" />
-                  <span className="text-xs font-black text-purple-950">गैलरी से लोड हो रहा है...</span>
-                  <span className="text-[10px] text-purple-900/60">क्रॉप टूल तैयार किया जा रहा है</span>
+              {isUploading ? (
+                <div className="flex flex-col items-center justify-center py-3 space-y-3">
+                  <div className="relative">
+                    <CloudUpload className="w-9 h-9 text-pink-600 animate-pulse" />
+                    <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 border-2 border-white animate-ping" />
+                  </div>
+
+                  <div className="w-full max-w-xs space-y-1.5">
+                    <div className="flex items-center justify-between text-xs font-black text-purple-950">
+                      <span>{uploadStatus}</span>
+                      <span className="text-pink-600">{uploadProgress}%</span>
+                    </div>
+                    <div className="w-full h-2.5 bg-purple-100 rounded-full overflow-hidden border border-purple-200">
+                      <div
+                        className="h-full bg-gradient-to-r from-pink-500 to-rose-500 rounded-full transition-all duration-300 shadow-sm"
+                        style={{ width: `${Math.max(5, uploadProgress)}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <p className="text-[10px] text-purple-900/60 font-medium">
+                    Cloud Storage में स्थायी रूप से सेव हो रहा है (सभी डिवाइसेस पर तुरंत दिखेगा)
+                  </p>
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-2 space-y-2">
                   <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-pink-500 to-rose-400 text-white flex items-center justify-center shadow-md shadow-pink-500/20 group-hover:scale-105 transition-transform">
-                    {accept === 'video' ? <Film className="w-5 h-5" /> : <Upload className="w-5 h-5" />}
+                    {accept === 'video' ? (
+                      <Film className="w-5 h-5" />
+                    ) : accept === 'document' ? (
+                      <FileText className="w-5 h-5" />
+                    ) : (
+                      <CloudUpload className="w-5 h-5" />
+                    )}
                   </div>
                   <div>
                     <p className="text-xs font-black text-purple-950">
@@ -295,10 +438,10 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
                     </p>
                     <p className="text-[10px] text-purple-900/60 mt-0.5">
                       {accept === 'video'
-                        ? 'Supports MP4, WebM, MOV • Auto-extracts poster & duration'
+                        ? 'Supports MP4, WebM, MOV • Auto-extracts poster & duration • Firebase Storage'
                         : accept === 'image'
-                        ? 'Supports JPG, PNG, WEBP • इन-ऐप लाइव फोटो क्रॉपिंग सपोर्ट'
-                        : 'Supports Photos & Videos directly from storage with Cropper'}
+                        ? 'Supports JPG, PNG, WEBP • Auto-optimized • Direct Firebase Storage Sync'
+                        : 'Supports Photos, Videos & Documents • Permanent Cloud Storage'}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -306,9 +449,9 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
                       type="button"
                       className="px-3.5 py-1.5 rounded-xl bg-purple-100 group-hover:bg-pink-100 text-purple-950 text-[11px] font-black border border-purple-200 transition-colors"
                     >
-                      📁 Browse Files / Gallery
+                      📁 Browse & Upload to Cloud
                     </button>
-                    {accept !== 'video' && enableCrop && (
+                    {accept !== 'video' && accept !== 'document' && enableCrop && (
                       <span className="px-2.5 py-1 rounded-xl bg-pink-50 text-pink-600 text-[10px] font-bold border border-pink-100 flex items-center gap-1">
                         <Crop className="w-3 h-3" />
                         <span>Auto-Crop Ready</span>
@@ -319,7 +462,7 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
               )}
             </div>
           ) : (
-            /* Uploaded Preview State with Direct Crop Tool Button */
+            /* Uploaded Preview State with Direct Crop & Cloud Storage Status */
             <div className="relative rounded-2xl border border-purple-200 bg-white/90 p-3 flex items-center gap-3 shadow-xs">
               <div
                 onClick={() => setShowPreviewModal(true)}
@@ -333,6 +476,11 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
               >
                 {isVideo(value) ? (
                   <video src={value} className="w-full h-full object-cover" />
+                ) : isPdf(value) ? (
+                  <div className="w-full h-full flex flex-col items-center justify-center bg-rose-50 text-rose-600 p-1">
+                    <FileText className="w-6 h-6" />
+                    <span className="text-[9px] font-black">PDF</span>
+                  </div>
                 ) : (
                   <img src={value} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                 )}
@@ -345,16 +493,19 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
                 <div className="flex items-center gap-1.5">
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                   <span className="text-xs font-bold text-purple-950 truncate">
-                    {fileDetails?.name || (isVideo(value) ? 'Uploaded Video File' : 'Uploaded Photo File')}
+                    {fileDetails?.name || (isVideo(value) ? 'Cloud Video Reel' : isPdf(value) ? 'Cloud PDF Document' : 'Cloud Photo')}
                   </span>
                 </div>
-                <div className="flex items-center gap-2 text-[10px] text-purple-900/60 font-medium mt-0.5">
-                  <span>{fileDetails?.size || 'Ready'}</span>
+                <div className="flex items-center gap-1.5 text-[10px] text-purple-900/60 font-medium mt-0.5">
+                  <span className="px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 font-bold text-[9px] flex items-center gap-0.5">
+                    <CloudUpload className="w-2.5 h-2.5" />
+                    <span>Firebase Storage Synced</span>
+                  </span>
                   <span>•</span>
-                  <span className="capitalize">{isVideo(value) ? 'Video Reel' : 'Photo'}</span>
+                  <span className="capitalize">{isVideo(value) ? 'Video Reel' : isPdf(value) ? 'PDF' : 'Photo'}</span>
                 </div>
                 <div className="flex items-center gap-2.5 mt-1.5">
-                  {!isVideo(value) && enableCrop && (
+                  {!isVideo(value) && !isPdf(value) && enableCrop && (
                     <button
                       type="button"
                       onClick={handleManualCropOpen}
@@ -420,13 +571,26 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
             <div className="rounded-2xl overflow-hidden bg-black flex items-center justify-center max-h-[70vh]">
               {isVideo(value) ? (
                 <video src={value} controls autoPlay className="w-full h-full max-h-[60vh] object-contain" />
+              ) : isPdf(value) ? (
+                <div className="p-8 text-center text-white space-y-3">
+                  <FileText className="w-16 h-16 text-pink-500 mx-auto" />
+                  <p className="text-xs font-bold">PDF Document Cloud Ready</p>
+                  <a
+                    href={value}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-block px-4 py-2 rounded-xl bg-pink-600 text-white text-xs font-bold"
+                  >
+                    Open PDF in New Tab
+                  </a>
+                </div>
               ) : (
                 <img src={value} alt="Preview" className="w-full h-full max-h-[60vh] object-contain" referrerPolicy="no-referrer" />
               )}
             </div>
 
             <div className="flex items-center justify-between">
-              {!isVideo(value) && enableCrop ? (
+              {!isVideo(value) && !isPdf(value) && enableCrop ? (
                 <button
                   type="button"
                   onClick={(e) => {
@@ -461,10 +625,6 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
           onClose={() => {
             setShowCropperModal(false);
             setRawImageForCrop(null);
-            // If there's no existing value and user cancels, leave empty or set raw
-            if (!value && rawImageForCrop) {
-              onChange(rawImageForCrop);
-            }
           }}
           onCropComplete={handleCropComplete}
           title={`क्रॉप करें: ${label}`}
@@ -475,4 +635,3 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
     </div>
   );
 };
-

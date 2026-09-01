@@ -79,9 +79,10 @@ import {
 interface AdminPageProps {
   onBackToSite: () => void;
   onSettingsUpdated: (newSettings: SiteSettings) => void;
+  onContentUpdated?: (content: MediaItem[]) => void;
 }
 
-export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUpdated }) => {
+export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUpdated, onContentUpdated }) => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!!getAdminToken());
   const [passcode, setPasscode] = useState('');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
@@ -133,7 +134,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
     tags: ['Exclusive', 'VIP'],
     duration: '1:30',
     published: true,
-    featured: false
+    featured: true
   });
 
   // Orders search & filter
@@ -261,7 +262,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
       if (editingItem) {
         // Instant optimistic update
         const updatedItem = { ...editingItem, ...payload } as MediaItem;
-        setContentList(prev => prev.map(item => item.id === editingItem.id ? updatedItem : item));
+        const nextList = contentList.map(item => item.id === editingItem.id ? updatedItem : item);
+        setContentList(nextList);
+        if (onContentUpdated) onContentUpdated(nextList);
         setShowContentModal(false);
         setEditingItem(null);
         showToast('✅ पोस्ट सफलतापूर्वक अपडेट हो गई');
@@ -270,7 +273,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
         setShowContentModal(false);
         showToast('⏳ नई पोस्ट पब्लिश हो रही है...');
         const created = await createAdminContent(payload);
-        setContentList(prev => [created, ...prev]);
+        const nextList = [created, ...contentList];
+        setContentList(nextList);
+        if (onContentUpdated) onContentUpdated(nextList);
         showToast('✅ नई पोस्ट सफलतापूर्वक पब्लिश हो गई');
 
         // Trigger Push Notification automatically if published (Single notification per post / album)
@@ -315,7 +320,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
     setIsDeleting(true);
     const targetId = deletingItem.id;
     // Optimistic UI removal
-    setContentList(prev => prev.filter(c => c.id !== targetId));
+    const nextList = contentList.filter(c => c.id !== targetId);
+    setContentList(nextList);
+    if (onContentUpdated) onContentUpdated(nextList);
     setDeletingItem(null);
     showToast('🗑️ पोस्ट सफलतापूर्वक डिलीट हो गई');
     try {
@@ -335,6 +342,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
     setLoading(true);
     try {
       const res = await purgeDemoContent();
+      const demoIds = ['rk-001', 'rk-002', 'rk-003', 'rk-004', 'rk-005', 'rk-006', 'rk-007'];
+      const nextList = contentList.filter(c => !demoIds.includes(c.id));
+      setContentList(nextList);
+      if (onContentUpdated) onContentUpdated(nextList);
       showToast(`✨ ${res.message}`);
       await loadAdminData();
     } catch (err: any) {
@@ -366,7 +377,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
     setBulkActionLoading(true);
     const targetIds = [...selectedContentIds];
     // Optimistic UI removal
-    setContentList(prev => prev.filter(c => !targetIds.includes(c.id)));
+    const nextList = contentList.filter(c => !targetIds.includes(c.id));
+    setContentList(nextList);
+    if (onContentUpdated) onContentUpdated(nextList);
     setSelectedContentIds([]);
     setShowBulkDeleteConfirm(false);
     try {
@@ -387,7 +400,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
     setBulkActionLoading(true);
     const targetIds = [...selectedContentIds];
     // Optimistic UI update
-    setContentList(prev => prev.map(c => targetIds.includes(c.id) ? { ...c, published: publish } : c));
+    const nextList = contentList.map(c => targetIds.includes(c.id) ? { ...c, published: publish } : c);
+    setContentList(nextList);
+    if (onContentUpdated) onContentUpdated(nextList);
     setSelectedContentIds([]);
     try {
       for (const id of targetIds) {
@@ -407,7 +422,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToSite, onSettingsUp
     setBulkActionLoading(true);
     const targetIds = [...selectedContentIds];
     // Optimistic UI update
-    setContentList(prev => prev.map(c => targetIds.includes(c.id) ? { ...c, featured } : c));
+    const nextList = contentList.map(c => targetIds.includes(c.id) ? { ...c, featured } : c);
+    setContentList(nextList);
+    if (onContentUpdated) onContentUpdated(nextList);
     setSelectedContentIds([]);
     try {
       for (const id of targetIds) {

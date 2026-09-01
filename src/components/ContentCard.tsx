@@ -115,7 +115,7 @@ const ContentCardComponent: React.FC<ContentCardProps> = ({
 
         {/* Media Thumbnail Foreground (Natural Ratio, Height Auto, Width 100%, Never Cropped, Never Distorted) */}
         <img
-          src={canAccess ? getOptimizedImageUrl(item.thumbnailUrl, 640, 80) : getOptimizedImageUrl(item.thumbnailUrl, 320, 45)}
+          src={canAccess ? getOptimizedImageUrl(item.thumbnailUrl, 640, 80) : getOptimizedImageUrl(item.thumbnailUrl, 480, 60)}
           srcSet={canAccess ? (getResponsiveSrcSet(item.thumbnailUrl) || undefined) : undefined}
           sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
           alt={item.title}
@@ -124,8 +124,10 @@ const ContentCardComponent: React.FC<ContentCardProps> = ({
           {...(priority ? { fetchPriority: 'high' as const } : {})}
           onContextMenu={(e) => e.preventDefault()}
           onDragStart={(e) => e.preventDefault()}
-          className={`relative z-[1] block w-full h-auto max-h-[85vh] object-contain transition-transform duration-500 group-hover:scale-105 pointer-events-none ${
-            !canAccess ? 'filter blur-[16px] scale-105 opacity-55' : 'opacity-100'
+          className={`relative z-[1] block w-full h-auto max-h-[85vh] object-contain transition-all duration-500 group-hover:scale-105 pointer-events-none ${
+            !canAccess
+              ? 'filter blur-[7px] brightness-[0.92] contrast-[1.08] saturate-[1.2] scale-105 opacity-90'
+              : 'opacity-100'
           }`}
           referrerPolicy="no-referrer"
         />
