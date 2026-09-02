@@ -30,6 +30,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   announcementEnabled: true,
   supportEmail: 'contact.rumakumari@gmail.com',
   supportTelegram: 'https://t.me/rumakumari_vip',
+  supportWhatsApp: '+63 9465507887',
   paymentVerificationMode: 'manual_approval',
   pushNotificationsEnabled: true,
   notifyOnNewPost: true,

@@ -18,9 +18,68 @@ export const CLIENT_SITE_SETTINGS: SiteSettings = {
   announcementEnabled: true,
   supportEmail: 'contact.rumakumari@gmail.com',
   supportTelegram: 'https://t.me/rumakumari_vip',
+  supportWhatsApp: '+63 9465507887',
   paymentVerificationMode: 'manual_approval',
   pushNotificationsEnabled: true,
   notifyOnNewPost: true,
+  vipPlans: [
+    {
+      id: 'plan-monthly',
+      title: '1-Month VIP All-Access Pass',
+      subtitle: '30 Days Instant Access to All VIP Photos & Reels',
+      price: 199,
+      originalPrice: 499,
+      durationDays: 30,
+      durationLabel: '30 Days Access',
+      badge: 'POPULAR 🔥',
+      popular: true,
+      enabled: true,
+      perks: [
+        'All HD Photo Sets & Uncensored Albums',
+        'Exclusive Video Reels & Backstage Clips',
+        'Daily Reward Wheel Access',
+        'Direct Creator WhatsApp Chat Support'
+      ]
+    },
+    {
+      id: 'plan-6months',
+      title: '6-Month VIP Mega Pass',
+      subtitle: '180 Days of Complete VIP Content + Future Drops',
+      price: 499,
+      originalPrice: 1299,
+      durationDays: 180,
+      durationLabel: '6 Months Access',
+      badge: 'BEST VALUE ⚡',
+      popular: false,
+      enabled: true,
+      perks: [
+        'Unlimited Access to All VIP Media',
+        'All Future Backstage Drops Included',
+        '4K Ultra-HD Downloads Enabled',
+        'Priority WhatsApp Chat Support',
+        '3 Bonus Daily Wheel Spins'
+      ]
+    },
+    {
+      id: 'plan-lifetime',
+      title: 'Lifetime VIP Royal All-Access',
+      subtitle: 'Permanent 1-Click Access Forever (No Expiry)',
+      price: 999,
+      originalPrice: 2999,
+      durationDays: 3650,
+      durationLabel: 'Lifetime Access',
+      badge: 'ROYAL VIP 👑',
+      popular: false,
+      enabled: true,
+      perks: [
+        'Permanent 1-Click Access Forever',
+        'Every Current & Future Master Video/Album',
+        'Personalized Welcome Note & Audio',
+        'Zero Expiration / No Renewal Ever',
+        'VIP Status Gold Badge'
+      ]
+    }
+  ],
   homepageConfig: {
     hero: {
       enabled: true,

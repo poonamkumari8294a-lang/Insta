@@ -1168,6 +1168,99 @@ export async function fetchVipLeads(forceFresh = false): Promise<any[]> {
   return activeLeadsPromise;
 }
 
+/**
+ * Permanently deletes a VIP Lead / User from Firestore and updates memory
+ */
+export async function deleteVipLead(leadId: string): Promise<boolean> {
+  if (!isCloudQuotaExhausted()) {
+    try {
+      const leadRef = doc(firestore, 'vip_leads', leadId);
+      await deleteDoc(leadRef);
+      console.log('[Firebase Cloud] Successfully deleted VIP lead/user:', leadId);
+    } catch (err: any) {
+      console.error('[Firebase Cloud Delete Lead Error]', err);
+      handleFirestoreError('deleteVipLead', err);
+    }
+  }
+
+  // Update in-memory cache
+  if (memoryVipLeads) {
+    memoryVipLeads = memoryVipLeads.filter(l => l.id !== leadId);
+  }
+  return true;
+}
+
+/**
+ * Updates a VIP Lead / User status in Firestore
+ */
+export async function updateVipLead(leadId: string, updates: Record<string, any>): Promise<boolean> {
+  if (!isCloudQuotaExhausted()) {
+    try {
+      const leadRef = doc(firestore, 'vip_leads', leadId);
+      await setDoc(leadRef, updates, { merge: true });
+      console.log('[Firebase Cloud] Successfully updated VIP lead/user:', leadId);
+    } catch (err: any) {
+      console.error('[Firebase Cloud Update Lead Error]', err);
+      handleFirestoreError('updateVipLead', err);
+    }
+  }
+
+  // Update in-memory cache
+  if (memoryVipLeads) {
+    memoryVipLeads = memoryVipLeads.map(l => l.id === leadId ? { ...l, ...updates } : l);
+  }
+  return true;
+}
+
+/**
+ * Creates a new VIP Lead / User in Firestore
+ */
+export async function createVipLead(leadData: Record<string, any>): Promise<any> {
+  const newId = `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const cleanItem = {
+    id: newId,
+    createdAt: new Date().toISOString(),
+    vipStatus: 'active',
+    ...leadData
+  };
+
+  if (!isCloudQuotaExhausted()) {
+    try {
+      const leadRef = doc(firestore, 'vip_leads', newId);
+      await setDoc(leadRef, cleanItem);
+    } catch (err: any) {
+      handleFirestoreError('createVipLead', err);
+    }
+  }
+
+  if (memoryVipLeads) {
+    memoryVipLeads = [cleanItem, ...memoryVipLeads];
+  }
+  return cleanItem;
+}
+
+/**
+ * Deletes / Archives an Order from Firestore and updates memory
+ */
+export async function deleteAdminOrder(orderId: string): Promise<boolean> {
+  if (!isCloudQuotaExhausted()) {
+    try {
+      const orderRef = doc(firestore, 'orders', orderId);
+      await deleteDoc(orderRef);
+      console.log('[Firebase Cloud] Successfully deleted order:', orderId);
+    } catch (err: any) {
+      console.error('[Firebase Cloud Delete Order Error]', err);
+      handleFirestoreError('deleteAdminOrder', err);
+    }
+  }
+
+  // Update in-memory cache
+  if (memoryAdminOrders) {
+    memoryAdminOrders = memoryAdminOrders.filter(o => o.orderId !== orderId);
+  }
+  return true;
+}
+
 export async function verifyAdminOrder(orderId: string, transactionRef?: string): Promise<OrderItem> {
   const token = `adm_verified_${Date.now()}`;
   const paidAt = new Date().toISOString();
