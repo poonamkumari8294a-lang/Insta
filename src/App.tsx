@@ -20,7 +20,6 @@ import { HowItWorks } from './components/HowItWorks';
 import { NotificationPermissionBanner } from './components/NotificationPermissionBanner';
 import { ForegroundNotificationToast, ForegroundNotificationData } from './components/ForegroundNotificationToast';
 import { LiveUnlockActivityToast } from './components/LiveUnlockActivityToast';
-import { FloatingWhatsAppSupport } from './components/FloatingWhatsAppSupport';
 import { NetworkSpeedBanner } from './components/NetworkSpeedBanner';
 import { setupForegroundMessageListener } from './services/notificationService';
 import { Sparkles, RefreshCw } from 'lucide-react';
@@ -460,9 +459,6 @@ export default function App() {
 
       {/* Live Unlock Activity Social Proof Toasts */}
       {currentRoute !== 'admin' && <LiveUnlockActivityToast content={content} />}
-
-      {/* Floating WhatsApp Support 24/7 Widget */}
-      {currentRoute !== 'admin' && <FloatingWhatsAppSupport settings={settings} />}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { SiteSettings } from '../types';
-import { ShieldCheck, Mail, Send, CheckCircle2, AlertCircle, MessageCircle } from 'lucide-react';
+import { ShieldCheck, Mail, Send, CheckCircle2, AlertCircle } from 'lucide-react';
 
 interface LegalPagesProps {
   pageType: 'terms' | 'privacy' | 'refund' | 'contact';
@@ -135,35 +135,18 @@ export const LegalPages: React.FC<LegalPagesProps> = ({
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
-            <a
-              href={`https://wa.me/${(settings.supportWhatsApp || '+63 9465507887').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Hello ${settings.creatorName}! I need assistance with VIP support.`)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="p-4 rounded-2xl bg-emerald-50/80 hover:bg-emerald-100/90 border border-emerald-200 text-center space-y-1 shadow-sm transition-transform active:scale-98 block group"
-            >
-              <MessageCircle className="w-5 h-5 text-emerald-600 mx-auto group-hover:scale-110 transition-transform" />
-              <div className="text-xs font-bold text-emerald-950">WhatsApp Support</div>
-              <div className="text-[11px] text-emerald-700 font-black font-mono truncate">{settings.supportWhatsApp || '+63 9465507887'}</div>
-              <div className="text-[10px] text-emerald-600 font-bold">Chat 24/7 ⚡</div>
-            </a>
-
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
             <div className="p-4 rounded-2xl bg-white/70 border border-purple-100 text-center space-y-1 shadow-sm">
               <Mail className="w-5 h-5 text-pink-600 mx-auto" />
               <div className="text-xs font-bold text-purple-950">Email Support</div>
               <div className="text-[11px] text-pink-700 font-medium truncate">{settings.supportEmail}</div>
             </div>
 
-            <a
-              href={settings.supportTelegram || 'https://t.me/rumakumari_vip'}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="p-4 rounded-2xl bg-white/70 hover:bg-purple-50 border border-purple-100 text-center space-y-1 shadow-sm transition-transform active:scale-98 block"
-            >
+            <div className="p-4 rounded-2xl bg-white/70 border border-purple-100 text-center space-y-1 shadow-sm">
               <Send className="w-5 h-5 text-purple-600 mx-auto" />
               <div className="text-xs font-bold text-purple-950">Telegram VIP</div>
               <div className="text-[11px] text-purple-700 font-medium truncate">@rumakumari_vip</div>
-            </a>
+            </div>
 
             <div className="p-4 rounded-2xl bg-white/70 border border-purple-100 text-center space-y-1 shadow-sm">
               <ShieldCheck className="w-5 h-5 text-emerald-600 mx-auto" />

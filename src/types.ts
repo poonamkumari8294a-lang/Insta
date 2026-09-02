@@ -61,43 +61,13 @@ export interface VipUserProfile {
 
 export interface VipLeadItem {
   id: string;
-  userId?: string;
-  username?: string;
   name: string;
   phone: string;
-  email?: string;
-  photoUrl?: string;
-  profilePicUrl?: string;
-  cloudinaryPublicId?: string;
   contentId?: string;
   contentTitle?: string;
   amount?: number;
-  totalSpent?: number;
-  unlockedCount?: number;
-  unlockedIds?: string[];
-  status?: 'active' | 'inactive' | 'banned' | 'free';
-  vipStatus?: 'active' | 'free' | 'expired' | 'banned';
-  tier?: string;
-  notes?: string;
-  bio?: string;
   createdAt: string;
-  joinedAt?: string;
-  lastActive?: string;
   source?: string;
-}
-
-export interface VipPlan {
-  id: string;
-  title: string;
-  subtitle?: string;
-  price: number; // in INR
-  originalPrice: number; // in INR
-  durationDays: number;
-  durationLabel: string;
-  badge?: string;
-  perks: string[];
-  popular?: boolean;
-  enabled: boolean;
 }
 
 export interface StoryHighlight {
@@ -145,10 +115,8 @@ export interface SiteSettings {
   announcementEnabled: boolean;
   supportEmail: string;
   supportTelegram: string;
-  supportWhatsApp?: string;
   paymentVerificationMode?: 'manual_approval' | 'instant_utr';
   adminPasscode?: string;
-  vipPlans?: VipPlan[];
   storyHighlights: StoryHighlight[];
   homepageConfig?: HomepageSectionConfig;
   // Push Notification settings

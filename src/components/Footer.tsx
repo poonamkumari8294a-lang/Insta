@@ -1,6 +1,6 @@
 import React from 'react';
 import { SiteSettings } from '../types';
-import { Instagram, Send, ShieldCheck, Heart, Lock, Mail, MessageCircle } from 'lucide-react';
+import { Instagram, Send, ShieldCheck, Heart, Lock, Mail } from 'lucide-react';
 
 interface FooterProps {
   settings: SiteSettings;
@@ -52,16 +52,6 @@ export const Footer: React.FC<FooterProps> = ({ settings, onNavigate }) => {
                   <span>VIP Telegram</span>
                 </a>
               )}
-
-              <a
-                href={`https://wa.me/${(settings.supportWhatsApp || '+63 9465507887').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Hello ${settings.creatorName}! I need VIP support.`)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-3.5 py-2 rounded-2xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 transition-all flex items-center gap-1.5 font-bold text-xs shadow-sm"
-              >
-                <MessageCircle className="w-4 h-4 text-emerald-600 fill-emerald-600/20" />
-                <span>WhatsApp: {settings.supportWhatsApp || '+63 9465507887'}</span>
-              </a>
             </div>
           </div>
 

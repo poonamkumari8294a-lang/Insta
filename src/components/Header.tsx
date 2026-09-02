@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { SiteSettings } from '../types';
-import { BadgeCheck, Instagram, Sparkles, Lock, Menu, X, ShieldCheck, Heart, Film, Share2, MessageCircle } from 'lucide-react';
+import { BadgeCheck, Instagram, Sparkles, Lock, Menu, X, ShieldCheck, Heart, Film, Share2 } from 'lucide-react';
 
 interface HeaderProps {
   settings: SiteSettings;
@@ -118,18 +118,6 @@ export const Header: React.FC<HeaderProps> = ({
             >
               How It Works
             </button>
-
-            <a
-              id="nav-link-whatsapp"
-              href={`https://wa.me/${(settings.supportWhatsApp || '+63 9465507887').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Hello ${settings.creatorName}! I need VIP support.`)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-3.5 py-2 rounded-full text-xs font-bold text-emerald-800 bg-emerald-50/80 hover:bg-emerald-100 border border-emerald-200/80 shadow-sm transition-all flex items-center gap-1.5"
-              title="24/7 VIP WhatsApp Support"
-            >
-              <MessageCircle className="w-3.5 h-3.5 text-emerald-600 fill-emerald-600/20" />
-              <span>WhatsApp Support</span>
-            </a>
 
             <a
               id="nav-link-instagram"
@@ -274,16 +262,6 @@ export const Header: React.FC<HeaderProps> = ({
                 <span>वेबसाइट दोस्तों के साथ शेयर करें (Share VIP Hub)</span>
               </button>
             )}
-
-            <a
-              href={`https://wa.me/${(settings.supportWhatsApp || '+63 9465507887').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Hello ${settings.creatorName}! I need VIP support.`)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full py-2.5 px-4 rounded-2xl text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 flex items-center justify-center gap-2 shadow-sm"
-            >
-              <MessageCircle className="w-4 h-4 text-emerald-600" />
-              <span>WhatsApp Support ({settings.supportWhatsApp || '+63 9465507887'})</span>
-            </a>
 
             <a
               href={settings.instagramUrl}
