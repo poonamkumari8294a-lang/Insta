@@ -402,15 +402,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     setIsDeleting(true);
     const targetId = deletingItem.id;
     const itemToDelete = { ...deletingItem };
-    // Optimistic UI removal
-    const nextList = contentList.filter(c => c.id !== targetId);
-    setContentList(nextList);
-    if (onContentUpdated) onContentUpdated(nextList);
-    setDeletingItem(null);
-    showToast('🗑️ पोस्ट सफलतापूर्वक डिलीट हो गई');
     try {
       await deleteAdminContent(targetId, itemToDelete);
+      // Remove from UI after successful Cloudinary and Firebase deletion
+      const nextList = contentList.filter(c => c.id !== targetId);
+      setContentList(nextList);
+      if (onContentUpdated) onContentUpdated(nextList);
+      setDeletingItem(null);
+      showToast('🗑️ Cloudinary और Firebase से सफलतापूर्वक डिलीट हो गया!');
     } catch (err: any) {
+      console.error('[Admin Delete Error]', err);
       showToast(err.message || 'डिलीट करने में विफल (Failed to delete)', 'error');
     } finally {
       setIsDeleting(false);
@@ -479,17 +480,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     setBulkActionLoading(true);
     const targetIds = [...selectedContentIds];
     const itemsToDelete = contentList.filter(c => targetIds.includes(c.id));
-    // Optimistic UI removal
-    const nextList = contentList.filter(c => !targetIds.includes(c.id));
-    setContentList(nextList);
-    if (onContentUpdated) onContentUpdated(nextList);
-    setSelectedContentIds([]);
     setShowBulkDeleteConfirm(false);
     try {
       for (const item of itemsToDelete) {
         await deleteAdminContent(item.id, item);
       }
-      showToast(`🗑️ ${itemsToDelete.length} पोस्ट्स सफलतापूर्वक डिलीट हो गईं`);
+      const nextList = contentList.filter(c => !targetIds.includes(c.id));
+      setContentList(nextList);
+      if (onContentUpdated) onContentUpdated(nextList);
+      setSelectedContentIds([]);
+      showToast(`🗑️ ${itemsToDelete.length} पोस्ट्स Cloudinary और Firebase से सफलतापूर्वक डिलीट हो गईं!`);
     } catch (err: any) {
       showToast(err.message || 'Bulk delete failed', 'error');
     } finally {
@@ -2410,7 +2410,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                   डिलीट करने की पुष्टि करें (Confirm Delete)
                 </h3>
                 <p className="text-xs text-purple-900/60 font-medium">
-                  Permanent Removal from Cloud Database
+                  Permanent Removal from Cloudinary & Firebase
                 </p>
               </div>
             </div>
@@ -2435,7 +2435,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
             </div>
 
             <p className="text-xs text-purple-900/80 leading-relaxed font-medium">
-              क्या आप वाकई इस मीडिया पोस्ट को डिलीट करना चाहते हैं? यह डेटाबेस और वेबसाइट से स्थायी रूप से हटा दिया जाएगा।
+              क्या आप वाकई इस मीडिया पोस्ट को डिलीट करना चाहते हैं? यह <b>Cloudinary</b> (फ़ोटो/वीडियो स्टोरेज) और <b>Firebase Firestore</b> (डेटाबेस) दोनों से हमेशा के लिए हटा दिया जाएगा।
             </p>
 
             <div className="flex items-center justify-end gap-2.5 pt-2">

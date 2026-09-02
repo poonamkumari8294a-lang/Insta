@@ -9,10 +9,13 @@ export interface MediaItem {
   type: ContentType;
   access: ContentAccess;
   price: number; // In INR (₹)
-  thumbnailUrl: string;
-  mediaUrl: string; // Protected URL (served via API token or preview)
-  previewUrl?: string; // Short teaser or watermarked sample
+  thumbnailUrl: string; // Cloudinary secure_url
+  mediaUrl: string; // Cloudinary secure_url
+  previewUrl?: string; // Short teaser or preview
   galleryUrls?: string[]; // Array of photos for multi-photo sets and VIP albums
+  cloudinaryPublicId?: string; // Cloudinary asset public_id (e.g. "website-media/xyz123")
+  resource_type?: 'image' | 'video' | 'raw' | string; // Cloudinary asset resource type
+  format?: string; // Cloudinary asset format (e.g. "jpg", "mp4", "webp")
   tags: string[];
   views: number;
   likes: number;

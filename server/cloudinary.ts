@@ -153,6 +153,8 @@ export function extractAllMediaItemAssets(item: {
   previewUrl?: string;
   galleryUrls?: string[];
   type?: string;
+  cloudinaryPublicId?: string;
+  resource_type?: string;
 }): CloudinaryAssetInfo[] {
   const assetsMap = new Map<string, CloudinaryAssetInfo>();
 
@@ -169,15 +171,29 @@ export function extractAllMediaItemAssets(item: {
     }
   };
 
-  const isVideoItem = item.type === 'video';
+  const isVideoItem = item.type === 'video' || item.resource_type === 'video';
 
-  // 1. Main media
+  // 1. Explicit cloudinaryPublicId if available
+  if (item.cloudinaryPublicId && typeof item.cloudinaryPublicId === 'string' && item.cloudinaryPublicId.trim()) {
+    const pubId = item.cloudinaryPublicId.trim();
+    const forcedType = isVideoItem ? 'video' : 'image';
+    const key = `${forcedType}:${pubId}`;
+    if (!assetsMap.has(key)) {
+      assetsMap.set(key, {
+        url: item.mediaUrl || '',
+        publicId: pubId,
+        resourceType: forcedType
+      });
+    }
+  }
+
+  // 2. Main media
   checkAndAdd(item.mediaUrl, isVideoItem ? 'video' : 'image');
 
-  // 2. Preview
+  // 3. Preview
   checkAndAdd(item.previewUrl, isVideoItem ? 'video' : 'image');
 
-  // 3. Thumbnail (If not a derived transformation of the main video, it's a separate image asset)
+  // 4. Thumbnail (If not a derived transformation of the main video, it's a separate image asset)
   if (item.thumbnailUrl) {
     const thumbInfo = extractCloudinaryAssetInfo(item.thumbnailUrl);
     if (thumbInfo) {
@@ -189,7 +205,7 @@ export function extractAllMediaItemAssets(item: {
     }
   }
 
-  // 4. Gallery multi-photos
+  // 5. Gallery multi-photos
   if (Array.isArray(item.galleryUrls)) {
     for (const gUrl of item.galleryUrls) {
       checkAndAdd(gUrl, 'image');
@@ -201,7 +217,8 @@ export function extractAllMediaItemAssets(item: {
 
 /**
  * Deletes a single Cloudinary asset by public_id and resource_type.
- * Uses authenticated Cloudinary Admin API when credentials exist.
+ * Uses authenticated Cloudinary Upload API (uploader.destroy) and Admin API (delete_resources)
+ * with multi-type fallback so nothing is missed.
  */
 export async function deleteCloudinaryAsset(
   publicId: string,
@@ -232,52 +249,86 @@ export async function deleteCloudinaryAsset(
   });
 
   try {
-    console.log(`[Cloudinary Server] Initiating deletion for "${publicId}" (type: ${resourceType})...`);
-    
-    // Use delete_resources which reliably removes original + derived assets and invalidates CDN
-    const res = await cloudinary.api.delete_resources([publicId], {
+    console.log(`[Cloudinary Server] Initiating deletion for "${publicId}" (primary type: ${resourceType})...`);
+
+    // 1. Primary fast deletion via uploader.destroy (Upload API)
+    let destroyRes = await cloudinary.uploader.destroy(publicId, {
       resource_type: resourceType,
       invalidate: true
     });
 
-    console.log(`[Cloudinary Server] Delete response for "${publicId}":`, res);
+    console.log(`[Cloudinary Server] Primary destroy result for "${publicId}" (${resourceType}):`, destroyRes);
 
-    const statusValue = res.deleted ? res.deleted[publicId] : undefined;
+    if (destroyRes.result === 'ok') {
+      // Also trigger delete_resources to invalidate derived transformations and caches
+      cloudinary.api.delete_resources([publicId], {
+        resource_type: resourceType,
+        invalidate: true
+      }).catch((e) => console.warn('[Cloudinary Server] Secondary cleanup note:', e?.message));
 
-    if (statusValue === 'deleted') {
       return {
         publicId,
         resourceType,
         status: 'deleted',
         result: 'ok'
       };
-    } else if (statusValue === 'not_found') {
-      return {
-        publicId,
-        resourceType,
-        status: 'not_found',
-        result: 'Asset already removed or not found'
-      };
+    }
+
+    // 2. If not found, try alternative resource types (e.g. video <-> image <-> raw)
+    const alternativeTypes: Array<'image' | 'video' | 'raw'> = [];
+    if (resourceType === 'image') {
+      alternativeTypes.push('video', 'raw');
+    } else if (resourceType === 'video') {
+      alternativeTypes.push('image', 'raw');
     } else {
-      // Fallback to destroy if needed
-      const destroyRes = await cloudinary.uploader.destroy(publicId, {
-        resource_type: resourceType
+      alternativeTypes.push('image', 'video');
+    }
+
+    for (const altType of alternativeTypes) {
+      console.log(`[Cloudinary Server] Retrying destroy for "${publicId}" with alternative type: ${altType}...`);
+      const altDestroyRes = await cloudinary.uploader.destroy(publicId, {
+        resource_type: altType,
+        invalidate: true
       });
-      if (destroyRes.result === 'ok' || destroyRes.result === 'not found') {
+
+      if (altDestroyRes.result === 'ok') {
+        console.log(`[Cloudinary Server] Successfully deleted "${publicId}" under type: ${altType}`);
+        cloudinary.api.delete_resources([publicId], {
+          resource_type: altType,
+          invalidate: true
+        }).catch(() => {});
+
         return {
           publicId,
-          resourceType,
-          status: destroyRes.result === 'ok' ? 'deleted' : 'not_found',
-          result: destroyRes.result
+          resourceType: altType,
+          status: 'deleted',
+          result: 'ok'
         };
       }
+    }
+
+    // 3. Fallback to delete_resources (Admin API)
+    const adminDelRes = await cloudinary.api.delete_resources([publicId], {
+      resource_type: resourceType,
+      invalidate: true
+    }).catch(() => null);
+
+    if (adminDelRes && adminDelRes.deleted && adminDelRes.deleted[publicId] === 'deleted') {
       return {
         publicId,
         resourceType,
-        status: 'failed',
-        result: JSON.stringify(res)
+        status: 'deleted',
+        result: 'ok'
       };
     }
+
+    // If both reported not found
+    return {
+      publicId,
+      resourceType,
+      status: 'not_found',
+      result: destroyRes.result || 'Asset not found on Cloudinary (may have already been deleted)'
+    };
   } catch (err: any) {
     const errorStr = err?.message || (err?.error?.message ? err.error.message : (typeof err === 'object' ? JSON.stringify(err) : String(err)));
     console.error(`[Cloudinary Server] Failed to delete "${publicId}":`, errorStr);

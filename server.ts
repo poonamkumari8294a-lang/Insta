@@ -486,7 +486,7 @@ async function startServer() {
       // Client may pass full item payload in query or body to ensure all Cloudinary URLs are known
       const passedItem = req.body?.item || req.body;
       const dbItem = db.getContentById(contentId);
-      const targetItem = passedItem && (passedItem.mediaUrl || passedItem.thumbnailUrl) ? passedItem : dbItem;
+      const targetItem = passedItem && (passedItem.mediaUrl || passedItem.thumbnailUrl || passedItem.cloudinaryPublicId || (Array.isArray(passedItem.galleryUrls) && passedItem.galleryUrls.length > 0)) ? passedItem : dbItem;
 
       console.log(`[Admin Delete API] Received request to delete content: "${contentId}"`);
 
@@ -529,30 +529,25 @@ async function startServer() {
     try {
       const { item, urls, publicId, resourceType } = req.body;
 
-      if (item) {
-        const result = await deleteItemCloudinaryMedia(item);
+      // Construct merged item to delete all referenced assets in one go
+      const mergedItem = { ...(item || {}) };
+      if (Array.isArray(urls) && urls.length > 0) {
+        const existingGalleries = Array.isArray(mergedItem.galleryUrls) ? mergedItem.galleryUrls : [];
+        mergedItem.galleryUrls = Array.from(new Set([...existingGalleries, ...urls]));
+      }
+      if (publicId && !mergedItem.cloudinaryPublicId) {
+        mergedItem.cloudinaryPublicId = publicId;
+      }
+      if (resourceType && !mergedItem.resource_type) {
+        mergedItem.resource_type = resourceType;
+      }
+
+      if (mergedItem.mediaUrl || mergedItem.thumbnailUrl || mergedItem.previewUrl || mergedItem.cloudinaryPublicId || (Array.isArray(mergedItem.galleryUrls) && mergedItem.galleryUrls.length > 0)) {
+        const result = await deleteItemCloudinaryMedia(mergedItem);
         return res.json({
           success: true,
           allSuccessful: result.allSuccessful,
           results: result.results
-        });
-      }
-
-      if (Array.isArray(urls) && urls.length > 0) {
-        const results: DeletionResult[] = [];
-        let allSuccessful = true;
-        for (const u of urls) {
-          const info = extractCloudinaryAssetInfo(u);
-          if (info) {
-            const delRes = await deleteCloudinaryAsset(info.publicId, info.resourceType);
-            results.push({ ...delRes, url: u });
-            if (delRes.status === 'failed') allSuccessful = false;
-          }
-        }
-        return res.json({
-          success: true,
-          allSuccessful,
-          results
         });
       }
 

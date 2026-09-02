@@ -12,6 +12,7 @@ import {
   isPermanentMediaUrl,
   getCloudinaryVideoThumbnailUrl,
   determineResourceType,
+  extractCloudinaryAssetInfo,
   CloudinaryFolder,
   CloudinaryUploadResult
 } from './cloudinary';
@@ -29,6 +30,11 @@ export interface StorageUploadProgress {
 export interface StorageUploadResult {
   downloadUrl: string;
   storagePath: string;
+  publicId: string;
+  cloudinaryPublicId: string;
+  resourceType: string;
+  resource_type: string;
+  format?: string;
   bytesTransferred: number;
   totalBytes: number;
   durationMs?: number;
@@ -98,7 +104,7 @@ export function dataURLtoBlob(dataUrl: string): { blob: Blob; mimeType: string; 
  */
 export async function uploadFileToStorage(
   fileOrBlob: File | Blob,
-  folder: StorageFolder = 'photos',
+  folder: StorageFolder = 'website-media',
   customFilename?: string,
   onProgress?: (progressPercent: number, statusText: string, meta?: { bytesTransferred: number; totalBytes: number; speedText?: string }) => void,
   options: { selectionTime?: number; preprocessDurationMs?: number } = {}
@@ -107,7 +113,7 @@ export async function uploadFileToStorage(
   const resType = determineResourceType(fileOrBlob);
 
   const res: CloudinaryUploadResult = await uploadToCloudinary(fileOrBlob, {
-    folder,
+    folder: folder || 'website-media',
     resourceType: resType,
     customFilename,
     selectionTime: options.selectionTime || startTime,
@@ -120,6 +126,11 @@ export async function uploadFileToStorage(
   return {
     downloadUrl: res.secureUrl,
     storagePath: res.publicId,
+    publicId: res.publicId,
+    cloudinaryPublicId: res.publicId,
+    resourceType: res.resourceType,
+    resource_type: res.resourceType,
+    format: res.format,
     bytesTransferred: res.bytes,
     totalBytes: res.bytes,
     durationMs,
@@ -134,7 +145,7 @@ export async function uploadFileToStorage(
  */
 export async function uploadDataUrlToStorage(
   dataUrl: string,
-  folder: StorageFolder = 'photos',
+  folder: StorageFolder = 'website-media',
   customFilename?: string,
   onProgress?: (progressPercent: number, statusText: string, meta?: { bytesTransferred: number; totalBytes: number; speedText?: string }) => void
 ): Promise<StorageUploadResult> {
@@ -143,6 +154,10 @@ export async function uploadDataUrlToStorage(
     return {
       downloadUrl: dataUrl,
       storagePath: '',
+      publicId: '',
+      cloudinaryPublicId: '',
+      resourceType: 'image',
+      resource_type: 'image',
       bytesTransferred: 0,
       totalBytes: 0
     };
@@ -213,29 +228,33 @@ export async function ensureMediaItemStorageUrls(
   if (updated.thumbnailUrl && isDataUrl(updated.thumbnailUrl)) {
     const res = await uploadDataUrlToStorage(
       updated.thumbnailUrl,
-      'thumbnails',
+      'website-media',
       `thumb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.webp`,
       (pct) => onProgress && onProgress('thumbnailUrl', pct)
     );
     updated.thumbnailUrl = res.downloadUrl;
+    if (!updated.cloudinaryPublicId) updated.cloudinaryPublicId = res.publicId;
   }
 
   if (updated.mediaUrl && isDataUrl(updated.mediaUrl)) {
     const isVid = updated.type === 'video' || updated.mediaUrl.startsWith('data:video/');
     const res = await uploadDataUrlToStorage(
       updated.mediaUrl,
-      isVid ? 'videos' : 'photos',
+      'website-media',
       `media_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${isVid ? 'mp4' : 'webp'}`,
       (pct) => onProgress && onProgress('mediaUrl', pct)
     );
     updated.mediaUrl = res.downloadUrl;
+    updated.cloudinaryPublicId = res.publicId;
+    updated.resource_type = isVid ? 'video' : 'image';
+    updated.format = res.format || (isVid ? 'mp4' : 'webp');
   }
 
   if (updated.previewUrl && isDataUrl(updated.previewUrl)) {
     const isVid = updated.type === 'video' || updated.previewUrl.startsWith('data:video/');
     const res = await uploadDataUrlToStorage(
       updated.previewUrl,
-      isVid ? 'videos' : 'photos',
+      'website-media',
       `preview_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${isVid ? 'mp4' : 'webp'}`,
       (pct) => onProgress && onProgress('previewUrl', pct)
     );
@@ -249,7 +268,7 @@ export async function ensureMediaItemStorageUrls(
       if (isDataUrl(gUrl)) {
         const res = await uploadDataUrlToStorage(
           gUrl,
-          'photos',
+          'website-media',
           `gallery_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 7)}.webp`,
           (pct) => onProgress && onProgress(`galleryUrls[${i}]`, pct)
         );
@@ -259,6 +278,17 @@ export async function ensureMediaItemStorageUrls(
       }
     }
     updated.galleryUrls = cleanGallery;
+  }
+
+  // Auto-extract Cloudinary metadata if mediaUrl or thumbnailUrl exists
+  const mainTarget = updated.mediaUrl || updated.thumbnailUrl;
+  if (mainTarget && isCloudinaryUrl(mainTarget)) {
+    const info = extractCloudinaryAssetInfo(mainTarget);
+    if (info) {
+      if (!updated.cloudinaryPublicId) updated.cloudinaryPublicId = info.publicId;
+      if (!updated.resource_type) updated.resource_type = info.resourceType;
+      if (!updated.format) updated.format = info.format;
+    }
   }
 
   return updated;
@@ -273,12 +303,12 @@ export async function ensureSiteSettingsStorageUrls(
   const updated = { ...settings };
 
   if (updated.profilePicUrl && isDataUrl(updated.profilePicUrl)) {
-    const res = await uploadDataUrlToStorage(updated.profilePicUrl, 'settings', `avatar_${Date.now()}.webp`);
+    const res = await uploadDataUrlToStorage(updated.profilePicUrl, 'website-media', `avatar_${Date.now()}.webp`);
     updated.profilePicUrl = res.downloadUrl;
   }
 
   if (updated.bannerUrl && isDataUrl(updated.bannerUrl)) {
-    const res = await uploadDataUrlToStorage(updated.bannerUrl, 'settings', `banner_${Date.now()}.webp`);
+    const res = await uploadDataUrlToStorage(updated.bannerUrl, 'website-media', `banner_${Date.now()}.webp`);
     updated.bannerUrl = res.downloadUrl;
   }
 
@@ -293,13 +323,28 @@ export async function cleanupMediaItemStorage(item: Partial<MediaItem>): Promise
   try {
     const adminToken = localStorage.getItem('ruma_admin_token') || 'adm_Ashok#8899_token';
     console.log(`[Storage Cleanup] Requesting backend Cloudinary deletion for item "${item.id}"...`);
+    
+    // Collect all associated URLs
+    const urls: string[] = [];
+    if (item.mediaUrl) urls.push(item.mediaUrl);
+    if (item.thumbnailUrl) urls.push(item.thumbnailUrl);
+    if (item.previewUrl) urls.push(item.previewUrl);
+    if (Array.isArray(item.galleryUrls)) {
+      urls.push(...item.galleryUrls);
+    }
+
     const res = await fetch('/api/admin/media/delete', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${adminToken}`
       },
-      body: JSON.stringify({ item })
+      body: JSON.stringify({
+        item,
+        urls,
+        publicId: item.cloudinaryPublicId,
+        resourceType: item.resource_type || (item.type === 'video' ? 'video' : 'image')
+      })
     });
 
     if (res.ok) {

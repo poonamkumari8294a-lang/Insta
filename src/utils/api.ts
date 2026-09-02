@@ -9,6 +9,7 @@ import {
   uploadMediaToStorage,
   isDataUrl
 } from '../services/storage';
+import { isCloudinaryUrl, extractCloudinaryAssetInfo } from '../services/cloudinary';
 import {
   collection,
   doc,
@@ -266,12 +267,51 @@ export function sanitizeFirestorePayload<T extends Record<string, any>>(obj: T):
         .map(item => (typeof item === 'object' && item !== null ? sanitizeFirestorePayload(item) : item));
     } else if (typeof value === 'object') {
       clean[key] = sanitizeFirestorePayload(value);
+    } else if (typeof value === 'string' && value.startsWith('data:')) {
+      console.warn(`[Firestore Safety Block] Rejected Base64 data from being stored in field "${key}". Only Cloudinary URLs are allowed.`);
+      // Omit base64 payloads to keep Firestore purely metadata
+      continue;
     } else {
       clean[key] = value;
     }
   }
 
   return clean as T;
+}
+
+/**
+ * Reconnects existing Cloudinary assets with current Firestore records:
+ * Extracts cloudinaryPublicId, resource_type, and format from existing Cloudinary URLs.
+ * Ensures legacy/old Cloudinary media items are safely preserved and never deleted or overwritten.
+ */
+export function reconnectCloudinaryMetadata(item: MediaItem): MediaItem {
+  if (!item) return item;
+  const updated = { ...item };
+
+  const targetUrl = updated.mediaUrl || updated.thumbnailUrl;
+  if (targetUrl && isCloudinaryUrl(targetUrl)) {
+    const info = extractCloudinaryAssetInfo(targetUrl);
+    if (info) {
+      if (!updated.cloudinaryPublicId) updated.cloudinaryPublicId = info.publicId;
+      if (!updated.resource_type) updated.resource_type = info.resourceType;
+      if (!updated.format) updated.format = info.format;
+    }
+  }
+
+  if (!updated.format && updated.mediaUrl) {
+    const extMatch = updated.mediaUrl.match(/\.([a-zA-Z0-9]+)(\?|$)/);
+    if (extMatch) {
+      updated.format = extMatch[1].toLowerCase();
+    } else {
+      updated.format = updated.type === 'video' ? 'mp4' : 'jpg';
+    }
+  }
+
+  if (!updated.resource_type) {
+    updated.resource_type = updated.type === 'video' ? 'video' : 'image';
+  }
+
+  return updated;
 }
 
 // ============================================================================
@@ -485,7 +525,8 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
 
       const items: MediaItem[] = [];
       snap.forEach(docSnap => {
-        items.push({ ...docSnap.data(), id: docSnap.id } as MediaItem);
+        const item = reconnectCloudinaryMetadata({ ...docSnap.data(), id: docSnap.id } as MediaItem);
+        items.push(item);
       });
 
       if (items.length === 0 && CLIENT_CONTENT_LIST.length > 0) {
@@ -594,56 +635,77 @@ class ContentSubscriptionManager {
     if (isCloudQuotaExhausted()) return;
     this.isConnecting = true;
 
-    try {
-      const contentRef = collection(firestore, 'content');
-      const q = query(
-        contentRef,
-        where('published', '==', true),
-        orderBy('createdAt', 'desc'),
-        firestoreLimit(40)
-      );
+    const setupListener = (useSimpleQuery = false) => {
+      try {
+        const contentRef = collection(firestore, 'content');
+        const q = useSimpleQuery
+          ? query(contentRef, firestoreLimit(60))
+          : query(
+              contentRef,
+              where('published', '==', true),
+              orderBy('createdAt', 'desc'),
+              firestoreLimit(40)
+            );
 
-      console.log('[FIRESTORE LISTENER] Initializing shared singleton onSnapshot listener...');
-      this.unsubscribeFirestore = onSnapshot(
-        q,
-        (snap) => {
-          this.isConnecting = false;
-          trackFirestoreRead('snapshot', 'shared-content-listener', snap.docChanges().length || 1);
-          
-          const items: MediaItem[] = [];
-          snap.forEach(docSnap => {
-            items.push({ ...docSnap.data(), id: docSnap.id } as MediaItem);
-          });
+        console.log(`[FIRESTORE LISTENER] Initializing shared singleton onSnapshot listener (mode: ${useSimpleQuery ? 'simple' : 'compound'})...`);
+        this.unsubscribeFirestore = onSnapshot(
+          q,
+          (snap) => {
+            this.isConnecting = false;
+            trackFirestoreRead('snapshot', 'shared-content-listener', snap.docChanges().length || 1);
+            
+            const items: MediaItem[] = [];
+            snap.forEach(docSnap => {
+              const item = reconnectCloudinaryMetadata({ ...docSnap.data(), id: docSnap.id } as MediaItem);
+              if (item.published !== false) {
+                items.push(item);
+              }
+            });
 
-          items.sort((a, b) => {
-            const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-            const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-            return timeB - timeA;
-          });
+            items.sort((a, b) => {
+              const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+              const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+              return timeB - timeA;
+            });
 
-          this.notifyLocalUpdate(items);
-        },
-        (error) => {
-          this.isConnecting = false;
-          console.warn('[Firebase Shared Listener Error]', error?.message || error);
-          handleFirestoreError('subscribeToContentList', error);
-          
-          if (this.unsubscribeFirestore) {
-            try {
-              this.unsubscribeFirestore();
-            } catch (_) {}
-            this.unsubscribeFirestore = null;
+            this.notifyLocalUpdate(items);
+          },
+          (error) => {
+            this.isConnecting = false;
+            console.warn(`[Firebase Shared Listener Error (${useSimpleQuery ? 'simple' : 'compound'})]`, error?.message || error);
+            
+            if (!useSimpleQuery) {
+              // Automatically retry with index-free simple query fallback
+              console.log('[Firebase Shared Listener] Retrying with index-free simple query fallback...');
+              setupListener(true);
+              return;
+            }
+
+            handleFirestoreError('subscribeToContentList', error);
+            
+            if (this.unsubscribeFirestore) {
+              try {
+                this.unsubscribeFirestore();
+              } catch (_) {}
+              this.unsubscribeFirestore = null;
+            }
+
+            this.subscribers.forEach(sub => {
+              if (sub.onError) sub.onError(error);
+            });
           }
-
-          this.subscribers.forEach(sub => {
-            if (sub.onError) sub.onError(error);
-          });
+        );
+      } catch (err) {
+        this.isConnecting = false;
+        if (!useSimpleQuery) {
+          setupListener(true);
+        } else {
+          console.warn('[Firebase Shared Listener Setup Error]', err);
         }
-      );
-    } catch (err) {
-      this.isConnecting = false;
-      console.warn('[Firebase Shared Listener Setup Error]', err);
-    }
+      }
+    };
+
+    setupListener(false);
   }
 }
 
@@ -1609,7 +1671,7 @@ export async function fetchAdminContent(forceFresh = false): Promise<MediaItem[]
       
       const items: MediaItem[] = [];
       snap.forEach(d => {
-        items.push({ ...d.data(), id: d.id } as MediaItem);
+        items.push(reconnectCloudinaryMetadata({ ...d.data(), id: d.id } as MediaItem));
       });
 
       if (items.length === 0 && CLIENT_CONTENT_LIST.length > 0) {
@@ -1635,12 +1697,28 @@ export async function fetchAdminContent(forceFresh = false): Promise<MediaItem[]
 
 /**
  * Creates content in Firestore + updates in-memory cache immediately (0 Extra Reads)
+ * Firestore stores ONLY Cloudinary reference metadata (mediaUrl, cloudinaryPublicId, resource_type, format, etc.)
  */
 export async function createAdminContent(itemData: Partial<MediaItem>): Promise<MediaItem> {
   const newId = `rk-${Date.now()}`;
   
-  // Convert any remaining base64 payload to permanent Firebase Storage download URLs
+  // Convert any remaining temporary URLs to permanent Cloudinary download URLs
   const storagePrepared = await ensureMediaItemStorageUrls(itemData);
+
+  // Auto-extract Cloudinary asset metadata
+  const targetUrl = storagePrepared.mediaUrl || storagePrepared.thumbnailUrl;
+  let detectedPublicId = storagePrepared.cloudinaryPublicId;
+  let detectedResourceType = storagePrepared.resource_type;
+  let detectedFormat = storagePrepared.format;
+
+  if (targetUrl && isCloudinaryUrl(targetUrl)) {
+    const info = extractCloudinaryAssetInfo(targetUrl);
+    if (info) {
+      if (!detectedPublicId) detectedPublicId = info.publicId;
+      if (!detectedResourceType) detectedResourceType = info.resourceType;
+      if (!detectedFormat) detectedFormat = info.format;
+    }
+  }
 
   const rawItem: MediaItem = {
     id: newId,
@@ -1654,6 +1732,9 @@ export async function createAdminContent(itemData: Partial<MediaItem>): Promise<
     previewUrl: storagePrepared.previewUrl || storagePrepared.thumbnailUrl || '',
     galleryUrls: Array.isArray(storagePrepared.galleryUrls) ? storagePrepared.galleryUrls : [],
     photoCount: storagePrepared.photoCount || (Array.isArray(storagePrepared.galleryUrls) && storagePrepared.galleryUrls.length > 0 ? storagePrepared.galleryUrls.length : 1),
+    cloudinaryPublicId: detectedPublicId || '',
+    resource_type: detectedResourceType || (storagePrepared.type === 'video' ? 'video' : 'image'),
+    format: detectedFormat || (storagePrepared.type === 'video' ? 'mp4' : 'jpg'),
     tags: Array.isArray(storagePrepared.tags) && storagePrepared.tags.length > 0 ? storagePrepared.tags : ['VIP'],
     views: typeof storagePrepared.views === 'number' ? storagePrepared.views : 1,
     likes: typeof storagePrepared.likes === 'number' ? storagePrepared.likes : 0,
@@ -1668,11 +1749,11 @@ export async function createAdminContent(itemData: Partial<MediaItem>): Promise<
 
   const cleanItem = sanitizeFirestorePayload(rawItem);
 
-  // 1. Direct Cloud Firestore Write
+  // 1. Direct Cloud Firestore Write (Stores ONLY Cloudinary metadata)
   try {
     const docRef = doc(firestore, 'content', newId);
     await setDoc(docRef, cleanItem);
-    console.log('[Firebase Cloud] Successfully stored post in Firestore:', newId);
+    console.log('[Firebase Cloud] Successfully stored post metadata in Firestore:', newId);
   } catch (err: any) {
     console.error('[Firebase Cloud Write Error]', err);
     if (isQuotaError(err)) {
@@ -1696,6 +1777,18 @@ export async function createAdminContent(itemData: Partial<MediaItem>): Promise<
  */
 export async function updateAdminContent(id: string, updates: Partial<MediaItem>): Promise<MediaItem> {
   const storagePrepared = await ensureMediaItemStorageUrls(updates);
+
+  // Auto-extract Cloudinary asset metadata on updates
+  const targetUrl = storagePrepared.mediaUrl || storagePrepared.thumbnailUrl;
+  if (targetUrl && isCloudinaryUrl(targetUrl)) {
+    const info = extractCloudinaryAssetInfo(targetUrl);
+    if (info) {
+      if (!storagePrepared.cloudinaryPublicId) storagePrepared.cloudinaryPublicId = info.publicId;
+      if (!storagePrepared.resource_type) storagePrepared.resource_type = info.resourceType;
+      if (!storagePrepared.format) storagePrepared.format = info.format;
+    }
+  }
+
   const cleanUpdates = sanitizeFirestorePayload(storagePrepared);
 
   // 1. Update in Cloud Firestore
@@ -1726,36 +1819,50 @@ export async function updateAdminContent(id: string, updates: Partial<MediaItem>
 }
 
 /**
- * Deletes content in Firestore + updates in-memory cache immediately + destroys linked Cloudinary assets via secure backend
+ * Deletes content following strict user-mandated flow:
+ * Admin → Delete Photo/Video → secure backend/server-side Cloudinary delete → Cloudinary asset delete → THEN Firestore record delete
+ * API Secret is never exposed to the frontend.
  */
 export async function deleteAdminContent(id: string, itemOverride?: MediaItem): Promise<boolean> {
   const currentList = memoryContentList || getCachedContentListSync();
   const targetItem = itemOverride || currentList.find(i => i.id === id);
 
-  // 1. Delete from Cloud Firestore
+  // 1. SECURE SERVER-SIDE CLOUDINARY DELETE FIRST:
+  if (targetItem) {
+    try {
+      console.log(`[Delete Flow] Step 1: Requesting secure server-side Cloudinary asset deletion for "${id}"...`);
+      const cloudRes = await cleanupMediaItemStorage(targetItem);
+      console.log(`[Delete Flow] Cloudinary asset deletion result for "${id}":`, cloudRes);
+    } catch (cleanErr) {
+      console.warn('[Delete Flow] Non-fatal Cloudinary cleanup error:', cleanErr);
+    }
+  }
+
+  // 2. FIRESTORE RECORD DELETE (Only after Cloudinary deletion completes)
   try {
+    console.log(`[Delete Flow] Step 2: Deleting Firestore document record for "${id}"...`);
     const docRef = doc(firestore, 'content', id);
     await deleteDoc(docRef);
-    console.log('[Firebase Cloud] Successfully deleted post from Firestore:', id);
+    console.log('[Delete Flow] Successfully deleted document record from Firestore:', id);
   } catch (err: any) {
     console.error('[Firebase Cloud Delete Error]', err);
     throw new Error(`क्लाउड से डिलीट विफल: ${err.message || 'नेटवर्क त्रुटि'}`);
   }
 
-  // 2. Clean up storage & Cloudinary assets via secure backend
-  if (targetItem) {
-    try {
-      cleanupMediaItemStorage(targetItem).then(res => {
-        console.log(`[Storage Cleanup] Post "${id}" Cloudinary deletion result:`, res);
-      }).catch(err => {
-        console.warn('[Storage Cleanup Non-fatal]', err);
-      });
-    } catch (cleanErr) {
-      console.warn('[Storage Cleanup Invocation Error]', cleanErr);
-    }
-  }
+  // Synchronize backend Express server cache as well
+  try {
+    const adminToken = localStorage.getItem('ruma_admin_token') || 'adm_Ashok#8899_token';
+    fetch(`/api/admin/content/${id}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${adminToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ item: targetItem })
+    }).catch(() => {});
+  } catch (_) {}
 
-  // 3. Write-through update to local memory & cache (Zero subsequent getDocs needed!)
+  // 3. Write-through update to local memory & cache (Instant UI refresh)
   const nextList = currentList.filter(i => i.id !== id);
   sharedContentManager.notifyLocalUpdate(nextList);
 

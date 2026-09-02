@@ -29,7 +29,7 @@ interface MediaUploadZoneProps {
   id?: string;
   label: string;
   value: string;
-  onChange: (url: string, metadata?: { duration?: string; thumbnail?: string }) => void;
+  onChange: (url: string, metadata?: { duration?: string; thumbnail?: string; publicId?: string; cloudinaryPublicId?: string; resourceType?: string; resource_type?: string; format?: string }) => void;
   accept?: 'image' | 'video' | 'document' | 'any';
   helperText?: string;
   required?: boolean;
@@ -37,7 +37,7 @@ interface MediaUploadZoneProps {
   onThumbnailExtracted?: (thumbUrl: string) => void;
   onDurationExtracted?: (duration: string) => void;
   enableCrop?: boolean;
-  storageFolder?: 'photos' | 'videos' | 'thumbnails' | 'documents' | 'settings';
+  storageFolder?: 'website-media' | 'photos' | 'videos' | 'thumbnails' | 'documents' | 'settings' | string;
 }
 
 export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
@@ -52,7 +52,7 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
   onThumbnailExtracted,
   onDurationExtracted,
   enableCrop = true,
-  storageFolder
+  storageFolder = 'website-media'
 }) => {
   const [mode, setMode] = useState<'gallery' | 'url'>(
     value && (value.startsWith('http://') || value.startsWith('https://')) && !isCloudinaryUrl(value) && !value.startsWith('data:') ? 'url' : 'gallery'
@@ -145,46 +145,42 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
 
     try {
       if (isImageFile) {
-        let payloadToUpload: File | Blob = file;
-        let preprocessMs = 0;
-
-        // Only compress if file is large (>2MB)
-        if (shouldCompressImage(file)) {
-          setUploadStatus('Preparing image optimization...');
-          const prepResult = await compressImageToBlob(file, 1920, 1920, 0.80);
-          payloadToUpload = prepResult.blob;
-          preprocessMs = prepResult.durationMs;
-        }
-
         setUploadStatus('Uploading to Cloudinary...');
+        // Direct file upload to Cloudinary (No unnecessary compression, 100% original quality)
         const uploadResult = await uploadFileToStorage(
-          payloadToUpload,
-          determinedFolder,
-          `img_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${payloadToUpload.type?.includes('webp') ? 'webp' : 'jpg'}`,
+          file,
+          'website-media',
+          `img_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`,
           (pct, statusText) => {
             setUploadProgress(pct);
             setUploadStatus(statusText);
           },
           {
             selectionTime,
-            preprocessDurationMs: preprocessMs
+            preprocessDurationMs: 0
           }
         );
 
         setUploadProgress(100);
         setUploadStatus('✅ Upload complete!');
         setLastFailedFile(null);
-        onChange(uploadResult.downloadUrl);
+        onChange(uploadResult.downloadUrl, {
+          publicId: uploadResult.publicId,
+          cloudinaryPublicId: uploadResult.cloudinaryPublicId,
+          resourceType: 'image',
+          resource_type: 'image',
+          format: uploadResult.format
+        });
 
       } else if (isVideoFile) {
         // High-Speed Direct Video Stream:
-        // 1. Upload original browser File immediately (0ms start delay, zero Base64, zero thumbnail blocking)
+        // 1. Upload original browser File immediately (0ms start delay, zero Base64, zero re-encoding)
         // 2. Derive video poster instantly from Cloudinary URL transformation
         setUploadStatus('Uploading to Cloudinary...');
 
         const uploadResult = await uploadFileToStorage(
           file,
-          'videos',
+          'website-media',
           `video_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`,
           (pct, statusText) => {
             setUploadProgress(pct);
@@ -212,7 +208,12 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
         setLastFailedFile(null);
         onChange(uploadResult.downloadUrl, {
           thumbnail: autoThumbnail,
-          duration: videoDuration
+          duration: videoDuration,
+          publicId: uploadResult.publicId,
+          cloudinaryPublicId: uploadResult.cloudinaryPublicId,
+          resourceType: 'video',
+          resource_type: 'video',
+          format: uploadResult.format
         });
 
       } else {
@@ -220,7 +221,7 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
         setUploadStatus('Uploading to Cloudinary...');
         const uploadResult = await uploadFileToStorage(
           file,
-          'documents',
+          'website-media',
           `doc_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`,
           (pct, statusText) => {
             setUploadProgress(pct);

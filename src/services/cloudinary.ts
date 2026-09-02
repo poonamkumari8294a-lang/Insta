@@ -13,9 +13,10 @@ import { formatFileSize, printUploadTimingReport } from '../utils/mediaUpload';
 export const CLOUDINARY_CONFIG = {
   cloudName: (((import.meta as any).env?.VITE_CLOUDINARY_CLOUD_NAME as string) || 'mnbjgtqu').trim(),
   uploadPreset: (((import.meta as any).env?.VITE_CLOUDINARY_UPLOAD_PRESET as string) || 'rumacutegirl').trim(),
+  defaultFolder: 'website-media'
 };
 
-export type CloudinaryFolder = 'photos' | 'videos' | 'thumbnails' | 'documents' | 'settings' | 'general';
+export type CloudinaryFolder = 'website-media' | 'photos' | 'videos' | 'thumbnails' | 'documents' | 'settings' | 'general' | string;
 export type CloudinaryResourceType = 'image' | 'video' | 'raw' | 'auto';
 
 export interface CloudinaryUploadProgress {
@@ -29,7 +30,9 @@ export interface CloudinaryUploadProgress {
 export interface CloudinaryUploadResult {
   secureUrl: string;
   publicId: string;
+  cloudinaryPublicId: string;
   resourceType: string;
+  resource_type: string;
   format?: string;
   bytes: number;
   width?: number;
@@ -53,6 +56,69 @@ export interface CloudinaryUploadResult {
 export function isCloudinaryUrl(url: string | undefined | null): boolean {
   if (!url || typeof url !== 'string') return false;
   return url.includes('cloudinary.com') || url.includes('res.cloudinary.com');
+}
+
+/**
+ * Extracts publicId, resourceType, and format from any Cloudinary URL
+ */
+export function extractCloudinaryAssetInfo(url: string | undefined | null): {
+  publicId: string;
+  resourceType: 'image' | 'video' | 'raw';
+  format?: string;
+} | null {
+  if (!url || typeof url !== 'string') return null;
+  const trimmed = url.trim();
+  if (!isCloudinaryUrl(trimmed)) return null;
+
+  try {
+    const parsedUrl = new URL(trimmed.startsWith('//') ? `https:${trimmed}` : trimmed);
+    const pathname = parsedUrl.pathname;
+
+    let resourceType: 'image' | 'video' | 'raw' = 'image';
+    if (pathname.includes('/video/upload/') || pathname.includes('/video/')) {
+      resourceType = 'video';
+    } else if (pathname.includes('/raw/upload/') || pathname.includes('/raw/')) {
+      resourceType = 'raw';
+    }
+
+    const uploadIndex = pathname.indexOf('/upload/');
+    if (uploadIndex === -1) return null;
+
+    const afterUpload = pathname.substring(uploadIndex + '/upload/'.length);
+    const segments = afterUpload.split('/');
+    const cleanSegments: string[] = [];
+
+    for (const seg of segments) {
+      if (
+        seg.includes(',') ||
+        seg.startsWith('w_') ||
+        seg.startsWith('h_') ||
+        seg.startsWith('c_') ||
+        seg.startsWith('q_') ||
+        seg.startsWith('so_') ||
+        seg.startsWith('f_') ||
+        /^v\d+$/.test(seg)
+      ) {
+        continue;
+      }
+      cleanSegments.push(seg);
+    }
+
+    if (cleanSegments.length === 0) return null;
+
+    const publicIdWithExt = cleanSegments.join('/');
+    const publicId = publicIdWithExt.replace(/\.[a-zA-Z0-9]+$/, '');
+    const extMatch = publicIdWithExt.match(/\.([a-zA-Z0-9]+)$/);
+    const format = extMatch ? extMatch[1].toLowerCase() : (resourceType === 'video' ? 'mp4' : 'jpg');
+
+    return {
+      publicId,
+      resourceType,
+      format
+    };
+  } catch (_) {
+    return null;
+  }
 }
 
 /**
@@ -148,7 +214,7 @@ export function uploadToCloudinary(
   } = {}
 ): Promise<CloudinaryUploadResult> {
   const {
-    folder = 'photos',
+    folder = 'website-media',
     selectionTime = performance.now(),
     preprocessDurationMs = 0,
     onProgress
@@ -273,8 +339,10 @@ export function uploadToCloudinary(
           resolve({
             secureUrl,
             publicId,
+            cloudinaryPublicId: publicId,
             resourceType: resType,
-            format: data.format,
+            resource_type: resType,
+            format: data.format || (resType === 'video' ? 'mp4' : 'jpg'),
             bytes: transferred,
             width: data.width,
             height: data.height,

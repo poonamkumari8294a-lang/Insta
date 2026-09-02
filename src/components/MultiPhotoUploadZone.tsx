@@ -88,27 +88,17 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
       const uploadSingleFile = async (file: File, index: number): Promise<string | null> => {
         const itemSelectionTime = performance.now();
         try {
-          let payloadToUpload: File | Blob = file;
-          let preprocessMs = 0;
-
-          // Only compress if file is large (>2MB)
-          if (shouldCompressImage(file)) {
-            const prepResult = await compressImageToBlob(file, 1920, 1920, 0.80);
-            payloadToUpload = prepResult.blob;
-            preprocessMs = prepResult.durationMs;
-          }
-
-          // Direct Stream to Cloudinary
+          // Direct file upload to Cloudinary (No unnecessary compression, 100% original quality)
           const uploadResult = await uploadFileToStorage(
-            payloadToUpload,
-            'photos',
-            `album_${Date.now()}_${index}_${Math.random().toString(36).substring(2, 7)}.${payloadToUpload.type?.includes('webp') ? 'webp' : 'jpg'}`,
+            file,
+            'website-media',
+            `album_${Date.now()}_${index}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`,
             (pct) => {
               updateAggregateProgress(index, pct);
             },
             {
               selectionTime: itemSelectionTime,
-              preprocessDurationMs: preprocessMs
+              preprocessDurationMs: 0
             }
           );
 

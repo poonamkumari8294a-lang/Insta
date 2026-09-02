@@ -2,6 +2,7 @@ import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { MediaItem, SiteSettings } from './types';
 import {
   fetchSiteSettings,
+  fetchContentList,
   subscribeToContentList,
   getCachedSiteSettingsSync,
   getCachedContentListSync,
@@ -161,7 +162,33 @@ export default function App() {
       }
     );
 
-    // 3. Listen for hash & URL changes
+    // 3. Background fresh content revalidation from cloud (ensures other devices catch up instantly)
+    fetchContentList(true).then((freshItems) => {
+      if (freshItems && freshItems.length > 0) {
+        setContent(freshItems);
+      }
+    }).catch((err) => {
+      console.warn('Background content revalidation:', err);
+    });
+
+    // 4. Automatic resync when tab or device becomes active / visible
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        fetchContentList(true).then((freshItems) => {
+          if (freshItems && freshItems.length > 0) {
+            setContent(freshItems);
+          }
+        }).catch(() => {});
+        fetchSiteSettings(true).then((freshSettings) => {
+          if (freshSettings) setSettings(freshSettings);
+        }).catch(() => {});
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
+    // 5. Listen for hash & URL changes
     const handleUrlChange = () => {
       const { route, mediaId } = getRouteFromUrl();
       setCurrentRoute(route);
@@ -173,6 +200,8 @@ export default function App() {
 
     return () => {
       unsubscribeContent();
+      window.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
       window.removeEventListener('hashchange', handleUrlChange);
       window.removeEventListener('popstate', handleUrlChange);
     };
