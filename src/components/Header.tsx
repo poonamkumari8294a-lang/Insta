@@ -121,19 +121,19 @@ export const Header: React.FC<HeaderProps> = ({
 
             <a
               id="nav-link-whatsapp"
-              href={`https://wa.me/${(settings.supportWhatsApp || '+63 9465507887').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Hello ${settings.creatorName}! I need VIP support.`)}`}
+              href={settings.supportInstagram || settings.instagramUrl || 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3'}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-3.5 py-2 rounded-full text-xs font-bold text-emerald-800 bg-emerald-50/80 hover:bg-emerald-100 border border-emerald-200/80 shadow-sm transition-all flex items-center gap-1.5"
-              title="24/7 VIP WhatsApp Support"
+              className="px-3.5 py-2 rounded-full text-xs font-bold text-white bg-gradient-to-r from-purple-600 via-pink-600 to-rose-500 hover:opacity-95 shadow-sm transition-all flex items-center gap-1.5"
+              title="24/7 VIP Instagram Support"
             >
-              <MessageCircle className="w-3.5 h-3.5 text-emerald-600 fill-emerald-600/20" />
-              <span>WhatsApp Support</span>
+              <Instagram className="w-3.5 h-3.5 text-white" />
+              <span>Instagram Support</span>
             </a>
 
             <a
               id="nav-link-instagram"
-              href={settings.instagramUrl}
+              href={settings.instagramUrl || 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3'}
               target="_blank"
               rel="noopener noreferrer"
               className="px-3.5 py-2 rounded-full text-xs font-bold text-pink-700 bg-white/70 hover:bg-white border border-pink-200/70 shadow-sm transition-all flex items-center gap-1.5"
@@ -276,23 +276,23 @@ export const Header: React.FC<HeaderProps> = ({
             )}
 
             <a
-              href={`https://wa.me/${(settings.supportWhatsApp || '+63 9465507887').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Hello ${settings.creatorName}! I need VIP support.`)}`}
+              href={settings.supportInstagram || settings.instagramUrl || 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3'}
               target="_blank"
               rel="noopener noreferrer"
-              className="w-full py-2.5 px-4 rounded-2xl text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 flex items-center justify-center gap-2 shadow-sm"
+              className="w-full py-2.5 px-4 rounded-2xl text-xs font-bold text-white bg-gradient-to-r from-purple-600 via-pink-600 to-rose-500 flex items-center justify-center gap-2 shadow-sm"
             >
-              <MessageCircle className="w-4 h-4 text-emerald-600" />
-              <span>WhatsApp Support ({settings.supportWhatsApp || '+63 9465507887'})</span>
+              <Instagram className="w-4 h-4 text-white" />
+              <span>Instagram Support ({settings.instagramHandle || '@ruma__cutegirl'})</span>
             </a>
 
             <a
-              href={settings.instagramUrl}
+              href={settings.instagramUrl || 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3'}
               target="_blank"
               rel="noopener noreferrer"
               className="w-full py-2.5 px-4 rounded-2xl text-xs font-bold text-pink-700 bg-white border border-pink-200 flex items-center justify-center gap-2 shadow-sm"
             >
               <Instagram className="w-4 h-4 text-pink-600" />
-              <span>Follow {settings.instagramHandle} on Instagram</span>
+              <span>Follow {settings.instagramHandle || '@ruma__cutegirl'} on Instagram</span>
             </a>
 
             <div className="flex items-center justify-between text-[11px] text-purple-900/60 px-1 pt-1 font-medium">

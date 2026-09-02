@@ -464,8 +464,8 @@ export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSecti
               : 'text-purple-900/70 hover:text-purple-950 hover:bg-purple-50'
           }`}
         >
-          <MessageCircle className="w-3.5 h-3.5" />
-          <span>3. WhatsApp & Social</span>
+          <Instagram className="w-3.5 h-3.5" />
+          <span>3. Instagram & Social Support</span>
         </button>
 
         <button
@@ -940,7 +940,81 @@ export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSecti
       {activeSubTab === 'whatsapp' && (
         <div className="glass-card rounded-3xl p-6 sm:p-8 border border-purple-200 space-y-6 shadow-md animate-in fade-in">
           
-          {/* WhatsApp Access Rules Card */}
+          {/* PRIMARY SUPPORT: INSTAGRAM OFFICIAL SUPPORT CARD */}
+          <div className="p-5 rounded-3xl bg-gradient-to-r from-purple-50 via-pink-50/70 to-rose-50 border-2 border-pink-300 space-y-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-pink-200 pb-2">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 flex items-center justify-center text-white shadow-xs">
+                  <Instagram className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-purple-950">
+                    Official Instagram Support ID (आधिकारिक इंस्टाग्राम सपोर्ट आईडी)
+                  </h4>
+                  <p className="text-[11px] text-pink-800 font-semibold">
+                    सपोर्ट में व्हाट्सएप हटाकर इंस्टाग्राम आईडी सक्रिय की गई है
+                  </p>
+                </div>
+              </div>
+              <span className="text-[10px] font-black uppercase bg-pink-100 text-pink-800 px-2.5 py-0.5 rounded-full border border-pink-300">
+                Primary Support Active 🔥
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs font-bold text-purple-950 block mb-1">
+                  Instagram Support URL (सपोर्ट लिंक) *
+                </label>
+                <input
+                  type="url"
+                  value={formData.supportInstagram || formData.instagramUrl || ''}
+                  onChange={(e) => {
+                    handleChange('supportInstagram', e.target.value);
+                    handleChange('instagramUrl', e.target.value);
+                  }}
+                  placeholder="https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3"
+                  className="w-full bg-white border-2 border-pink-400 rounded-2xl px-3.5 py-2.5 text-xs text-pink-900 font-bold focus:ring-2 focus:ring-pink-500 shadow-xs"
+                />
+                <p className="text-[10px] text-purple-900/70 mt-1">
+                  💡 वर्तमान सेट लिंक: <strong>https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3</strong>
+                </p>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-purple-950 block mb-1">
+                  Instagram Handle (हैंडल नाम)
+                </label>
+                <input
+                  type="text"
+                  value={formData.instagramHandle || ''}
+                  onChange={(e) => handleChange('instagramHandle', e.target.value)}
+                  placeholder="@ruma__cutegirl"
+                  className="w-full bg-white border-2 border-pink-400 rounded-2xl px-3.5 py-2.5 text-xs text-purple-950 font-bold focus:ring-2 focus:ring-pink-500 shadow-xs"
+                />
+                <p className="text-[10px] text-purple-900/70 mt-1">
+                  हेडर, फूटर व सपोर्ट विजेट पर यह हैंडल प्रदर्शित होगा।
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-white/80 rounded-2xl border border-pink-200 text-xs">
+              <span className="font-bold text-pink-900">
+                सीधा इंस्टाग्राम प्रोफाइल टेस्ट करें:
+              </span>
+              <a
+                href={formData.supportInstagram || formData.instagramUrl || 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 via-pink-600 to-rose-500 text-white font-bold text-[11px] shadow-xs hover:brightness-105 transition-all flex items-center gap-1.5"
+              >
+                <Instagram className="w-3.5 h-3.5" />
+                <span>Open @ruma__cutegirl on Instagram</span>
+              </a>
+            </div>
+          </div>
+
+          {/* WhatsApp Access Rules Card (Secondary) */}
           <div className="p-5 rounded-3xl bg-gradient-to-r from-emerald-50 via-teal-50/50 to-white border-2 border-emerald-300 space-y-4">
             <div className="flex items-center justify-between border-b border-emerald-200 pb-2">
               <div className="flex items-center gap-2">

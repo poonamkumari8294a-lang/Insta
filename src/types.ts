@@ -159,6 +159,7 @@ export interface SiteSettings {
   supportEmail: string;
   supportTelegram: string;
   supportWhatsApp?: string;
+  supportInstagram?: string;
   whatsappNumber?: string;
   whatsappAccessMode?: 'paid_only' | 'all';
   youtubeUrl?: string;

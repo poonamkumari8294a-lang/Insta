@@ -324,6 +324,15 @@ export function getCachedSiteSettingsSync(): SiteSettings {
     const raw = localStorage.getItem(SETTINGS_CACHE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
+      if (parsed.instagramUrl && parsed.instagramUrl.includes('ruma__cutegirl')) {
+        parsed.instagramUrl = 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3';
+      }
+      if (!parsed.supportInstagram) {
+        parsed.supportInstagram = 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3';
+      }
+      if (!parsed.instagramHandle || parsed.instagramHandle === '@ruma__cuteg...') {
+        parsed.instagramHandle = '@ruma__cutegirl';
+      }
       memorySiteSettings = { ...CLIENT_SITE_SETTINGS, ...parsed };
       return memorySiteSettings;
     }
@@ -400,7 +409,10 @@ export async function fetchSiteSettings(forceFresh = false): Promise<SiteSetting
           creatorName: data.creatorName || CLIENT_SITE_SETTINGS.creatorName,
           upiId: data.upiId || CLIENT_SITE_SETTINGS.upiId,
           tagline: data.tagline !== undefined ? data.tagline : CLIENT_SITE_SETTINGS.tagline,
-          bio: data.bio !== undefined ? data.bio : CLIENT_SITE_SETTINGS.bio
+          bio: data.bio !== undefined ? data.bio : CLIENT_SITE_SETTINGS.bio,
+          instagramUrl: (data.instagramUrl && data.instagramUrl.includes('ruma__cutegirl')) ? 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3' : (data.instagramUrl || CLIENT_SITE_SETTINGS.instagramUrl),
+          supportInstagram: data.supportInstagram || 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3',
+          instagramHandle: data.instagramHandle && data.instagramHandle !== '@ruma__cuteg...' ? data.instagramHandle : '@ruma__cutegirl'
         };
         memorySiteSettings = merged;
         memorySettingsTimestamp = Date.now();

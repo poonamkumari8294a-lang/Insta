@@ -175,7 +175,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     badge: 'POPULAR 🔥',
     popular: true,
     enabled: true,
-    perks: ['All HD Photo Sets', 'Exclusive Video Reels', 'WhatsApp Support']
+    perks: ['All HD Photo Sets', 'Exclusive Video Reels', 'VIP Instagram Support']
   });
   const [isSavingPlans, setIsSavingPlans] = useState(false);
 
@@ -1736,7 +1736,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                   badge: 'EXCLUSIVE ✨',
                   popular: false,
                   enabled: true,
-                  perks: ['All HD Photo Sets', 'VIP Video Reels', 'Priority WhatsApp Support']
+                  perks: ['All HD Photo Sets', 'VIP Video Reels', 'Priority Instagram Support']
                 });
                 setEditingPlan(null);
                 setIsCreatingPlan(true);
@@ -2932,7 +2932,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     ...planFormData,
                     perks: e.target.value.split(',').map(s => s.trim()).filter(Boolean)
                   })}
-                  placeholder="All VIP Photos, HD Video Reels, Direct WhatsApp Access"
+                  placeholder="All VIP Photos, HD Video Reels, Direct Instagram DM Support"
                   className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2 text-purple-950 shadow-xs font-medium"
                 />
               </div>

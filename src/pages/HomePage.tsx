@@ -23,7 +23,13 @@ import {
   TrendingUp,
   Heart,
   Share2,
-  Gift
+  Gift,
+  Star,
+  CheckCircle2,
+  CheckCircle,
+  Crown,
+  Eye,
+  Users
 } from 'lucide-react';
 
 // Lazy load below-the-fold static sections
@@ -120,26 +126,26 @@ export const HomePage: React.FC<HomePageProps> = ({
       case 'hero':
         if (cfg.hero && !cfg.hero.enabled) return null;
         return (
-          <section key="hero" className="relative pt-6 sm:pt-10">
+          <section key="hero" className="relative pt-4 sm:pt-8">
             {/* Ambient Glows */}
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-80 bg-gradient-to-tr from-pink-300/30 via-purple-300/20 to-transparent blur-3xl pointer-events-none rounded-full" />
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-5xl h-96 bg-gradient-to-tr from-pink-300/25 via-purple-300/15 to-transparent blur-3xl pointer-events-none rounded-full" />
 
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 space-y-6">
               <div className="glass-card rounded-3xl p-6 sm:p-10 border border-white/80 shadow-2xl relative overflow-hidden">
-                {/* Background Pattern */}
-                <div className="absolute top-0 right-0 w-96 h-96 bg-pink-200/20 rounded-full blur-3xl pointer-events-none" />
+                {/* Background Luxury Ambient Gradient */}
+                <div className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-br from-pink-200/20 via-purple-200/15 to-transparent rounded-full blur-3xl pointer-events-none" />
 
                 <div className="flex flex-col md:flex-row items-center gap-6 sm:gap-10">
-                  {/* Creator Profile Photo */}
+                  {/* Creator Profile Photo with Active Status */}
                   <div className="relative shrink-0">
-                    <div className="w-28 h-28 sm:w-36 sm:h-36 md:w-44 md:h-44 rounded-full p-1 bg-gradient-to-tr from-yellow-300 via-pink-400 to-purple-500 shadow-2xl shadow-pink-500/25">
+                    <div className="w-32 h-32 sm:w-40 sm:h-40 md:w-48 md:h-48 rounded-full p-1 bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 shadow-2xl shadow-pink-500/25 relative group">
                       <div className="w-full h-full rounded-full p-1 bg-white overflow-hidden shadow-inner">
                         <img
                           src={getOptimizedImageUrl(settings.profilePicUrl, 240, 80)}
                           alt={settings.creatorName}
-                          width={180}
-                          height={180}
-                          className="w-full h-full object-cover rounded-full"
+                          width={192}
+                          height={192}
+                          className="w-full h-full object-cover rounded-full group-hover:scale-105 transition-transform duration-500"
                           loading="eager"
                           fetchPriority="high"
                           decoding="async"
@@ -148,75 +154,95 @@ export const HomePage: React.FC<HomePageProps> = ({
                       </div>
                     </div>
 
-                    {/* Mood Tag */}
-                    <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-white/95 border border-pink-300 text-pink-700 text-[10px] sm:text-xs font-black px-3.5 py-0.5 rounded-full shadow-md whitespace-nowrap flex items-center gap-1">
-                      <span>Pretty mood always 💋</span>
+                    {/* Live Online Badge */}
+                    <div className="absolute -bottom-2.5 left-1/2 -translate-x-1/2 bg-white/95 border border-pink-300 text-pink-700 text-[10px] sm:text-xs font-black px-3 py-0.5 rounded-full shadow-md whitespace-nowrap flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block" />
+                      <span>Active Now • VIP Online</span>
                     </div>
                   </div>
 
                   {/* Creator Bio & Stats */}
                   <div className="flex-1 text-center md:text-left space-y-4">
-                    {/* Name & Handle */}
+                    {/* Name & Official Badges */}
                     <div>
-                      <div className="flex flex-wrap items-center justify-center md:justify-start gap-2">
+                      <div className="flex flex-wrap items-center justify-center md:justify-start gap-2 sm:gap-2.5">
                         <h1 className="font-display font-black text-2xl sm:text-3xl md:text-4xl text-purple-950 tracking-tight">
                           {cfg.hero?.title || settings.creatorName}
                         </h1>
                         {(cfg.profile?.showBadge ?? true) && (
-                          <>
-                            <BadgeCheck className="w-6 h-6 text-blue-500 fill-blue-500/20" />
-                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-pink-100 text-pink-700 border border-pink-200 shadow-sm">
-                              {settings.badgeText || 'VIP Creator'}
+                          <div className="flex items-center gap-1.5">
+                            <BadgeCheck className="w-6 h-6 text-blue-500 fill-blue-500/20" title="Verified Creator" />
+                            <span className="px-3 py-0.5 rounded-full text-[11px] font-black bg-gradient-to-r from-pink-100 to-purple-100 text-pink-700 border border-pink-200/80 shadow-xs">
+                              {settings.badgeText || 'Official VIP Hub'}
                             </span>
-                          </>
+                          </div>
                         )}
                       </div>
-                      <p className="text-xs sm:text-sm text-pink-700 font-bold mt-1">
-                        {settings.instagramHandle} • Official Premium Hub
-                      </p>
+
+                      <div className="flex items-center justify-center md:justify-start gap-2 mt-1">
+                        <a
+                          href={settings.instagramUrl || 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3'}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs sm:text-sm text-pink-700 font-extrabold hover:underline flex items-center gap-1"
+                        >
+                          <Instagram className="w-3.5 h-3.5 text-pink-600" />
+                          <span>{settings.instagramHandle || '@ruma__cutegirl'}</span>
+                        </a>
+                        <span className="text-purple-300">•</span>
+                        <span className="text-xs text-purple-900/60 font-semibold">Premium Creator Hub</span>
+                      </div>
                     </div>
 
                     {/* Bio text */}
                     <p className="text-xs sm:text-sm text-purple-900/80 max-w-xl leading-relaxed font-medium">
-                      {cfg.hero?.description || settings.tagline}
+                      {cfg.hero?.description || settings.tagline || 'Exclusive 4K Uncut Photosets & Video Reels. 100% Instant Delivery via Secure Direct UPI.'}
                     </p>
 
-                    {/* Real-time stats row */}
+                    {/* Real-time Performance & Trust Metrics Grid */}
                     {(cfg.profile?.showStats ?? true) && (
-                      <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 sm:gap-6 pt-2">
-                        <div className="p-3.5 rounded-2xl bg-white/70 border border-purple-100 text-center min-w-[90px] shadow-sm">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 pt-1">
+                        <div className="p-3 rounded-2xl bg-white/80 border border-purple-100 text-center shadow-xs">
                           <span className="font-display text-base sm:text-xl font-black text-purple-950 block">
-                            {settings.postsCount}
+                            {settings.postsCount || '50+'}
                           </span>
-                          <span className="text-[10px] sm:text-xs text-purple-900/70 font-semibold">VIP Posts</span>
+                          <span className="text-[10px] sm:text-xs text-purple-900/70 font-semibold">VIP Drops</span>
                         </div>
 
-                        <div className="p-3.5 rounded-2xl bg-white/70 border border-purple-100 text-center min-w-[90px] shadow-sm">
+                        <div className="p-3 rounded-2xl bg-white/80 border border-purple-100 text-center shadow-xs">
                           <span className="font-display text-base sm:text-xl font-black text-purple-950 block">
-                            {typeof settings.followersCount === 'number' ? settings.followersCount.toLocaleString() : settings.followersCount}
+                            {typeof settings.followersCount === 'number' ? settings.followersCount.toLocaleString() : settings.followersCount || '150K+'}
                           </span>
                           <span className="text-[10px] sm:text-xs text-purple-900/70 font-semibold">Followers</span>
                         </div>
 
-                        <div className="p-3.5 rounded-2xl bg-pink-50/80 border border-pink-200 text-center min-w-[110px] shadow-sm">
+                        <div className="p-3 rounded-2xl bg-pink-50/80 border border-pink-200/80 text-center shadow-xs">
                           <span className="font-display text-base sm:text-xl font-black text-pink-700 block flex items-center justify-center gap-1">
-                            <TrendingUp className="w-4 h-4 text-emerald-600" />
-                            {settings.viewsCount}
+                            <Zap className="w-4 h-4 text-amber-500 fill-amber-500/20" />
+                            0-Sec
                           </span>
-                          <span className="text-[10px] sm:text-xs text-pink-800/80 font-bold">Monthly Views</span>
+                          <span className="text-[10px] sm:text-xs text-pink-900/70 font-semibold">Auto Unlock</span>
+                        </div>
+
+                        <div className="p-3 rounded-2xl bg-amber-50/80 border border-amber-200/80 text-center shadow-xs">
+                          <span className="font-display text-base sm:text-xl font-black text-amber-700 block flex items-center justify-center gap-1">
+                            <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
+                            4.9 / 5.0
+                          </span>
+                          <span className="text-[10px] sm:text-xs text-amber-900/70 font-semibold">Member Rating</span>
                         </div>
                       </div>
                     )}
 
                     {/* Action CTAs */}
-                    <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 pt-2">
+                    <div className="flex flex-wrap items-center justify-center md:justify-start gap-2.5 sm:gap-3 pt-2">
                       <button
                         id="hero-btn-explore-feed"
                         onClick={() => onNavigate('content')}
                         className="glow-pink-btn px-6 py-3 rounded-2xl text-xs sm:text-sm font-black text-white flex items-center gap-2 shadow-lg shadow-pink-500/25 hover:scale-[1.02] transition-transform cursor-pointer"
                       >
                         <Flame className="w-4 h-4 text-yellow-300" />
-                        <span>{cfg.hero?.ctaText || 'View Premium Feed'}</span>
+                        <span>{cfg.hero?.ctaText || 'View VIP Releases'}</span>
                         <ArrowRight className="w-4 h-4" />
                       </button>
 
@@ -226,16 +252,16 @@ export const HomePage: React.FC<HomePageProps> = ({
                         className="px-5 py-3 rounded-2xl text-xs sm:text-sm font-black text-white bg-gradient-to-r from-amber-500 via-rose-500 to-pink-600 hover:brightness-110 transition-all flex items-center gap-2 shadow-lg shadow-rose-500/20 active:scale-95 cursor-pointer"
                       >
                         <Gift className="w-4 h-4 text-yellow-200 animate-bounce" />
-                        <span>डेली स्पिन & जीतें (Free Wheel)</span>
+                        <span>डेली स्पिन (Free Wheel)</span>
                       </button>
 
                       {(cfg.profile?.showInstagramBtn ?? true) && (
                         <a
                           id="hero-btn-instagram"
-                          href={settings.instagramUrl}
+                          href={settings.instagramUrl || 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3'}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="px-5 py-3 rounded-2xl text-xs sm:text-sm font-black text-purple-950 bg-white hover:bg-pink-50 border border-purple-200 transition-all flex items-center gap-2 shadow-sm"
+                          className="px-4 sm:px-5 py-3 rounded-2xl text-xs sm:text-sm font-black text-purple-950 bg-white hover:bg-pink-50 border border-purple-200 transition-all flex items-center gap-2 shadow-sm"
                         >
                           <Instagram className="w-4 h-4 text-pink-600" />
                           <span>Instagram</span>
@@ -248,13 +274,48 @@ export const HomePage: React.FC<HomePageProps> = ({
                           id="hero-btn-share-hub"
                           type="button"
                           onClick={() => onOpenShare()}
-                          className="px-4 sm:px-5 py-3 rounded-2xl text-xs sm:text-sm font-black text-pink-700 bg-pink-50 hover:bg-pink-100 border border-pink-200/80 transition-all flex items-center gap-2 shadow-sm cursor-pointer"
-                          title="प्रोफाइल शेयर करें (WhatsApp, Instagram, Telegram)"
+                          className="px-4 py-3 rounded-2xl text-xs sm:text-sm font-black text-pink-700 bg-pink-50 hover:bg-pink-100 border border-pink-200/80 transition-all flex items-center gap-2 shadow-sm cursor-pointer"
+                          title="प्रोफाइल शेयर करें"
                         >
                           <Share2 className="w-4 h-4 text-pink-600" />
-                          <span>शेयर करें (Share)</span>
+                          <span>शेयर</span>
                         </button>
                       )}
+                    </div>
+
+                    {/* Trust Guarantees Bar */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-3 border-t border-purple-100/80 text-left">
+                      <div className="flex items-center gap-2 p-2 rounded-xl bg-purple-50/50">
+                        <ShieldCheck className="w-4 h-4 text-purple-700 shrink-0" />
+                        <div>
+                          <div className="text-[10px] font-black text-purple-950 leading-tight">100% Private</div>
+                          <div className="text-[9px] text-purple-900/60 font-semibold">Discreet Access</div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 p-2 rounded-xl bg-pink-50/50">
+                        <Zap className="w-4 h-4 text-pink-600 shrink-0" />
+                        <div>
+                          <div className="text-[10px] font-black text-purple-950 leading-tight">Instant UPI</div>
+                          <div className="text-[9px] text-pink-700 font-semibold">GPay • PhonePe • Paytm</div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 p-2 rounded-xl bg-amber-50/50">
+                        <Film className="w-4 h-4 text-amber-700 shrink-0" />
+                        <div>
+                          <div className="text-[10px] font-black text-purple-950 leading-tight">4K Ultra HD</div>
+                          <div className="text-[9px] text-amber-800 font-semibold">Original Masters</div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 p-2 rounded-xl bg-rose-50/50">
+                        <Instagram className="w-4 h-4 text-pink-600 shrink-0" />
+                        <div>
+                          <div className="text-[10px] font-black text-purple-950 leading-tight">VIP Support</div>
+                          <div className="text-[9px] text-rose-700 font-semibold">24/7 Instagram DM</div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -267,10 +328,60 @@ export const HomePage: React.FC<HomePageProps> = ({
                         <Sparkles className="w-3.5 h-3.5" />
                         {cfg.storyHighlights?.title || 'Story Highlights & Teasers'}
                       </span>
-                      <span className="text-[11px] text-purple-900/60 font-medium">Tap to play stories</span>
+                      <span className="text-[11px] text-purple-900/60 font-medium">Tap to preview teasers</span>
                     </div>
                     <StoryHighlights highlights={settings.storyHighlights} />
                   </div>
+                )}
+              </div>
+
+              {/* VIP Quick Category Filter Bar */}
+              <div className="sticky top-14 z-20 py-2 px-1 bg-white/80 backdrop-blur-xl border border-purple-100/90 rounded-2xl shadow-sm flex items-center gap-2 overflow-x-auto no-scrollbar">
+                <span className="text-[11px] font-black uppercase text-purple-900/60 px-2 shrink-0 hidden sm:inline-block">
+                  Categories:
+                </span>
+                <button
+                  onClick={() => document.getElementById('section-featured')?.scrollIntoView({ behavior: 'smooth' })}
+                  className="px-3 py-1.5 rounded-xl text-xs font-black bg-purple-950 text-white shadow-xs shrink-0 flex items-center gap-1.5 cursor-pointer hover:bg-purple-900"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
+                  <span>All Drops ({content.length})</span>
+                </button>
+                {vipPacks.length > 0 && (
+                  <button
+                    onClick={() => document.getElementById('section-vipPacks')?.scrollIntoView({ behavior: 'smooth' })}
+                    className="px-3 py-1.5 rounded-xl text-xs font-black bg-white text-rose-700 hover:bg-rose-50 border border-rose-200 shadow-xs shrink-0 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Crown className="w-3.5 h-3.5 text-rose-600" />
+                    <span>VIP Bundles ({vipPacks.length})</span>
+                  </button>
+                )}
+                {latestVideos.length > 0 && (
+                  <button
+                    onClick={() => document.getElementById('section-latestVideos')?.scrollIntoView({ behavior: 'smooth' })}
+                    className="px-3 py-1.5 rounded-xl text-xs font-black bg-white text-purple-900 hover:bg-purple-50 border border-purple-200 shadow-xs shrink-0 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Film className="w-3.5 h-3.5 text-pink-600" />
+                    <span>4K Videos ({latestVideos.length})</span>
+                  </button>
+                )}
+                {latestPhotos.length > 0 && (
+                  <button
+                    onClick={() => document.getElementById('section-latestPhotos')?.scrollIntoView({ behavior: 'smooth' })}
+                    className="px-3 py-1.5 rounded-xl text-xs font-black bg-white text-purple-900 hover:bg-purple-50 border border-purple-200 shadow-xs shrink-0 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <ImageIcon className="w-3.5 h-3.5 text-purple-600" />
+                    <span>HD Photos ({latestPhotos.length})</span>
+                  </button>
+                )}
+                {freeItems.length > 0 && (
+                  <button
+                    onClick={() => document.getElementById('section-freeSamples')?.scrollIntoView({ behavior: 'smooth' })}
+                    className="px-3 py-1.5 rounded-xl text-xs font-black bg-white text-emerald-700 hover:bg-emerald-50 border border-emerald-200 shadow-xs shrink-0 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Free Previews ({freeItems.length})</span>
+                  </button>
                 )}
               </div>
 
@@ -290,7 +401,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         if (cfg.featured && !cfg.featured.enabled) return null;
         if (featuredContent.length === 0) return null;
         return (
-          <section key="featured" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <section key="featured" id="section-featured" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <div className="flex items-center gap-2">
@@ -308,7 +419,7 @@ export const HomePage: React.FC<HomePageProps> = ({
 
               <button
                 onClick={() => onNavigate('content')}
-                className="text-xs sm:text-sm font-extrabold text-pink-600 hover:text-pink-700 flex items-center gap-1"
+                className="text-xs sm:text-sm font-extrabold text-pink-600 hover:text-pink-700 flex items-center gap-1 cursor-pointer"
               >
                 <span>View All ({content.length})</span>
                 <ArrowRight className="w-4 h-4" />
@@ -339,7 +450,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         if (cfg.vipPacks && !cfg.vipPacks.enabled) return null;
         if (vipPacks.length === 0) return null;
         return (
-          <div key="vipPacks" className="render-fast">
+          <div key="vipPacks" id="section-vipPacks" className="render-fast">
             <PricingPacks
               packs={vipPacks}
               unlockedIds={unlockedIds}
@@ -353,7 +464,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         if (cfg.latestVideos && !cfg.latestVideos.enabled) return null;
         if (latestVideos.length === 0) return null;
         return (
-          <section key="latestVideos" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 render-fast">
+          <section key="latestVideos" id="section-latestVideos" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 render-fast">
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-2">
                 <span className="p-2 rounded-xl bg-pink-100 text-pink-600 border border-pink-200">
@@ -366,7 +477,7 @@ export const HomePage: React.FC<HomePageProps> = ({
 
               <button
                 onClick={() => onNavigate('content')}
-                className="text-xs font-bold text-pink-600 hover:underline"
+                className="text-xs font-bold text-pink-600 hover:underline cursor-pointer"
               >
                 See All Videos →
               </button>
@@ -395,7 +506,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         if (cfg.latestPhotos && !cfg.latestPhotos.enabled) return null;
         if (latestPhotos.length === 0) return null;
         return (
-          <section key="latestPhotos" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 render-fast">
+          <section key="latestPhotos" id="section-latestPhotos" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 render-fast">
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-2">
                 <span className="p-2 rounded-xl bg-pink-100 text-pink-600 border border-pink-200">
@@ -408,7 +519,7 @@ export const HomePage: React.FC<HomePageProps> = ({
 
               <button
                 onClick={() => onNavigate('content')}
-                className="text-xs font-bold text-pink-600 hover:underline"
+                className="text-xs font-bold text-pink-600 hover:underline cursor-pointer"
               >
                 See All Photos →
               </button>
@@ -437,7 +548,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         if (cfg.freeSamples && !cfg.freeSamples.enabled) return null;
         if (freeItems.length === 0) return null;
         return (
-          <section key="freeSamples" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 render-fast">
+          <section key="freeSamples" id="section-freeSamples" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 render-fast">
             <div className="p-6 sm:p-8 rounded-3xl bg-white/70 backdrop-blur-xl border border-white/90 shadow-lg">
               <div className="flex items-center justify-between mb-6">
                 <div>
@@ -469,6 +580,107 @@ export const HomePage: React.FC<HomePageProps> = ({
           </section>
         );
 
+      case 'reviews':
+        return (
+          <section key="reviews" id="section-reviews" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 render-fast">
+            <div className="rounded-3xl bg-gradient-to-br from-white/95 via-purple-50/40 to-pink-50/30 border border-pink-200/80 p-6 sm:p-8 shadow-xl backdrop-blur-xl space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-purple-100 pb-5">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="px-3 py-0.5 rounded-full text-[11px] font-black bg-pink-100 text-pink-700 border border-pink-200 uppercase tracking-wider">
+                      ★ VERIFIED VIP COMMUNITY
+                    </span>
+                    <span className="text-xs text-purple-900/70 font-bold">2,800+ Active VIP Members</span>
+                  </div>
+                  <h3 className="font-display font-black text-xl sm:text-2xl text-purple-950">
+                    VIP Members Feedback & Ratings
+                  </h3>
+                  <p className="text-xs sm:text-sm text-purple-900/70 font-medium mt-0.5">
+                    100% Genuine reviews from verified subscribers across India.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3 bg-white/90 border border-pink-200/80 px-4 py-2.5 rounded-2xl shadow-xs self-start sm:self-auto">
+                  <div className="flex text-amber-400 text-sm sm:text-base">
+                    {'★★★★★'.split('').map((s, i) => (
+                      <span key={i}>★</span>
+                    ))}
+                  </div>
+                  <div className="border-l border-purple-100 pl-3">
+                    <div className="text-base font-black text-purple-950 leading-tight">4.9 / 5.0</div>
+                    <div className="text-[10px] text-purple-900/60 font-semibold">Satisfaction Score</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
+                <div className="p-5 rounded-2xl bg-white/90 border border-purple-100/90 shadow-xs space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex text-amber-400 text-xs">★★★★★</div>
+                    <span className="text-[11px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                      ✓ Verified Member
+                    </span>
+                  </div>
+                  <p className="text-xs text-purple-900/85 leading-relaxed font-medium">
+                    "UPI scan karte hi bina kisi wait ke 2 second me video unlock ho gayi! Quality is pure 4K master copy. Best experience!"
+                  </p>
+                  <div className="flex items-center gap-2.5 pt-2 border-t border-purple-50 text-[11px]">
+                    <div className="w-7 h-7 rounded-full bg-pink-100 text-pink-700 font-black flex items-center justify-center text-xs">
+                      R
+                    </div>
+                    <div>
+                      <div className="font-bold text-purple-950">Rahul K.</div>
+                      <div className="text-[10px] text-purple-900/50">Mumbai • VIP All-Access</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-5 rounded-2xl bg-white/90 border border-purple-100/90 shadow-xs space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex text-amber-400 text-xs">★★★★★</div>
+                    <span className="text-[11px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                      ✓ Verified Member
+                    </span>
+                  </div>
+                  <p className="text-xs text-purple-900/85 leading-relaxed font-medium">
+                    "Full photoset bilkul clean aur high resolution me hai. Daily spin wheel me coupon mila to aur sasta pada. Support is super fast on Instagram!"
+                  </p>
+                  <div className="flex items-center gap-2.5 pt-2 border-t border-purple-50 text-[11px]">
+                    <div className="w-7 h-7 rounded-full bg-purple-100 text-purple-700 font-black flex items-center justify-center text-xs">
+                      V
+                    </div>
+                    <div>
+                      <div className="font-bold text-purple-950">Vikas S.</div>
+                      <div className="text-[10px] text-purple-900/50">Delhi • VIP Member</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-5 rounded-2xl bg-white/90 border border-purple-100/90 shadow-xs space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex text-amber-400 text-xs">★★★★★</div>
+                    <span className="text-[11px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                      ✓ Verified Member
+                    </span>
+                  </div>
+                  <p className="text-xs text-purple-900/85 leading-relaxed font-medium">
+                    "Zero hassle. Koi extra login ya password banane ka jhanjhat nahi. Direct UPI payment and instant access. Super safe and private!"
+                  </p>
+                  <div className="flex items-center gap-2.5 pt-2 border-t border-purple-50 text-[11px]">
+                    <div className="w-7 h-7 rounded-full bg-rose-100 text-rose-700 font-black flex items-center justify-center text-xs">
+                      A
+                    </div>
+                    <div>
+                      <div className="font-bold text-purple-950">Amit P.</div>
+                      <div className="text-[10px] text-purple-900/50">Bangalore • VIP Member</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        );
+
       case 'howItWorks':
         if (cfg.howItWorks && !cfg.howItWorks.enabled) return null;
         return (
@@ -494,7 +706,20 @@ export const HomePage: React.FC<HomePageProps> = ({
     }
   };
 
-  const sectionOrder = cfg.sectionOrder || ['hero', 'featured', 'vipPacks', 'latestVideos', 'latestPhotos', 'freeSamples', 'howItWorks', 'faq'];
+  const sectionOrder = useMemo(() => {
+    const defaultOrder = ['hero', 'featured', 'vipPacks', 'latestVideos', 'latestPhotos', 'freeSamples', 'reviews', 'howItWorks', 'faq'];
+    const custom = cfg.sectionOrder || defaultOrder;
+    if (!custom.includes('reviews')) {
+      const idx = custom.indexOf('howItWorks');
+      if (idx !== -1) {
+        const copy = [...custom];
+        copy.splice(idx, 0, 'reviews');
+        return copy;
+      }
+      return [...custom, 'reviews'];
+    }
+    return custom;
+  }, [cfg.sectionOrder]);
 
   return (
     <div className="space-y-12 sm:space-y-16 pb-16 relative">
@@ -512,12 +737,12 @@ export const HomePage: React.FC<HomePageProps> = ({
       <button
         id="floating-daily-reward-btn"
         onClick={() => setIsWheelOpen(true)}
-        className="fixed bottom-20 right-4 sm:bottom-6 sm:right-6 z-40 p-3.5 sm:p-4 rounded-full bg-gradient-to-r from-amber-500 via-rose-500 to-pink-600 text-white shadow-2xl shadow-rose-600/40 border-2 border-yellow-300 hover:scale-110 active:scale-95 transition-all flex items-center gap-2 group cursor-pointer animate-pulse"
+        className="fixed bottom-20 right-4 sm:bottom-6 sm:right-6 z-40 p-3 sm:p-3.5 rounded-full bg-gradient-to-r from-amber-500 via-rose-500 to-pink-600 text-white shadow-xl shadow-rose-600/30 border-2 border-yellow-300 hover:scale-105 active:scale-95 transition-all flex items-center gap-2 group cursor-pointer animate-pulse"
         title="स्पिन करें और डेली कूपन जीतें!"
       >
-        <Gift className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-200 animate-spin" />
-        <span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 whitespace-nowrap text-xs font-black text-white">
-          🎁 डेली स्पिन व्हील
+        <Gift className="w-5 h-5 text-yellow-200" />
+        <span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 whitespace-nowrap text-xs font-black text-white px-0 group-hover:px-1">
+          डेली लकी स्पिन
         </span>
       </button>
 

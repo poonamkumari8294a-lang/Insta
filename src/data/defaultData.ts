@@ -7,8 +7,8 @@ export const CLIENT_SITE_SETTINGS: SiteSettings = {
   tagline: 'Unlock my private, uncut HD photos, backstage reels & VIP stories instantly.',
   profilePicUrl: 'https://res.cloudinary.com/mnbjgtqu/image/upload/v1788341260/settings/xrfuncs6lmkwr1njlvhe.jpg',
   bannerUrl: 'https://res.cloudinary.com/mnbjgtqu/image/upload/v1788341261/settings/jizzyecqdpy22p2b1f2f.jpg',
-  instagramUrl: 'https://instagram.com/ruma__cutegirl',
-  instagramHandle: '@ruma__cuteg...',
+  instagramUrl: 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3',
+  instagramHandle: '@ruma__cutegirl',
   badgeText: 'VIP Creator',
   upiId: '6202292319pnb@ybl',
   postsCount: 37,
@@ -18,7 +18,8 @@ export const CLIENT_SITE_SETTINGS: SiteSettings = {
   announcementEnabled: true,
   supportEmail: 'contact.rumakumari@gmail.com',
   supportTelegram: 'https://t.me/rumakumari_vip',
-  supportWhatsApp: '+63 9465507887',
+  supportWhatsApp: '',
+  supportInstagram: 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3',
   paymentVerificationMode: 'manual_approval',
   pushNotificationsEnabled: true,
   notifyOnNewPost: true,
@@ -38,7 +39,7 @@ export const CLIENT_SITE_SETTINGS: SiteSettings = {
         'All HD Photo Sets & Uncensored Albums',
         'Exclusive Video Reels & Backstage Clips',
         'Daily Reward Wheel Access',
-        'Direct Creator WhatsApp Chat Support'
+        'Direct Instagram DM Support (@ruma__cutegirl)'
       ]
     },
     {
@@ -56,7 +57,7 @@ export const CLIENT_SITE_SETTINGS: SiteSettings = {
         'Unlimited Access to All VIP Media',
         'All Future Backstage Drops Included',
         '4K Ultra-HD Downloads Enabled',
-        'Priority WhatsApp Chat Support',
+        'Priority Instagram DM Support (@ruma__cutegirl)',
         '3 Bonus Daily Wheel Spins'
       ]
     }

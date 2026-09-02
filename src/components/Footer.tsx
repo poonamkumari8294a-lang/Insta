@@ -54,13 +54,13 @@ export const Footer: React.FC<FooterProps> = ({ settings, onNavigate }) => {
               )}
 
               <a
-                href={`https://wa.me/${(settings.supportWhatsApp || '+63 9465507887').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Hello ${settings.creatorName}! I need VIP support.`)}`}
+                href={settings.supportInstagram || settings.instagramUrl || 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3'}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-3.5 py-2 rounded-2xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 transition-all flex items-center gap-1.5 font-bold text-xs shadow-sm"
+                className="px-3.5 py-2 rounded-2xl bg-gradient-to-r from-purple-50 via-pink-50 to-rose-50 hover:from-purple-100 hover:via-pink-100 hover:to-rose-100 border border-pink-200 text-pink-800 transition-all flex items-center gap-1.5 font-bold text-xs shadow-sm"
               >
-                <MessageCircle className="w-4 h-4 text-emerald-600 fill-emerald-600/20" />
-                <span>WhatsApp: {settings.supportWhatsApp || '+63 9465507887'}</span>
+                <Instagram className="w-4 h-4 text-pink-600" />
+                <span>Instagram Support: {settings.instagramHandle || '@ruma__cutegirl'}</span>
               </a>
             </div>
           </div>

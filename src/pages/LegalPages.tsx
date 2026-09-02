@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { SiteSettings } from '../types';
-import { ShieldCheck, Mail, Send, CheckCircle2, AlertCircle, MessageCircle } from 'lucide-react';
+import { ShieldCheck, Mail, Send, CheckCircle2, AlertCircle, Instagram } from 'lucide-react';
 
 interface LegalPagesProps {
   pageType: 'terms' | 'privacy' | 'refund' | 'contact';
@@ -137,15 +137,15 @@ export const LegalPages: React.FC<LegalPagesProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
             <a
-              href={`https://wa.me/${(settings.supportWhatsApp || '+63 9465507887').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Hello ${settings.creatorName}! I need assistance with VIP support.`)}`}
+              href={settings.supportInstagram || settings.instagramUrl || 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3'}
               target="_blank"
               rel="noopener noreferrer"
-              className="p-4 rounded-2xl bg-emerald-50/80 hover:bg-emerald-100/90 border border-emerald-200 text-center space-y-1 shadow-sm transition-transform active:scale-98 block group"
+              className="p-4 rounded-2xl bg-gradient-to-br from-purple-50 via-pink-50 to-rose-50 hover:from-purple-100 hover:via-pink-100 hover:to-rose-100 border border-pink-200 text-center space-y-1 shadow-sm transition-transform active:scale-98 block group"
             >
-              <MessageCircle className="w-5 h-5 text-emerald-600 mx-auto group-hover:scale-110 transition-transform" />
-              <div className="text-xs font-bold text-emerald-950">WhatsApp Support</div>
-              <div className="text-[11px] text-emerald-700 font-black font-mono truncate">{settings.supportWhatsApp || '+63 9465507887'}</div>
-              <div className="text-[10px] text-emerald-600 font-bold">Chat 24/7 ⚡</div>
+              <Instagram className="w-5 h-5 text-pink-600 mx-auto group-hover:scale-110 transition-transform" />
+              <div className="text-xs font-bold text-pink-950">Instagram Support</div>
+              <div className="text-[11px] text-pink-700 font-black font-mono truncate">{settings.instagramHandle || '@ruma__cutegirl'}</div>
+              <div className="text-[10px] text-pink-600 font-bold">DM 24/7 ⚡</div>
             </a>
 
             <div className="p-4 rounded-2xl bg-white/70 border border-purple-100 text-center space-y-1 shadow-sm">
