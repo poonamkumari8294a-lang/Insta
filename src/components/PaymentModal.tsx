@@ -42,7 +42,8 @@ import {
   Star,
   User,
   Phone,
-  Edit3
+  Edit3,
+  MessageCircle
 } from 'lucide-react';
 
 interface PaymentModalProps {
@@ -470,8 +471,18 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 </div>
               </div>
 
-              <div className="p-3 rounded-2xl bg-purple-50 border border-purple-100 text-xs text-purple-900/80 text-center font-medium">
-                ⚡ <strong>कृपया इस स्क्रीन पर बने रहें।</strong> कन्फर्म होते ही आपका VIP कंटेंट तुरंत स्क्रीन पर खुल जाएगा।
+              <div className="p-3 rounded-2xl bg-purple-50 border border-purple-100 text-xs text-purple-900/80 text-center font-medium space-y-2">
+                <div>⚡ <strong>कृपया इस स्क्रीन पर बने रहें।</strong> कन्फर्म होते ही आपका VIP कंटेंट तुरंत स्क्रीन पर खुल जाएगा।</div>
+                
+                <a
+                  href={`https://wa.me/639465507887?text=${encodeURIComponent(`Hello Ruma! Maine Payment kar diya hai.\n\n📦 Order ID: ${orderData?.order.orderId || ''}\n💰 Amount: ₹${item.price}\n🔑 UTR: ${utrNumber}\n👤 Name: ${userName || ''} (+91 ${userPhone || ''})\n\nKripya turant approve karein!`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center gap-1.5 py-2 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs shadow-md shadow-emerald-600/30 transition-transform active:scale-95"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  <span>व्हाट्सएप (+63 9465507887) पर स्क्रीनशॉट भेजकर तुरंत अनलॉक करवाएं</span>
+                </a>
               </div>
 
               <button
@@ -928,6 +939,29 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                   </button>
                 </div>
               )}
+
+              {/* WhatsApp Payment Support Helper */}
+              <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-between text-xs gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-xl bg-emerald-100 text-emerald-700 shrink-0">
+                    <MessageCircle className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h6 className="font-bold text-emerald-950 text-[11px] leading-tight">पेमेंट में कोई परेशानी है?</h6>
+                    <p className="text-[10px] text-emerald-800/80 font-medium">WhatsApp पर 24/7 तुरंत सहायता प्राप्त करें</p>
+                  </div>
+                </div>
+
+                <a
+                  href={`https://wa.me/639465507887?text=${encodeURIComponent(`Hello! Mujhe payment karne me help chahiye.\nItem: ${item.title} (₹${item.price})\nOrder ID: ${orderData?.order.orderId || ''}`)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[11px] shadow-sm flex items-center gap-1 shrink-0 transition-transform active:scale-95"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>+63 9465507887</span>
+                </a>
+              </div>
 
               {/* Security Guarantee */}
               <div className="flex items-center justify-center gap-1.5 text-[11px] text-purple-900/60 pt-1 font-semibold">

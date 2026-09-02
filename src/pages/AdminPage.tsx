@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MediaItem, OrderItem, SiteSettings, AdminStats, VipLeadItem } from '../types';
+import { MediaItem, OrderItem, SiteSettings, AdminStats, VipLeadItem, VipPlan } from '../types';
 import {
   adminLogin,
   getAdminToken,
@@ -9,6 +9,10 @@ import {
   fetchAdminContent,
   fetchSiteSettings,
   fetchVipLeads,
+  deleteVipLead,
+  updateVipLead,
+  createVipLead,
+  deleteAdminOrder,
   createAdminContent,
   updateAdminContent,
   deleteAdminContent,
@@ -17,12 +21,15 @@ import {
   verifyAdminOrder,
   adminApproveOrder,
   adminRejectOrder,
+  restorePreviousOriginalData,
   formatINR
 } from '../utils/api';
 import { HomepageControlTab } from '../components/HomepageControlTab';
 import { StoryHighlightsManager } from '../components/StoryHighlightsManager';
 import { MediaUploadZone } from '../components/MediaUploadZone';
 import { MultiPhotoUploadZone } from '../components/MultiPhotoUploadZone';
+import { UserManagementSection } from '../components/UserManagementSection';
+import { PaymentManagementSection } from '../components/PaymentManagementSection';
 import {
   sendNewPostNotification,
   sendTestNotification,
@@ -76,7 +83,23 @@ import {
   User,
   Phone,
   MessageCircle,
-  Users
+  Users,
+  Crown,
+  CreditCard,
+  Award,
+  PlusCircle,
+  UserX,
+  UserCheck,
+  Smartphone,
+  QrCode,
+  SlidersHorizontal,
+  CheckCircle,
+  Info,
+  FileText,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  UserPlus
 } from 'lucide-react';
 
 interface AdminPageProps {
@@ -102,7 +125,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const [isSyncing, setIsSyncing] = useState(false);
 
   // Active Tab
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'content' | 'highlights' | 'homepage' | 'orders' | 'leads' | 'settings' | 'setup'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'content' | 'users' | 'orders' | 'plans' | 'highlights' | 'homepage' | 'settings' | 'setup'>('dashboard');
 
   // Data states (pre-populated instantly with initial site data)
   const [stats, setStats] = useState<AdminStats | null>(null);
@@ -111,6 +134,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const [siteSettings, setSiteSettings] = useState<SiteSettings | null>(() => initialSettings || null);
   const [vipLeads, setVipLeads] = useState<VipLeadItem[]>([]);
   const [leadSearch, setLeadSearch] = useState('');
+  const [userVipFilter, setUserVipFilter] = useState<'all' | 'active' | 'free' | 'banned'>('all');
   const [subscriberCount, setSubscriberCount] = useState<number>(0);
   const [testNotificationLoading, setTestNotificationLoading] = useState(false);
 
@@ -122,13 +146,41 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const [selectedContentIds, setSelectedContentIds] = useState<string[]>([]);
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
 
-  // Content form modal
+  // Modals and Action States
   const [showContentModal, setShowContentModal] = useState(false);
   const [editingItem, setEditingItem] = useState<MediaItem | null>(null);
   const [adminPreviewItem, setAdminPreviewItem] = useState<MediaItem | null>(null);
   const [webhookSimOrderId, setWebhookSimOrderId] = useState('');
   const [webhookSimLoading, setWebhookSimLoading] = useState(false);
   const [webhookSimResult, setWebhookSimResult] = useState<string | null>(null);
+
+  // Users & Members Management States
+  const [deletingLead, setDeletingLead] = useState<VipLeadItem | null>(null);
+  const [isDeletingLead, setIsDeletingLead] = useState(false);
+  const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [newUserData, setNewUserData] = useState({ name: '', phone: '', email: '', tier: 'Gold VIP', notes: '' });
+
+  // VIP Plans Management States
+  const [editingPlan, setEditingPlan] = useState<VipPlan | null>(null);
+  const [isCreatingPlan, setIsCreatingPlan] = useState(false);
+  const [planFormData, setPlanFormData] = useState<Partial<VipPlan>>({
+    title: '',
+    subtitle: '',
+    price: 199,
+    originalPrice: 499,
+    durationDays: 30,
+    durationLabel: '30 Days Access',
+    badge: 'POPULAR 🔥',
+    popular: true,
+    enabled: true,
+    perks: ['All HD Photo Sets', 'Exclusive Video Reels', 'WhatsApp Support']
+  });
+  const [isSavingPlans, setIsSavingPlans] = useState(false);
+
+  // Order deletion & Screenshot Zoom
+  const [deletingOrder, setDeletingOrder] = useState<OrderItem | null>(null);
+  const [isDeletingOrder, setIsDeletingOrder] = useState(false);
+  const [screenshotZoom, setScreenshotZoom] = useState<number>(1);
 
   // Profile and Banner state for Settings
   const [settingsProfilePic, setSettingsProfilePic] = useState<string>('');
@@ -363,6 +415,27 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     }
   };
 
+  const handleRestoreAllOriginalData = async () => {
+    if (!window.confirm('क्या आप पिछला सारा डेटा, प्रोफाइल सेटिंग्स और सभी 8 ओरिजिनल पोस्ट्स वापस लाना चाहते हैं?')) {
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await restorePreviousOriginalData();
+      const updatedContent = await fetchAdminContent(true);
+      const updatedSettings = await fetchSiteSettings(true);
+      setContentList(updatedContent);
+      setSiteSettings(updatedSettings);
+      if (onContentUpdated) onContentUpdated(updatedContent);
+      if (onSettingsUpdated) onSettingsUpdated(updatedSettings);
+      showToast(`🎉 ${res.message}`);
+    } catch (err: any) {
+      showToast(err.message || 'रीस्टोर करने में विफल', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handlePurgeAllDemoData = async () => {
     if (!window.confirm('क्या आप सभी डेमो पोस्ट्स हटाना चाहते हैं ताकि वेबसाइट पर सिर्फ आपके द्वारा अपलोड किए गए असली फोटो दिखें?')) {
       return;
@@ -511,6 +584,153 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     }
   };
 
+  // ----------------------------------------------------
+  // USER / VIP LEAD HANDLERS
+  // ----------------------------------------------------
+  const handleDeleteLeadConfirm = async () => {
+    if (!deletingLead) return;
+    setIsDeletingLead(true);
+    try {
+      await deleteVipLead(deletingLead.id);
+      setVipLeads(prev => prev.filter(l => l.id !== deletingLead.id));
+      showToast('✅ यूजर को सफलतापूर्वक डिलीट कर दिया गया (User deleted)');
+      setDeletingLead(null);
+    } catch (err: any) {
+      showToast(err.message || 'यूजर डिलीट करने में विफल', 'error');
+    } finally {
+      setIsDeletingLead(false);
+    }
+  };
+
+  const handleToggleUserVip = async (lead: VipLeadItem) => {
+    const currentStatus = lead.vipStatus || 'free';
+    const newStatus = currentStatus === 'active' ? 'free' : 'active';
+    const newTier = newStatus === 'active' ? (lead.tier || 'Gold VIP') : 'Free Member';
+    try {
+      await updateVipLead(lead.id, { vipStatus: newStatus, tier: newTier });
+      setVipLeads(prev => prev.map(l => l.id === lead.id ? { ...l, vipStatus: newStatus, tier: newTier } : l));
+      showToast(newStatus === 'active' ? `👑 ${lead.name || 'User'} को VIP एक्सेस दिया गया!` : `ℹ️ ${lead.name || 'User'} का VIP स्टेटस हटाया गया।`);
+    } catch (err: any) {
+      showToast('VIP स्टेटस अपडेट करने में विफल', 'error');
+    }
+  };
+
+  const handleCreateUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUserData.name.trim() || !newUserData.phone.trim()) {
+      showToast('कृपया नाम और फोन नंबर दर्ज करें', 'error');
+      return;
+    }
+    try {
+      const created = await createVipLead({
+        name: newUserData.name.trim(),
+        phone: newUserData.phone.trim(),
+        email: newUserData.email.trim(),
+        tier: newUserData.tier,
+        vipStatus: newUserData.tier.includes('VIP') ? 'active' : 'free',
+        notes: newUserData.notes.trim()
+      });
+      setVipLeads(prev => [created, ...prev]);
+      showToast('✅ नया VIP सदस्य सफलतापूर्वक जोड़ा गया!');
+      setShowAddUserModal(false);
+      setNewUserData({ name: '', phone: '', email: '', tier: 'Gold VIP', notes: '' });
+    } catch (err: any) {
+      showToast(err.message || 'यूजर जोड़ने में विफल', 'error');
+    }
+  };
+
+  // ----------------------------------------------------
+  // ORDER DELETION HANDLER
+  // ----------------------------------------------------
+  const handleDeleteOrderConfirm = async () => {
+    if (!deletingOrder) return;
+    setIsDeletingOrder(true);
+    try {
+      await deleteAdminOrder(deletingOrder.orderId);
+      setOrdersList(prev => prev.filter(o => o.orderId !== deletingOrder.orderId));
+      showToast('✅ आर्डर डेटाबेस से सफलतापूर्वक डिलीट कर दिया गया');
+      setDeletingOrder(null);
+    } catch (err: any) {
+      showToast(err.message || 'आर्डर डिलीट करने में विफल', 'error');
+    } finally {
+      setIsDeletingOrder(false);
+    }
+  };
+
+  // ----------------------------------------------------
+  // VIP MEMBERSHIP PLANS HANDLERS
+  // ----------------------------------------------------
+  const handleSavePlanSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingPlans(true);
+    try {
+      const currentPlans = siteSettings?.vipPlans && siteSettings.vipPlans.length > 0 
+        ? [...siteSettings.vipPlans] 
+        : [];
+
+      let updatedPlans: VipPlan[] = [];
+      if (editingPlan) {
+        // Editing existing plan
+        updatedPlans = currentPlans.map(p => p.id === editingPlan.id ? { ...p, ...planFormData } as VipPlan : p);
+      } else {
+        // Creating new plan
+        const newPlan: VipPlan = {
+          id: `plan_${Date.now()}`,
+          title: planFormData.title || 'Exclusive VIP Pass',
+          subtitle: planFormData.subtitle || 'All Access Pass',
+          price: Number(planFormData.price) || 199,
+          originalPrice: Number(planFormData.originalPrice) || 499,
+          durationDays: Number(planFormData.durationDays) || 30,
+          durationLabel: planFormData.durationLabel || '30 Days Access',
+          badge: planFormData.badge || 'POPULAR 🔥',
+          popular: !!planFormData.popular,
+          enabled: planFormData.enabled ?? true,
+          perks: planFormData.perks && planFormData.perks.length > 0 ? planFormData.perks : ['All HD Photo Sets', 'Private Videos', 'Instant Access']
+        };
+        updatedPlans = [...currentPlans, newPlan];
+      }
+
+      const updatedSettings = await updateAdminSettings({ vipPlans: updatedPlans });
+      setSiteSettings(updatedSettings);
+      if (onSettingsUpdated) onSettingsUpdated(updatedSettings);
+      showToast('✅ VIP प्लान सफलतापूर्वक सेव हो गया!');
+      setEditingPlan(null);
+      setIsCreatingPlan(false);
+    } catch (err: any) {
+      showToast(err.message || 'प्लान सेव करने में विफल', 'error');
+    } finally {
+      setIsSavingPlans(false);
+    }
+  };
+
+  const handleTogglePlanStatus = async (planId: string) => {
+    if (!siteSettings?.vipPlans) return;
+    try {
+      const updatedPlans = siteSettings.vipPlans.map(p => 
+        p.id === planId ? { ...p, enabled: !p.enabled } : p
+      );
+      const updatedSettings = await updateAdminSettings({ vipPlans: updatedPlans });
+      setSiteSettings(updatedSettings);
+      if (onSettingsUpdated) onSettingsUpdated(updatedSettings);
+      showToast('✅ प्लान स्थिति अपडेट हुई!');
+    } catch (err: any) {
+      showToast('प्लान अपडेट करने में विफल', 'error');
+    }
+  };
+
+  const handleDeletePlanConfirm = async (planId: string) => {
+    if (!siteSettings?.vipPlans) return;
+    try {
+      const updatedPlans = siteSettings.vipPlans.filter(p => p.id !== planId);
+      const updatedSettings = await updateAdminSettings({ vipPlans: updatedPlans });
+      setSiteSettings(updatedSettings);
+      if (onSettingsUpdated) onSettingsUpdated(updatedSettings);
+      showToast('✅ VIP प्लान हटा दिया गया!');
+    } catch (err: any) {
+      showToast('प्लान हटाने में विफल', 'error');
+    }
+  };
+
   // Filter & Sort Content Items
   const filteredContent = contentList
     .filter((c) => {
@@ -542,7 +762,26 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       return (
         o.orderId.toLowerCase().includes(q) ||
         o.contentTitle.toLowerCase().includes(q) ||
+        (o.customerName && o.customerName.toLowerCase().includes(q)) ||
+        (o.customerPhone && o.customerPhone.toLowerCase().includes(q)) ||
         (o.transactionRef && o.transactionRef.toLowerCase().includes(q))
+      );
+    }
+    return true;
+  });
+
+  // Filtered VIP Leads & Users
+  const filteredUsers = vipLeads.filter((lead) => {
+    if (userVipFilter === 'active' && lead.vipStatus !== 'active') return false;
+    if (userVipFilter === 'free' && lead.vipStatus === 'active') return false;
+    if (leadSearch.trim()) {
+      const q = leadSearch.toLowerCase();
+      return (
+        (lead.name && lead.name.toLowerCase().includes(q)) ||
+        (lead.phone && lead.phone.toLowerCase().includes(q)) ||
+        (lead.email && lead.email.toLowerCase().includes(q)) ||
+        (lead.tier && lead.tier.toLowerCase().includes(q)) ||
+        (lead.notes && lead.notes.toLowerCase().includes(q))
       );
     }
     return true;
@@ -696,55 +935,48 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 border-b border-purple-100">
         <button
           onClick={() => setActiveTab('dashboard')}
-          className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap ${
+          className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
             activeTab === 'dashboard'
               ? 'bg-pink-600 text-white shadow-md shadow-pink-500/25'
               : 'text-purple-900/70 hover:text-purple-950 hover:bg-white/60'
           }`}
         >
           <LayoutDashboard className="w-4 h-4" />
-          <span>Dashboard Analytics</span>
+          <span>Analytics</span>
         </button>
 
         <button
           onClick={() => setActiveTab('content')}
-          className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap ${
+          className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
             activeTab === 'content'
               ? 'bg-pink-600 text-white shadow-md shadow-pink-500/25'
               : 'text-purple-900/70 hover:text-purple-950 hover:bg-white/60'
           }`}
         >
           <Film className="w-4 h-4" />
-          <span>Content Manager ({contentList.length})</span>
+          <span>Content ({contentList.length})</span>
         </button>
 
         <button
-          onClick={() => setActiveTab('highlights')}
-          className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap ${
-            activeTab === 'highlights'
+          onClick={() => setActiveTab('users')}
+          className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'users'
               ? 'bg-pink-600 text-white shadow-md shadow-pink-500/25'
               : 'text-purple-900/70 hover:text-purple-950 hover:bg-white/60'
           }`}
         >
-          <Sparkles className="w-4 h-4 text-yellow-300" />
-          <span>Story Highlights ({siteSettings?.storyHighlights?.length || 0})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('homepage')}
-          className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap ${
-            activeTab === 'homepage'
-              ? 'bg-pink-600 text-white shadow-md shadow-pink-500/25'
-              : 'text-purple-900/70 hover:text-purple-950 hover:bg-white/60'
-          }`}
-        >
-          <Sliders className="w-4 h-4" />
-          <span>Homepage Control</span>
+          <Users className="w-4 h-4" />
+          <span>Users & Members ({vipLeads.length})</span>
+          {vipLeads.filter(l => l.vipStatus === 'active').length > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-purple-950 text-[10px] font-black shadow-2xs">
+              {vipLeads.filter(l => l.vipStatus === 'active').length} VIP
+            </span>
+          )}
         </button>
 
         <button
           onClick={() => setActiveTab('orders')}
-          className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap ${
+          className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
             activeTab === 'orders'
               ? 'bg-pink-600 text-white shadow-md shadow-pink-500/25'
               : 'text-purple-900/70 hover:text-purple-950 hover:bg-white/60'
@@ -760,25 +992,44 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         </button>
 
         <button
-          onClick={() => setActiveTab('leads')}
-          className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap ${
-            activeTab === 'leads'
+          onClick={() => setActiveTab('plans')}
+          className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'plans'
               ? 'bg-pink-600 text-white shadow-md shadow-pink-500/25'
               : 'text-purple-900/70 hover:text-purple-950 hover:bg-white/60'
           }`}
         >
-          <Phone className="w-4 h-4" />
-          <span>VIP Leads & Contacts ({vipLeads.length})</span>
-          {vipLeads.length > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-white text-[10px] font-black shadow-xs">
-              {vipLeads.length}
-            </span>
-          )}
+          <Crown className="w-4 h-4 text-amber-400" />
+          <span>VIP Plans ({siteSettings?.vipPlans?.length || 3})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('highlights')}
+          className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'highlights'
+              ? 'bg-pink-600 text-white shadow-md shadow-pink-500/25'
+              : 'text-purple-900/70 hover:text-purple-950 hover:bg-white/60'
+          }`}
+        >
+          <Sparkles className="w-4 h-4 text-yellow-300" />
+          <span>Highlights ({siteSettings?.storyHighlights?.length || 0})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('homepage')}
+          className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'homepage'
+              ? 'bg-pink-600 text-white shadow-md shadow-pink-500/25'
+              : 'text-purple-900/70 hover:text-purple-950 hover:bg-white/60'
+          }`}
+        >
+          <Sliders className="w-4 h-4" />
+          <span>Homepage Control</span>
         </button>
 
         <button
           onClick={() => setActiveTab('settings')}
-          className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap ${
+          className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
             activeTab === 'settings'
               ? 'bg-pink-600 text-white shadow-md shadow-pink-500/25'
               : 'text-purple-900/70 hover:text-purple-950 hover:bg-white/60'
@@ -790,14 +1041,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({
 
         <button
           onClick={() => setActiveTab('setup')}
-          className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap ${
+          className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
             activeTab === 'setup'
               ? 'bg-purple-600 text-white shadow-md shadow-purple-600/25'
               : 'text-purple-700 hover:text-purple-950 hover:bg-purple-100'
           }`}
         >
           <ShieldCheck className="w-4 h-4" />
-          <span>Gateway & Webhook Docs</span>
+          <span>Gateway & Docs</span>
         </button>
       </div>
 
@@ -1105,6 +1356,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({
             <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
               <button
                 type="button"
+                onClick={handleRestoreAllOriginalData}
+                className="px-4 py-2.5 rounded-2xl text-xs font-bold text-purple-950 bg-gradient-to-r from-purple-100 to-pink-100 hover:from-purple-200 hover:to-pink-200 border border-purple-300 flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                title="पिछला सारा डेटा व ओरिजिनल पोस्ट्स रीस्टोर करें"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-purple-700" />
+                <span>पिछला डेटा व पोस्ट्स लाएं (Restore Data)</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={handlePurgeAllDemoData}
                 className="px-4 py-2.5 rounded-2xl text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
                 title="सभी डिफ़ॉल्ट डेमो पोस्ट्स हटाएं"
@@ -1256,8 +1517,29 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           </div>
 
           {/* Content Cards Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {filteredContent.map((item) => {
+          {filteredContent.length === 0 ? (
+            <div className="p-8 sm:p-12 text-center glass-card rounded-3xl border-2 border-dashed border-purple-200 space-y-4 shadow-sm my-6">
+              <div className="p-3.5 w-fit mx-auto rounded-2xl bg-pink-100 text-pink-600">
+                <Film className="w-8 h-8" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-black text-purple-950">कोई पोस्ट नहीं मिली (No Content Items Found)</h3>
+                <p className="text-xs text-purple-900/70 max-w-md mx-auto font-medium">
+                  यदि आपके पिछले पोस्ट हट गए हैं या डेटा खाली दिख रहा है, तो नीचे दिए गए बटन पर क्लिक करके सभी पुराने 8 पोस्ट और डेटा तुरंत रीस्टोर करें।
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleRestoreAllOriginalData}
+                className="glow-pink-btn px-6 py-3 rounded-2xl text-xs font-black text-white inline-flex items-center gap-2 shadow-lg cursor-pointer"
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span>🔄 पिछला सारा डेटा व 8 पोस्ट्स वापस लाएं (Restore All Content)</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {filteredContent.map((item) => {
               const isSelected = selectedContentIds.includes(item.id);
               return (
                 <div
@@ -1367,6 +1649,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               );
             })}
           </div>
+        )}
 
         </div>
       )}
@@ -1398,378 +1681,174 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       )}
 
       {/* ---------------------------------------------------- */}
-      {/* TAB 4: ORDERS MANAGEMENT */}
+      {/* TAB 4: ORDERS & PAYMENT MANAGEMENT (AUDIT & SCREENSHOTS) */}
       {/* ---------------------------------------------------- */}
       {activeTab === 'orders' && (
-        <div className="space-y-6 animate-in fade-in duration-200">
-          
-          {/* Pending Verification Notice Banner */}
-          {ordersList.filter(o => o.status === 'waiting_verification').length > 0 && (
-            <div className="p-4 rounded-3xl bg-amber-500/15 border-2 border-amber-400 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 rounded-2xl bg-amber-400 text-amber-950 font-black shrink-0">
-                  <ShieldAlert className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="text-xs sm:text-sm font-black text-amber-950">
-                    {ordersList.filter(o => o.status === 'waiting_verification').length} Payment(s) Waiting For Verification!
-                  </h4>
-                  <p className="text-[11px] text-amber-900/80 font-medium">
-                    ग्राहकों ने UTR सबमिट किया है। अपने PhonePe / Bank SMS में UTR चेक करें और <strong>"Approve & Unlock"</strong> दबाएं।
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setOrderStatusFilter('waiting_verification')}
-                className="px-4 py-2 rounded-xl bg-amber-500 text-amber-950 font-black text-xs hover:bg-amber-400 transition-colors shadow-sm whitespace-nowrap"
-              >
-                Show Pending ({ordersList.filter(o => o.status === 'waiting_verification').length})
-              </button>
-            </div>
-          )}
-
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h2 className="font-display font-black text-xl text-purple-950">Payment Orders & UTR Audit</h2>
-              <p className="text-xs text-purple-900/70 font-medium">Track, audit, and approve verified UPI bank transfers.</p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={orderSearch}
-                onChange={(e) => setOrderSearch(e.target.value)}
-                placeholder="Search order ID, title or UTR..."
-                className="bg-white/90 border border-purple-200 rounded-2xl px-3 py-2 text-xs text-purple-950 placeholder-purple-900/40 focus:outline-none focus:border-pink-500 shadow-sm font-medium"
-              />
-
-              <select
-                value={orderStatusFilter}
-                onChange={(e) => setOrderStatusFilter(e.target.value)}
-                className="bg-white/90 border border-purple-200 rounded-2xl px-3 py-2 text-xs text-purple-950 shadow-sm font-semibold"
-              >
-                <option value="all">All Statuses ({ordersList.length})</option>
-                <option value="waiting_verification">⏳ Review UTR ({ordersList.filter(o => o.status === 'waiting_verification').length})</option>
-                <option value="paid">✅ Paid ({ordersList.filter(o => o.status === 'paid').length})</option>
-                <option value="pending">🕒 Pending ({ordersList.filter(o => o.status === 'pending').length})</option>
-                <option value="failed">❌ Failed / Rejected ({ordersList.filter(o => o.status === 'failed').length})</option>
-                <option value="expired">⌛ Expired ({ordersList.filter(o => o.status === 'expired').length})</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="glass-card rounded-3xl overflow-hidden border border-white/80 shadow-lg">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-purple-100 bg-white/60 text-purple-900/60 uppercase text-[10px] font-black">
-                    <th className="py-3 px-4">Order ID</th>
-                    <th className="py-3 px-4">👤 Customer (Lead)</th>
-                    <th className="py-3 px-4">Content</th>
-                    <th className="py-3 px-4">Amount</th>
-                    <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-4">📸 Receipt / Screenshot</th>
-                    <th className="py-3 px-4">Submitted UTR / Ref</th>
-                    <th className="py-3 px-4">Created</th>
-                    <th className="py-3 px-4 text-right">Verification Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-purple-100">
-                  {filteredOrders.length === 0 ? (
-                    <tr>
-                      <td colSpan={9} className="text-center py-8 text-purple-900/40 font-medium">
-                        No orders matching filters.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredOrders.map((o) => (
-                      <tr
-                        key={o.orderId}
-                        className={
-                          o.status === 'waiting_verification'
-                            ? 'bg-amber-50/60 hover:bg-amber-50 font-semibold'
-                            : 'hover:bg-purple-50/50'
-                        }
-                      >
-                        <td className="py-3.5 px-4 font-mono font-bold text-pink-700">
-                          {o.orderId}
-                        </td>
-                        <td className="py-3.5 px-4">
-                          {o.customerName || o.customerPhone ? (
-                            <div className="space-y-0.5">
-                              <div className="font-bold text-purple-950 flex items-center gap-1 text-[11px]">
-                                <User className="w-3 h-3 text-pink-600" />
-                                <span>{o.customerName || 'VIP Buyer'}</span>
-                              </div>
-                              {o.customerPhone && (
-                                <a
-                                  href={`https://wa.me/91${o.customerPhone.replace(/[^0-9]/g, '')}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-[11px] text-emerald-700 font-mono font-bold hover:underline flex items-center gap-1 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 w-fit"
-                                  title="WhatsApp पर चैट करें"
-                                >
-                                  <Phone className="w-2.5 h-2.5 text-emerald-600" />
-                                  <span>+91 {o.customerPhone}</span>
-                                </a>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-purple-900/40 text-[11px]">Direct Guest</span>
-                          )}
-                        </td>
-                        <td className="py-3.5 px-4 font-bold text-purple-950 max-w-[160px] truncate">
-                          {o.contentTitle}
-                        </td>
-                        <td className="py-3.5 px-4 font-black text-purple-950">
-                          {formatINR(o.amount)}
-                        </td>
-                        <td className="py-3.5 px-4">
-                          <span
-                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                              o.status === 'paid'
-                                ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                                : o.status === 'waiting_verification'
-                                ? 'bg-amber-200 text-amber-900 border border-amber-300 animate-pulse'
-                                : o.status === 'failed'
-                                ? 'bg-rose-100 text-rose-700 border border-rose-200'
-                                : o.status === 'expired'
-                                ? 'bg-zinc-100 text-zinc-600'
-                                : 'bg-purple-100 text-purple-700 border border-purple-200'
-                            }`}
-                          >
-                            {o.status === 'waiting_verification' ? '⏳ Review UTR' : o.status}
-                          </span>
-                        </td>
-                        <td className="py-3.5 px-4">
-                          {o.screenshotUrl ? (
-                            <button
-                              type="button"
-                              onClick={() => setViewingReceiptOrder(o)}
-                              className="group inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-pink-50 hover:bg-pink-100 border border-pink-200 text-pink-800 text-[11px] font-bold shadow-2xs transition-all cursor-pointer"
-                              title="क्लिक करके पेमेंट स्क्रीनशॉट देखें"
-                            >
-                              <img
-                                src={o.screenshotUrl}
-                                alt="Receipt"
-                                className="w-5 h-5 rounded-md object-cover border border-pink-300"
-                              />
-                              <span>रसीद देखें (View)</span>
-                            </button>
-                          ) : (
-                            <span className="text-purple-900/40 text-[11px] font-medium">—</span>
-                          )}
-                        </td>
-                        <td className="py-3.5 px-4">
-                          {o.transactionRef ? (
-                            <span className="font-mono font-bold text-xs px-2.5 py-1 rounded-lg bg-white border border-purple-200 text-purple-950 shadow-xs">
-                              {o.transactionRef}
-                            </span>
-                          ) : (
-                            <span className="text-purple-900/40 font-mono text-[11px]">—</span>
-                          )}
-                        </td>
-                        <td className="py-3.5 px-4 text-purple-900/60 font-medium text-[11px]">
-                          {new Date(o.createdAt).toLocaleString()}
-                        </td>
-                        <td className="py-3.5 px-4 text-right">
-                          {o.status === 'waiting_verification' ? (
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                onClick={() => handleApproveOrder(o.orderId)}
-                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black shadow-sm flex items-center gap-1 transition-transform active:scale-95 cursor-pointer"
-                                title="Approve payment & unlock content for user"
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>Approve & Unlock</span>
-                              </button>
-                              <button
-                                onClick={() => setRejectingOrder(o)}
-                                className="px-2.5 py-1.5 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-700 text-[11px] font-bold transition-colors cursor-pointer"
-                                title="Reject fake claim"
-                              >
-                                <XCircle className="w-3.5 h-3.5" />
-                                <span>Reject</span>
-                              </button>
-                            </div>
-                          ) : o.status === 'pending' ? (
-                            <button
-                              onClick={() => {
-                                setVerifyingOrder(o);
-                                setVerifyingTxnRef(`ADMIN_VERIFIED_${Date.now()}`);
-                              }}
-                              className="px-3 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-[11px] font-black shadow-sm transition-transform active:scale-95 cursor-pointer"
-                            >
-                              Verify & Issue Token
-                            </button>
-                          ) : o.status === 'paid' ? (
-                            <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-black">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                              <span>Paid & Unlocked</span>
-                            </span>
-                          ) : (
-                            <span className="text-[11px] text-purple-900/50 font-medium">
-                              {o.status === 'failed' ? 'Rejected' : 'Closed'}
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-        </div>
+        <PaymentManagementSection
+          ordersList={ordersList}
+          onReload={loadAdminData}
+          showToast={showToast}
+        />
       )}
 
       {/* ---------------------------------------------------- */}
-      {/* TAB: VIP LEADS & CUSTOMER CONTACTS */}
+      {/* TAB 5: USERS & VIP MEMBERS MANAGEMENT (FULL SUITE) */}
       {/* ---------------------------------------------------- */}
-      {activeTab === 'leads' && (
+      {activeTab === 'users' && (
+        <UserManagementSection
+          vipLeads={vipLeads}
+          ordersList={ordersList}
+          onReload={loadAdminData}
+          showToast={showToast}
+        />
+      )}
+
+      {/* ---------------------------------------------------- */}
+      {/* TAB: VIP PLANS & PRICING MANAGEMENT */}
+      {/* ---------------------------------------------------- */}
+      {activeTab === 'plans' && (
         <div className="space-y-6 animate-in fade-in duration-200">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          
+          {/* Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-3xl bg-white/80 backdrop-blur-xl border border-white/90 shadow-sm">
             <div>
               <h2 className="font-display font-black text-xl text-purple-950 flex items-center gap-2">
-                <Users className="w-5 h-5 text-pink-600" />
-                <span>VIP Leads & Customer Inquiries ({vipLeads.length})</span>
+                <Crown className="w-6 h-6 text-amber-500 fill-amber-400" />
+                <span>VIP Membership Plans & Pricing (VIP प्लान्स व मूल्य)</span>
               </h2>
-              <p className="text-xs text-purple-900/70 font-medium">
-                All visitor contact details, registered VIP phone numbers, and unlock inquiries captured from the website.
+              <p className="text-xs text-purple-900/70 font-medium mt-0.5">
+                Customize VIP pass duration, pricing, promotional discounts, and included perks directly on your website.
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  if (vipLeads.length === 0) {
-                    showToast('कोई लीड उपलब्ध नहीं है (No leads to export)', 'info');
-                    return;
-                  }
-                  const csvRows = ['Name,Phone,Content,Date,Source'];
-                  vipLeads.forEach(l => {
-                    csvRows.push(`"${l.name || 'VIP User'}","${l.phone || ''}","${l.contentTitle || 'VIP Registration'}","${new Date(l.createdAt).toLocaleString()}","${l.source || 'website'}"`);
-                  });
-                  const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `vip_leads_${Date.now()}.csv`;
-                  a.click();
-                  URL.revokeObjectURL(url);
-                  showToast('✅ सभी लीड्स CSV फाइल में डाउनलोड हो गए (Exported to CSV)');
-                }}
-                className="px-4 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black shadow-md shadow-emerald-600/20 flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
-              >
-                <Download className="w-4 h-4" />
-                <span>Export Contacts (CSV)</span>
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setPlanFormData({
+                  title: 'Special VIP Pass',
+                  subtitle: 'Full Exclusive Access',
+                  price: 299,
+                  originalPrice: 699,
+                  durationDays: 30,
+                  durationLabel: '30 Days Access',
+                  badge: 'EXCLUSIVE ✨',
+                  popular: false,
+                  enabled: true,
+                  perks: ['All HD Photo Sets', 'VIP Video Reels', 'Priority WhatsApp Support']
+                });
+                setEditingPlan(null);
+                setIsCreatingPlan(true);
+              }}
+              className="px-4 py-2.5 rounded-2xl bg-pink-600 hover:bg-pink-500 text-white text-xs font-black shadow-md shadow-pink-600/20 flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>+ Add New VIP Plan</span>
+            </button>
           </div>
 
-          {/* Lead Search & Filter */}
-          <div className="p-4 rounded-3xl bg-white/80 backdrop-blur-xl border border-white/90 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-purple-900/40 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={leadSearch}
-                onChange={(e) => setLeadSearch(e.target.value)}
-                placeholder="Search by name, phone number or content title..."
-                className="w-full bg-white border border-purple-200 rounded-2xl pl-9 pr-3 py-2 text-xs text-purple-950 placeholder-purple-900/40 shadow-xs font-medium"
-              />
-            </div>
+          {/* Plan Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {(siteSettings?.vipPlans || []).map((plan) => {
+              const discountPercent = plan.originalPrice > plan.price 
+                ? Math.round(((plan.originalPrice - plan.price) / plan.originalPrice) * 100)
+                : 0;
+
+              return (
+                <div
+                  key={plan.id}
+                  className={`relative rounded-3xl p-6 border-2 transition-all flex flex-col justify-between shadow-md ${
+                    plan.popular
+                      ? 'bg-gradient-to-b from-pink-50 via-white to-purple-50 border-pink-400 shadow-pink-500/10'
+                      : 'bg-white border-purple-100 hover:border-purple-200'
+                  } ${!plan.enabled ? 'opacity-60 grayscale-[30%]' : ''}`}
+                >
+                  {/* Top Badge */}
+                  <div className="flex items-center justify-between gap-2 mb-3">
+                    <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-pink-100 text-pink-700 border border-pink-200 shadow-2xs">
+                      {plan.badge || 'VIP PASS'}
+                    </span>
+                    
+                    <button
+                      type="button"
+                      onClick={() => handleTogglePlanStatus(plan.id)}
+                      className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase transition-colors cursor-pointer ${
+                        plan.enabled
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                          : 'bg-zinc-100 text-zinc-600 border border-zinc-200'
+                      }`}
+                    >
+                      {plan.enabled ? 'Active ✅' : 'Disabled ⛔'}
+                    </button>
+                  </div>
+
+                  {/* Plan Details */}
+                  <div className="space-y-2 mb-4">
+                    <h3 className="font-display font-black text-lg text-purple-950">{plan.title}</h3>
+                    <p className="text-xs text-purple-900/60 font-medium">{plan.subtitle}</p>
+
+                    <div className="flex items-baseline gap-2 pt-2">
+                      <span className="font-display font-black text-2xl text-purple-950">
+                        {formatINR(plan.price)}
+                      </span>
+                      {plan.originalPrice > plan.price && (
+                        <>
+                          <span className="text-xs text-purple-900/40 line-through font-bold">
+                            {formatINR(plan.originalPrice)}
+                          </span>
+                          <span className="text-[10px] font-black text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md">
+                            {discountPercent}% OFF
+                          </span>
+                        </>
+                      )}
+                    </div>
+
+                    <span className="inline-block text-[11px] font-bold text-pink-700 bg-pink-50 px-2.5 py-1 rounded-xl border border-pink-100">
+                      ⏳ {plan.durationLabel}
+                    </span>
+                  </div>
+
+                  {/* Perks List */}
+                  <div className="space-y-1.5 py-3 border-t border-purple-100/80 mb-4 flex-1">
+                    <span className="text-[10px] font-black uppercase text-purple-900/50 tracking-wider block mb-1">
+                      Included Benefits:
+                    </span>
+                    {(plan.perks || []).map((perk, pIdx) => (
+                      <div key={pIdx} className="flex items-center gap-2 text-xs font-semibold text-purple-950">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span>{perk}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center gap-2 pt-3 border-t border-purple-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPlanFormData({ ...plan });
+                        setEditingPlan(plan);
+                        setIsCreatingPlan(true);
+                      }}
+                      className="flex-1 py-2 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-950 text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1"
+                    >
+                      <Edit2 className="w-3.5 h-3.5 text-pink-600" />
+                      <span>Edit Plan</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeletePlanConfirm(plan.id)}
+                      className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-colors cursor-pointer"
+                      title="Delete Plan"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
-          {/* Leads Table */}
-          <div className="glass-card rounded-3xl border border-white/80 overflow-hidden shadow-md">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-purple-950">
-                <thead className="bg-purple-100/60 text-purple-950/80 font-black uppercase text-[10px] tracking-wider border-b border-purple-200">
-                  <tr>
-                    <th className="py-3 px-4">Customer Name</th>
-                    <th className="py-3 px-4">Mobile / WhatsApp Number</th>
-                    <th className="py-3 px-4">Interested Content / Action</th>
-                    <th className="py-3 px-4">Date & Time</th>
-                    <th className="py-3 px-4 text-right">Quick Contact Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-purple-100 bg-white/60">
-                  {vipLeads.filter(l => {
-                    if (!leadSearch.trim()) return true;
-                    const q = leadSearch.toLowerCase();
-                    return (l.name || '').toLowerCase().includes(q) || (l.phone || '').includes(q) || (l.contentTitle || '').toLowerCase().includes(q);
-                  }).length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="py-12 text-center text-purple-900/60 font-medium">
-                        <Users className="w-8 h-8 text-purple-300 mx-auto mb-2" />
-                        No customer leads match the current search.
-                      </td>
-                    </tr>
-                  ) : (
-                    vipLeads
-                      .filter(l => {
-                        if (!leadSearch.trim()) return true;
-                        const q = leadSearch.toLowerCase();
-                        return (l.name || '').toLowerCase().includes(q) || (l.phone || '').includes(q) || (l.contentTitle || '').toLowerCase().includes(q);
-                      })
-                      .map((lead, idx) => {
-                        const cleanPhone = (lead.phone || '').replace(/[^0-9]/g, '');
-                        const waNumber = cleanPhone.startsWith('91') ? cleanPhone : `91${cleanPhone}`;
-                        return (
-                          <tr key={lead.id || idx} className="hover:bg-purple-50/70 transition-colors">
-                            <td className="py-3.5 px-4 font-bold text-purple-950">
-                              <div className="flex items-center gap-2">
-                                <div className="w-7 h-7 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center font-black text-xs">
-                                  {(lead.name || 'V').charAt(0).toUpperCase()}
-                                </div>
-                                <span>{lead.name || 'VIP Visitor'}</span>
-                              </div>
-                            </td>
-                            <td className="py-3.5 px-4 font-black text-purple-900 tracking-wide">
-                              {cleanPhone ? `+91 ${cleanPhone.slice(-10)}` : 'N/A'}
-                            </td>
-                            <td className="py-3.5 px-4 text-purple-900/80 font-medium">
-                              <span className="px-2 py-0.5 rounded-md bg-purple-100 text-purple-800 text-[11px] font-bold">
-                                {lead.contentTitle || 'VIP Gallery Access'}
-                              </span>
-                            </td>
-                            <td className="py-3.5 px-4 text-purple-900/60 font-medium text-[11px]">
-                              {lead.createdAt ? new Date(lead.createdAt).toLocaleString() : 'Recent'}
-                            </td>
-                            <td className="py-3.5 px-4 text-right">
-                              {cleanPhone ? (
-                                <div className="flex items-center justify-end gap-2">
-                                  <a
-                                    href={`https://wa.me/${waNumber}?text=${encodeURIComponent(`Hi ${lead.name || ''}! Ruma Cute Girl VIP Gallery mein aapka swagat hai. Kya aapko kisi content unlock mein help chahiye?`)}`}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-bold flex items-center gap-1 shadow-sm transition-transform active:scale-95"
-                                  >
-                                    <MessageCircle className="w-3.5 h-3.5" />
-                                    <span>WhatsApp</span>
-                                  </a>
-                                  <a
-                                    href={`tel:+91${cleanPhone.slice(-10)}`}
-                                    className="px-3 py-1.5 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 text-[11px] font-bold flex items-center gap-1 transition-colors"
-                                  >
-                                    <Phone className="w-3.5 h-3.5 text-purple-700" />
-                                    <span>Call</span>
-                                  </a>
-                                </div>
-                              ) : (
-                                <span className="text-purple-400 text-xs">No Phone</span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
         </div>
       )}
 
@@ -1807,6 +1886,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 announcementEnabled: formData.get('announcementEnabled') === 'on',
                 supportEmail: formData.get('supportEmail') as string,
                 supportTelegram: formData.get('supportTelegram') as string,
+                supportWhatsApp: (formData.get('supportWhatsApp') as string)?.trim() || '+63 9465507887',
                 adminPasscode: (formData.get('adminPasscode') as string)?.trim() || siteSettings?.adminPasscode || 'Ashok#8899',
                 pushNotificationsEnabled: formData.get('pushNotificationsEnabled') === 'on',
                 notifyOnNewPost: formData.get('notifyOnNewPost') === 'on',
@@ -2001,7 +2081,17 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="text-xs font-bold text-purple-950 block mb-1">WhatsApp Support (+63 9465507887)</label>
+                <input
+                  name="supportWhatsApp"
+                  defaultValue={siteSettings?.supportWhatsApp || '+63 9465507887'}
+                  placeholder="+63 9465507887"
+                  className="w-full bg-white/90 border border-purple-200 rounded-2xl px-3.5 py-2.5 text-xs text-emerald-800 font-bold shadow-sm"
+                />
+              </div>
+
               <div>
                 <label className="text-xs font-bold text-purple-950 block mb-1">Support Email</label>
                 <input
@@ -2973,7 +3063,426 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       )}
 
       {/* ---------------------------------------------------- */}
-      {/* 5. FLOATING IN-APP TOAST NOTIFICATION */}
+      {/* 5. CONFIRM DELETE USER / LEAD MODAL */}
+      {/* ---------------------------------------------------- */}
+      {deletingLead && (
+        <div className="fixed inset-0 z-50 bg-purple-950/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="relative w-full max-w-md bg-white rounded-3xl p-6 border border-purple-100 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-2xl bg-rose-100 text-rose-600 shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-display font-black text-base text-purple-950">
+                  यूजर को डिलीट करें (Delete User Account)
+                </h3>
+                <p className="text-xs text-purple-900/60 font-medium">
+                  Permanent Removal of User & VIP Status
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-purple-50/80 rounded-2xl border border-purple-100 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-pink-100 text-pink-700 flex items-center justify-center font-black text-sm shrink-0">
+                {(deletingLead.name || 'U').charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h4 className="font-bold text-xs text-purple-950 truncate">{deletingLead.name || 'VIP Member'}</h4>
+                <p className="text-[11px] text-purple-900/60 font-mono">{deletingLead.phone || 'No phone'}</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-purple-900/80 leading-relaxed font-medium">
+              क्या आप वाकई इस यूजर को हमेशा के लिए डिलीट करना चाहते हैं? इनका VIP एक्सेस और डेटाबेस रिकॉर्ड हटा दिया जाएगा।
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingLead}
+                onClick={() => setDeletingLead(null)}
+                className="px-4 py-2.5 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 text-xs font-bold transition-colors cursor-pointer"
+              >
+                रद्द करें (Cancel)
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingLead}
+                onClick={handleDeleteLeadConfirm}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-black shadow-md shadow-rose-600/30 flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+              >
+                {isDeletingLead ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>डिलीट हो रहा है...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>हाँ, डिलीट करें (Delete User)</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------- */}
+      {/* 6. ADD NEW USER / VIP MEMBER MODAL */}
+      {/* ---------------------------------------------------- */}
+      {showAddUserModal && (
+        <div className="fixed inset-0 z-50 bg-purple-950/50 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+          <div className="relative w-full max-w-md bg-white rounded-3xl p-6 sm:p-7 border border-white/90 shadow-2xl space-y-4 my-auto">
+            <div className="flex items-center justify-between border-b border-purple-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-pink-100 text-pink-600">
+                  <UserPlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-display font-black text-base text-purple-950">
+                    नया यूजर / VIP सदस्य जोड़ें (Add User)
+                  </h3>
+                  <p className="text-[11px] text-purple-900/60 font-medium">Create direct user record or grant VIP access</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddUserModal(false)}
+                className="p-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateUserSubmit} className="space-y-3.5 text-xs">
+              <div>
+                <label className="font-bold text-purple-950 block mb-1">Customer / User Name (नाम) *</label>
+                <input
+                  type="text"
+                  required
+                  value={newUserData.name}
+                  onChange={(e) => setNewUserData({ ...newUserData, name: e.target.value })}
+                  placeholder="e.g. Rahul Sharma"
+                  className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2.5 text-purple-950 shadow-xs font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-purple-950 block mb-1">WhatsApp / Phone Number (मोबाइल नंबर) *</label>
+                <input
+                  type="tel"
+                  required
+                  value={newUserData.phone}
+                  onChange={(e) => setNewUserData({ ...newUserData, phone: e.target.value })}
+                  placeholder="e.g. 9876543210"
+                  className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2.5 text-purple-950 shadow-xs font-mono font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-purple-950 block mb-1">Email Address (Optional)</label>
+                <input
+                  type="email"
+                  value={newUserData.email}
+                  onChange={(e) => setNewUserData({ ...newUserData, email: e.target.value })}
+                  placeholder="e.g. rahul@gmail.com"
+                  className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2.5 text-purple-950 shadow-xs font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-purple-950 block mb-1">VIP Tier / Membership Plan</label>
+                <select
+                  value={newUserData.tier}
+                  onChange={(e) => setNewUserData({ ...newUserData, tier: e.target.value })}
+                  className="w-full bg-white border border-purple-200 rounded-xl px-3 py-2 text-purple-950 font-bold shadow-xs"
+                >
+                  <option value="Gold VIP">👑 Gold VIP (₹199)</option>
+                  <option value="Diamond VIP">👑 Diamond VIP (₹499)</option>
+                  <option value="Lifetime VIP">👑 Lifetime VIP (₹999)</option>
+                  <option value="Free Member">Free Member</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-purple-950 block mb-1">Admin Notes (टिप्पणी)</label>
+                <input
+                  type="text"
+                  value={newUserData.notes}
+                  onChange={(e) => setNewUserData({ ...newUserData, notes: e.target.value })}
+                  placeholder="e.g. Added manually by Admin / Paid via Cash"
+                  className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2 text-purple-950 shadow-xs font-medium"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-purple-100">
+                <button
+                  type="button"
+                  onClick={() => setShowAddUserModal(false)}
+                  className="px-4 py-2 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="glow-pink-btn px-5 py-2 rounded-xl text-white font-black shadow-md shadow-pink-500/25"
+                >
+                  Save User Record
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------- */}
+      {/* 7. VIP PLAN CREATE / EDIT MODAL */}
+      {/* ---------------------------------------------------- */}
+      {isCreatingPlan && (
+        <div className="fixed inset-0 z-50 bg-purple-950/50 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+          <div className="relative w-full max-w-lg bg-white rounded-3xl p-6 sm:p-7 border border-white/90 shadow-2xl space-y-4 my-auto">
+            <div className="flex items-center justify-between border-b border-purple-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-amber-100 text-amber-700">
+                  <Crown className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-display font-black text-base text-purple-950">
+                    {editingPlan ? 'VIP प्लान संपादित करें (Edit VIP Plan)' : 'नया VIP प्लान बनाएं (Create VIP Plan)'}
+                  </h3>
+                  <p className="text-[11px] text-purple-900/60 font-medium">Set plan duration, pricing & included benefits</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCreatingPlan(false);
+                  setEditingPlan(null);
+                }}
+                className="p-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePlanSubmit} className="space-y-3.5 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-purple-950 block mb-1">Plan Title (शीर्षक) *</label>
+                  <input
+                    type="text"
+                    required
+                    value={planFormData.title}
+                    onChange={(e) => setPlanFormData({ ...planFormData, title: e.target.value })}
+                    placeholder="e.g. 1 Month VIP Pass"
+                    className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2.5 text-purple-950 shadow-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-purple-950 block mb-1">Badge Tag (बैज)</label>
+                  <input
+                    type="text"
+                    value={planFormData.badge}
+                    onChange={(e) => setPlanFormData({ ...planFormData, badge: e.target.value })}
+                    placeholder="e.g. POPULAR 🔥, BEST VALUE 💎"
+                    className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2.5 text-purple-950 shadow-xs font-medium"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-purple-950 block mb-1">Subtitle / Tagline (विवरण)</label>
+                <input
+                  type="text"
+                  value={planFormData.subtitle}
+                  onChange={(e) => setPlanFormData({ ...planFormData, subtitle: e.target.value })}
+                  placeholder="e.g. Full Access to All VIP Photos & Video Reels"
+                  className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2 text-purple-950 shadow-xs font-medium"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="font-bold text-purple-950 block mb-1">Offer Price (₹) *</label>
+                  <input
+                    type="number"
+                    required
+                    min={1}
+                    value={planFormData.price}
+                    onChange={(e) => setPlanFormData({ ...planFormData, price: Number(e.target.value) })}
+                    className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2 text-purple-950 font-black shadow-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-purple-950 block mb-1">Original Price (₹)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={planFormData.originalPrice}
+                    onChange={(e) => setPlanFormData({ ...planFormData, originalPrice: Number(e.target.value) })}
+                    className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2 text-purple-950 font-bold shadow-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-purple-950 block mb-1">Duration (Days)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={planFormData.durationDays}
+                    onChange={(e) => setPlanFormData({ ...planFormData, durationDays: Number(e.target.value) })}
+                    className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2 text-purple-950 font-bold shadow-xs"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-purple-950 block mb-1">Duration Label (उदा. 30 Days Access, Lifetime Unlimited)</label>
+                <input
+                  type="text"
+                  value={planFormData.durationLabel}
+                  onChange={(e) => setPlanFormData({ ...planFormData, durationLabel: e.target.value })}
+                  placeholder="e.g. 30 Days Full Access"
+                  className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2 text-purple-950 shadow-xs font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-purple-950 block mb-1">Included Benefits / Perks (Comma-separated)</label>
+                <textarea
+                  rows={2}
+                  value={planFormData.perks.join(', ')}
+                  onChange={(e) => setPlanFormData({
+                    ...planFormData,
+                    perks: e.target.value.split(',').map(s => s.trim()).filter(Boolean)
+                  })}
+                  placeholder="All VIP Photos, HD Video Reels, Direct WhatsApp Access"
+                  className="w-full bg-white border border-purple-200 rounded-xl px-3.5 py-2 text-purple-950 shadow-xs font-medium"
+                />
+              </div>
+
+              <div className="flex items-center gap-6 pt-1">
+                <label className="flex items-center gap-2 cursor-pointer font-bold text-purple-950">
+                  <input
+                    type="checkbox"
+                    checked={planFormData.enabled}
+                    onChange={(e) => setPlanFormData({ ...planFormData, enabled: e.target.checked })}
+                    className="w-4 h-4 rounded text-pink-600 border-purple-300"
+                  />
+                  <span>Plan Active & Visible</span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer font-bold text-purple-950">
+                  <input
+                    type="checkbox"
+                    checked={planFormData.popular}
+                    onChange={(e) => setPlanFormData({ ...planFormData, popular: e.target.checked })}
+                    className="w-4 h-4 rounded text-pink-600 border-purple-300"
+                  />
+                  <span>Highlight as Most Popular 🔥</span>
+                </label>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-purple-100">
+                <button
+                  type="button"
+                  disabled={isSavingPlans}
+                  onClick={() => {
+                    setIsCreatingPlan(false);
+                    setEditingPlan(null);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingPlans}
+                  className="glow-pink-btn px-6 py-2 rounded-xl text-white font-black shadow-md shadow-pink-500/25"
+                >
+                  {isSavingPlans ? 'Saving Plan...' : 'Save VIP Plan'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------- */}
+      {/* 8. CONFIRM DELETE ORDER MODAL */}
+      {/* ---------------------------------------------------- */}
+      {deletingOrder && (
+        <div className="fixed inset-0 z-50 bg-purple-950/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="relative w-full max-w-md bg-white rounded-3xl p-6 border border-purple-100 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-2xl bg-rose-100 text-rose-600 shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-display font-black text-base text-purple-950">
+                  आर्डर को हमेशा के लिए डिलीट करें (Delete Order)
+                </h3>
+                <p className="text-xs text-purple-900/60 font-medium">
+                  Order ID: <span className="font-mono text-pink-700">{deletingOrder.orderId}</span>
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-purple-50/80 rounded-2xl border border-purple-100 text-xs space-y-1">
+              <div className="flex justify-between">
+                <span className="text-purple-900/60">Customer:</span>
+                <span className="font-bold text-purple-950">{deletingOrder.customerName || 'Direct Visitor'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-purple-900/60">Amount:</span>
+                <span className="font-black text-emerald-700">{formatINR(deletingOrder.amount)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-purple-900/60">Content:</span>
+                <span className="font-bold text-purple-950 truncate max-w-[200px]">{deletingOrder.contentTitle}</span>
+              </div>
+            </div>
+
+            <p className="text-xs text-purple-900/80 leading-relaxed font-medium">
+              क्या आप वाकई इस आर्डर रिकॉर्ड को डेटाबेस से डिलीट करना चाहते हैं?
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingOrder}
+                onClick={() => setDeletingOrder(null)}
+                className="px-4 py-2.5 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 text-xs font-bold transition-colors cursor-pointer"
+              >
+                रद्द करें (Cancel)
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingOrder}
+                onClick={handleDeleteOrderConfirm}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-black shadow-md shadow-rose-600/30 flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+              >
+                {isDeletingOrder ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>डिलीट हो रहा है...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>हाँ, आर्डर डिलीट करें (Delete)</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------- */}
+      {/* 9. FLOATING IN-APP TOAST NOTIFICATION */}
       {/* ---------------------------------------------------- */}
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 animate-in slide-in-from-bottom-5 duration-200">
