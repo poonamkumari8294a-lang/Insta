@@ -1,6 +1,6 @@
 /**
- * High-performance Media upload & processing utility for Firebase Storage
- * Zero-copy Object URLs, hardware-accelerated image scaling, and fast non-blocking thumbnails.
+ * High-performance Media Processing & Upload Utilities
+ * Zero-copy Object URLs, hardware-accelerated image scaling, and zero-blocking video pipelines.
  */
 
 export interface VideoMetadata {
@@ -12,54 +12,57 @@ export interface VideoMetadata {
   height: number;
 }
 
-/**
- * Reads a File object as base64 Data URL (used only when strictly necessary, e.g. Cropper modal)
- */
-export function readFileAsDataURL(file: File | Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = (err) => reject(err);
-    reader.readAsDataURL(file);
-  });
+export interface UploadTimings {
+  fileSize: number;
+  fileSizeBytes: number;
+  preprocessTimeMs: number;
+  uploadStartDelayMs: number;
+  ttfbMs: number;
+  uploadDurationMs: number;
+  totalDurationMs: number;
+  effectiveSpeedMbps: number;
 }
 
 /**
- * Calculates byte size of a string or JSON object
+ * Checks whether an image requires client-side downscaling.
+ * Images <= 2MB (or SVG/GIF) are uploaded directly as native Files with 0ms preprocessing.
  */
-export function getApproximateByteSize(data: any): number {
-  try {
-    const str = typeof data === 'string' ? data : JSON.stringify(data);
-    return new Blob([str]).size;
-  } catch (_) {
-    return 0;
+export function shouldCompressImage(fileOrBlob: File | Blob): boolean {
+  if (!fileOrBlob || fileOrBlob.size === 0) return false;
+  if (fileOrBlob.type === 'image/gif' || fileOrBlob.type === 'image/svg+xml') {
+    return false;
   }
+  // If file is 2MB or less, upload original directly (no preprocessing CPU delay)
+  if (fileOrBlob.size <= 2 * 1024 * 1024) {
+    return false;
+  }
+  return true;
 }
 
 /**
- * High-performance image optimizer for Firebase Storage upload.
- * Uses native createImageBitmap when available for fast hardware-accelerated decoding.
- * Resizes large camera photos (e.g. 15MB) into lightweight WebP/JPEG Blobs (200-400KB) in <100ms.
+ * High-performance, lightweight image optimizer for large images (>2MB).
+ * Uses native createImageBitmap when available for off-main-thread hardware decoding.
+ * Skips processing immediately if file is already small (<= 2MB).
  */
 export async function compressImageToBlob(
   file: File | Blob,
-  maxWidth = 1600,
-  maxHeight = 1600,
-  quality = 0.82
-): Promise<{ blob: Blob; mimeType: string }> {
-  // If it's a GIF or SVG, preserve exact original binary
-  if (file.type === 'image/gif' || file.type === 'image/svg+xml') {
-    return { blob: file, mimeType: file.type };
+  maxWidth = 1920,
+  maxHeight = 1920,
+  quality = 0.80
+): Promise<{ blob: Blob; mimeType: string; preprocessed: boolean; durationMs: number }> {
+  const startTime = performance.now();
+
+  // Fast path: If compression is not needed, return original immediately (0ms delay)
+  if (!shouldCompressImage(file)) {
+    return {
+      blob: file,
+      mimeType: file.type || 'image/jpeg',
+      preprocessed: false,
+      durationMs: Math.round(performance.now() - startTime)
+    };
   }
 
-  // Fast path: If the file is already a JPEG/WebP under 500KB, upload original directly!
-  const isSmallImage = file.size > 0 && file.size < 500 * 1024;
-  const isWebpOrJpeg = file.type === 'image/webp' || file.type === 'image/jpeg';
-  if (isSmallImage && isWebpOrJpeg) {
-    return { blob: file, mimeType: file.type };
-  }
-
-  // Modern Hardware-Accelerated path: createImageBitmap (Off-main-thread)
+  // Hardware-Accelerated Path: createImageBitmap (Off-main-thread)
   if (typeof window !== 'undefined' && 'createImageBitmap' in window) {
     try {
       const bitmap = await createImageBitmap(file);
@@ -83,15 +86,26 @@ export async function compressImageToBlob(
         ctx.drawImage(bitmap, 0, 0, width, height);
         bitmap.close();
 
-        return new Promise<{ blob: Blob; mimeType: string }>((resolve) => {
+        return new Promise((resolve) => {
           canvas.toBlob(
             (blob) => {
+              const durationMs = Math.round(performance.now() - startTime);
               if (blob) {
-                resolve({ blob, mimeType: blob.type || 'image/webp' });
+                resolve({
+                  blob,
+                  mimeType: blob.type || 'image/webp',
+                  preprocessed: true,
+                  durationMs
+                });
               } else {
                 canvas.toBlob(
                   (jpgBlob) => {
-                    resolve({ blob: jpgBlob || file, mimeType: 'image/jpeg' });
+                    resolve({
+                      blob: jpgBlob || file,
+                      mimeType: 'image/jpeg',
+                      preprocessed: true,
+                      durationMs: Math.round(performance.now() - startTime)
+                    });
                   },
                   'image/jpeg',
                   quality
@@ -105,21 +119,24 @@ export async function compressImageToBlob(
       }
       bitmap.close();
     } catch (bitmapErr) {
-      // Fallback to Image element if createImageBitmap is not supported for this file format
-      console.warn('[ImageBitmap fallback to HTMLImageElement]', bitmapErr);
+      console.warn('[ImageBitmap fallback to standard Image]', bitmapErr);
     }
   }
 
-  // Standard Canvas Image Scaling Fallback
+  // Fallback Canvas Image Scaling
   return new Promise((resolve) => {
     const objectUrl = URL.createObjectURL(file);
     const img = new Image();
 
-    // Safety timeout: Never hang on corrupt image files
     const safetyTimer = setTimeout(() => {
       URL.revokeObjectURL(objectUrl);
-      resolve({ blob: file, mimeType: file.type || 'image/jpeg' });
-    }, 4000);
+      resolve({
+        blob: file,
+        mimeType: file.type || 'image/jpeg',
+        preprocessed: false,
+        durationMs: Math.round(performance.now() - startTime)
+      });
+    }, 3000);
 
     img.onload = () => {
       clearTimeout(safetyTimer);
@@ -139,7 +156,12 @@ export async function compressImageToBlob(
 
       if (!ctx) {
         URL.revokeObjectURL(objectUrl);
-        resolve({ blob: file, mimeType: file.type || 'image/jpeg' });
+        resolve({
+          blob: file,
+          mimeType: file.type || 'image/jpeg',
+          preprocessed: false,
+          durationMs: Math.round(performance.now() - startTime)
+        });
         return;
       }
 
@@ -150,12 +172,23 @@ export async function compressImageToBlob(
 
       canvas.toBlob(
         (blob) => {
+          const durationMs = Math.round(performance.now() - startTime);
           if (blob) {
-            resolve({ blob, mimeType: blob.type || 'image/webp' });
+            resolve({
+              blob,
+              mimeType: blob.type || 'image/webp',
+              preprocessed: true,
+              durationMs
+            });
           } else {
             canvas.toBlob(
               (jpgBlob) => {
-                resolve({ blob: jpgBlob || file, mimeType: 'image/jpeg' });
+                resolve({
+                  blob: jpgBlob || file,
+                  mimeType: 'image/jpeg',
+                  preprocessed: true,
+                  durationMs: Math.round(performance.now() - startTime)
+                });
               },
               'image/jpeg',
               quality
@@ -170,7 +203,12 @@ export async function compressImageToBlob(
     img.onerror = () => {
       clearTimeout(safetyTimer);
       URL.revokeObjectURL(objectUrl);
-      resolve({ blob: file, mimeType: file.type || 'image/jpeg' });
+      resolve({
+        blob: file,
+        mimeType: file.type || 'image/jpeg',
+        preprocessed: false,
+        durationMs: Math.round(performance.now() - startTime)
+      });
     };
 
     img.src = objectUrl;
@@ -178,102 +216,10 @@ export async function compressImageToBlob(
 }
 
 /**
- * Fast Video Metadata and Poster Thumbnail Extractor.
- * Runs non-blocking and extracts poster Blob directly for Firebase Storage.
- */
-export function processVideoFile(file: File): Promise<VideoMetadata> {
-  return new Promise((resolve) => {
-    const videoUrl = URL.createObjectURL(file);
-    const video = document.createElement('video');
-    video.preload = 'metadata';
-    video.src = videoUrl;
-    video.muted = true;
-    video.playsInline = true;
-
-    // Safety timeout: If metadata fails to load in 3s, resolve gracefully without blocking upload
-    const timer = setTimeout(() => {
-      URL.revokeObjectURL(videoUrl);
-      resolve({
-        thumbnailDataUrl: '',
-        durationFormatted: '0:30',
-        durationSeconds: 30,
-        width: 720,
-        height: 1280
-      });
-    }, 3000);
-
-    video.onloadedmetadata = () => {
-      const seekTime = Math.min(0.5, Math.max(0.1, video.duration * 0.05));
-      video.currentTime = seekTime;
-    };
-
-    video.onseeked = () => {
-      clearTimeout(timer);
-      try {
-        const canvas = document.createElement('canvas');
-        const targetWidth = Math.min(video.videoWidth || 720, 640);
-        const ratio = targetWidth / (video.videoWidth || 720);
-        const targetHeight = Math.max(1, Math.round((video.videoHeight || 1280) * ratio));
-
-        canvas.width = targetWidth;
-        canvas.height = targetHeight;
-        const ctx = canvas.getContext('2d', { alpha: false });
-
-        if (ctx && canvas.width > 0 && canvas.height > 0) {
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        }
-
-        const durSec = Math.round(video.duration || 0);
-        const mins = Math.floor(durSec / 60);
-        const secs = durSec % 60;
-        const formatted = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-
-        canvas.toBlob(
-          (posterBlob) => {
-            URL.revokeObjectURL(videoUrl);
-            resolve({
-              thumbnailDataUrl: '',
-              posterBlob: posterBlob || undefined,
-              durationFormatted: formatted,
-              durationSeconds: durSec,
-              width: video.videoWidth,
-              height: video.videoHeight
-            });
-          },
-          'image/webp',
-          0.80
-        );
-      } catch (err) {
-        URL.revokeObjectURL(videoUrl);
-        resolve({
-          thumbnailDataUrl: '',
-          durationFormatted: '0:30',
-          durationSeconds: 30,
-          width: 720,
-          height: 1280
-        });
-      }
-    };
-
-    video.onerror = () => {
-      clearTimeout(timer);
-      URL.revokeObjectURL(videoUrl);
-      resolve({
-        thumbnailDataUrl: '',
-        durationFormatted: '0:30',
-        durationSeconds: 30,
-        width: 720,
-        height: 1280
-      });
-    };
-  });
-}
-
-/**
  * Format bytes to readable string (e.g. 2.4 MB)
  */
 export function formatFileSize(bytes: number): string {
-  if (!bytes || bytes === 0) return '0 B';
+  if (!bytes || bytes <= 0) return '0 B';
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -281,14 +227,57 @@ export function formatFileSize(bytes: number): string {
 }
 
 /**
- * Fast helper to compress image and return as lightweight data URL (e.g. for receipts or quick previews)
+ * Reads a File object as base64 Data URL (used only when strictly necessary, e.g. Payment receipt snapshot)
+ */
+export function readFileAsDataURL(file: File | Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Fast helper to compress image and return as data URL (e.g. for offline payment receipt previews)
  */
 export async function compressImageFile(
   file: File | Blob,
   maxWidth = 1280,
   maxHeight = 1280,
-  quality = 0.82
+  quality = 0.80
 ): Promise<string> {
   const { blob } = await compressImageToBlob(file, maxWidth, maxHeight, quality);
   return readFileAsDataURL(blob);
+}
+
+/**
+ * Prints a clean, structured Timing Report in browser dev console
+ */
+export function printUploadTimingReport(report: {
+  mediaType: 'photo' | 'video' | 'album_photo' | 'document';
+  fileName: string;
+  originalSizeBytes: number;
+  uploadSizeBytes: number;
+  preprocessTimeMs: number;
+  uploadStartDelayMs: number;
+  ttfbMs: number;
+  uploadDurationMs: number;
+  totalDurationMs: number;
+  secureUrl: string;
+}) {
+  const speedMbps =
+    report.uploadDurationMs > 0
+      ? ((report.uploadSizeBytes * 8) / (report.uploadDurationMs / 1000) / 1000000).toFixed(2)
+      : '0.00';
+
+  console.group(`⚡ [Upload Timing Report] ${report.mediaType.toUpperCase()} - ${report.fileName}`);
+  console.log(`📦 File Size: ${formatFileSize(report.originalSizeBytes)} (Upload Payload: ${formatFileSize(report.uploadSizeBytes)})`);
+  console.log(`⏱️ Preprocessing Time: ${report.preprocessTimeMs} ms ${report.preprocessTimeMs === 0 ? '(Skipped - Direct Native Upload)' : ''}`);
+  console.log(`🚀 Upload Start Delay: ${report.uploadStartDelayMs} ms`);
+  console.log(`📡 Time To First Byte (TTFB): ${report.ttfbMs} ms`);
+  console.log(`📤 Upload Transfer Duration: ${report.uploadDurationMs} ms (Avg Speed: ${speedMbps} Mbps)`);
+  console.log(`🏁 Total Duration: ${report.totalDurationMs} ms`);
+  console.log(`🔗 CDN Secure URL: ${report.secureUrl}`);
+  console.groupEnd();
 }

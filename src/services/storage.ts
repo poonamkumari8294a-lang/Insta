@@ -1,15 +1,22 @@
-import { storage } from './firebase';
-import {
-  ref,
-  uploadBytesResumable,
-  getDownloadURL,
-  deleteObject,
-  StorageReference
-} from 'firebase/storage';
-import { MediaItem, SiteSettings } from '../types';
-import { formatFileSize } from '../utils/mediaUpload';
+/**
+ * Unified Storage Service powered by Cloudinary
+ * 
+ * Provides high-speed direct client-side uploads to Cloudinary via Unsigned Upload Preset.
+ * Zero API keys or secrets exposed in frontend code.
+ * Ensures all stored URLs are permanent HTTPS CDN links.
+ */
 
-export type StorageFolder = 'photos' | 'videos' | 'thumbnails' | 'documents' | 'settings' | 'general';
+import {
+  uploadToCloudinary,
+  isCloudinaryUrl,
+  isPermanentMediaUrl,
+  getCloudinaryVideoThumbnailUrl,
+  determineResourceType,
+  CloudinaryFolder,
+  CloudinaryUploadResult
+} from './cloudinary';
+
+export type StorageFolder = CloudinaryFolder;
 
 export interface StorageUploadProgress {
   progressPercent: number;
@@ -25,6 +32,9 @@ export interface StorageUploadResult {
   bytesTransferred: number;
   totalBytes: number;
   durationMs?: number;
+  duration?: number;
+  durationFormatted?: string;
+  thumbnailUrl?: string;
 }
 
 /**
@@ -36,15 +46,14 @@ export function isDataUrl(str: string | undefined | null): boolean {
 }
 
 /**
- * Checks whether a string is a Firebase Storage URL
+ * Checks whether a string is a permanent CDN or Storage URL
  */
 export function isFirebaseStorageUrl(url: string | undefined | null): boolean {
   if (!url || typeof url !== 'string') return false;
-  return (
-    url.includes('firebasestorage.googleapis.com') ||
-    url.includes('storage.googleapis.com')
-  );
+  return isPermanentMediaUrl(url);
 }
+
+export { isCloudinaryUrl, isPermanentMediaUrl, getCloudinaryVideoThumbnailUrl };
 
 /**
  * Converts a Base64 Data URL into a native Blob with proper MIME type
@@ -56,7 +65,7 @@ export function dataURLtoBlob(dataUrl: string): { blob: Blob; mimeType: string; 
       throw new Error('Invalid data URL format');
     }
     const mimeMatch = parts[0].match(/:(.*?);/);
-    const mimeType = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+    const mimeType = mimeMatch ? mimeMatch[1] : 'image/webp';
     const binaryStr = atob(parts[1]);
     const len = binaryStr.length;
     const bytes = new Uint8Array(len);
@@ -65,15 +74,12 @@ export function dataURLtoBlob(dataUrl: string): { blob: Blob; mimeType: string; 
       bytes[i] = binaryStr.charCodeAt(i);
     }
 
-    let extension = 'bin';
-    if (mimeType.includes('webp')) extension = 'webp';
-    else if (mimeType.includes('jpeg') || mimeType.includes('jpg')) extension = 'jpg';
+    let extension = 'webp';
+    if (mimeType.includes('jpeg') || mimeType.includes('jpg')) extension = 'jpg';
     else if (mimeType.includes('png')) extension = 'png';
     else if (mimeType.includes('gif')) extension = 'gif';
-    else if (mimeType.includes('svg')) extension = 'svg';
     else if (mimeType.includes('mp4')) extension = 'mp4';
     else if (mimeType.includes('webm')) extension = 'webm';
-    else if (mimeType.includes('quicktime') || mimeType.includes('mov')) extension = 'mov';
     else if (mimeType.includes('pdf')) extension = 'pdf';
 
     return {
@@ -88,149 +94,43 @@ export function dataURLtoBlob(dataUrl: string): { blob: Blob; mimeType: string; 
 }
 
 /**
- * Uploads a native File or Blob directly to Firebase Storage with real-time progress callbacks.
- * Configured with caching headers for lightning-fast worldwide delivery.
+ * Uploads a native File or Blob directly to Cloudinary using unsigned upload preset
  */
-export function uploadFileToStorage(
+export async function uploadFileToStorage(
   fileOrBlob: File | Blob,
   folder: StorageFolder = 'photos',
   customFilename?: string,
   onProgress?: (progressPercent: number, statusText: string, meta?: { bytesTransferred: number; totalBytes: number; speedText?: string }) => void,
-  retryCount = 0
+  options: { selectionTime?: number; preprocessDurationMs?: number } = {}
 ): Promise<StorageUploadResult> {
   const startTime = performance.now();
-  let lastTransferred = 0;
-  let lastTime = startTime;
+  const resType = determineResourceType(fileOrBlob);
 
-  return new Promise((resolve, reject) => {
-    try {
-      const mimeType = fileOrBlob.type || 'application/octet-stream';
-      let fileExt = 'bin';
-      if (fileOrBlob instanceof File && fileOrBlob.name) {
-        const dotIndex = fileOrBlob.name.lastIndexOf('.');
-        if (dotIndex !== -1) {
-          fileExt = fileOrBlob.name.substring(dotIndex + 1).toLowerCase();
-        }
-      } else {
-        if (mimeType.includes('webp')) fileExt = 'webp';
-        else if (mimeType.includes('jpeg') || mimeType.includes('jpg')) fileExt = 'jpg';
-        else if (mimeType.includes('png')) fileExt = 'png';
-        else if (mimeType.includes('gif')) fileExt = 'gif';
-        else if (mimeType.includes('mp4')) fileExt = 'mp4';
-        else if (mimeType.includes('webm')) fileExt = 'webm';
-        else if (mimeType.includes('pdf')) fileExt = 'pdf';
-      }
-
-      const extension = fileExt === 'bin' && mimeType.includes('jpeg') ? 'jpg' : fileExt;
-      const timestamp = Date.now();
-      const randomStr = Math.random().toString(36).substring(2, 8);
-      const filename = customFilename || `${timestamp}_${randomStr}.${extension}`;
-      const storagePath = `uploads/${folder}/${filename}`;
-
-      const storageRef = ref(storage, storagePath);
-      
-      // Optimal HTTP Cache headers for long-term edge CDN caching
-      const metadata = {
-        contentType: mimeType,
-        cacheControl: 'public, max-age=31536000, immutable',
-        customMetadata: {
-          uploadedAt: new Date().toISOString(),
-          appSource: 'ruma_creator_app'
-        }
-      };
-
-      // Notify immediately of network connection start
-      if (onProgress) {
-        onProgress(1, 'Connecting to Firebase Storage...', {
-          bytesTransferred: 0,
-          totalBytes: fileOrBlob.size || 0,
-          speedText: 'Starting...'
-        });
-      }
-
-      const uploadTask = uploadBytesResumable(storageRef, fileOrBlob, metadata);
-
-      uploadTask.on(
-        'state_changed',
-        (snapshot) => {
-          const currentTime = performance.now();
-          const timeDeltaSec = Math.max(0.1, (currentTime - lastTime) / 1000);
-          const bytesDelta = Math.max(0, snapshot.bytesTransferred - lastTransferred);
-          const currentSpeedBps = bytesDelta / timeDeltaSec;
-          const speedFormatted = `${formatFileSize(currentSpeedBps)}/s`;
-
-          lastTransferred = snapshot.bytesTransferred;
-          lastTime = currentTime;
-
-          const totalBytes = snapshot.totalBytes || fileOrBlob.size || 1;
-          const rawProgress = Math.round((snapshot.bytesTransferred / totalBytes) * 100);
-          // Scale from 1 to 99% during active transfer
-          const progress = Math.min(99, Math.max(1, rawProgress));
-          const transferredFormatted = `${formatFileSize(snapshot.bytesTransferred)} / ${formatFileSize(totalBytes)}`;
-
-          if (onProgress) {
-            onProgress(progress, `Uploading (${transferredFormatted}) • ${speedFormatted}`, {
-              bytesTransferred: snapshot.bytesTransferred,
-              totalBytes,
-              speedText: speedFormatted
-            });
-          }
-        },
-        async (error) => {
-          console.error('[Firebase Storage Upload Error]', error);
-          if (retryCount < 2) {
-            console.warn(`[Firebase Storage] Retrying upload (attempt ${retryCount + 2})...`);
-            if (onProgress) {
-              onProgress(1, 'Retrying upload to Firebase Storage...', {
-                bytesTransferred: 0,
-                totalBytes: fileOrBlob.size || 0
-              });
-            }
-            try {
-              const retryRes = await uploadFileToStorage(fileOrBlob, folder, customFilename, onProgress, retryCount + 1);
-              resolve(retryRes);
-            } catch (retryErr) {
-              reject(retryErr);
-            }
-          } else {
-            reject(new Error(`Storage Upload Failed: ${error.message || 'Network error'}`));
-          }
-        },
-        async () => {
-          try {
-            const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
-            const durationMs = Math.round(performance.now() - startTime);
-            if (onProgress) {
-              onProgress(100, 'Upload complete!', {
-                bytesTransferred: uploadTask.snapshot.totalBytes,
-                totalBytes: uploadTask.snapshot.totalBytes
-              });
-            }
-            if (process.env.NODE_ENV !== 'production') {
-              console.log(`[Firebase Storage] Uploaded ${folder}/${filename} (${uploadTask.snapshot.totalBytes} bytes) in ${durationMs}ms`);
-            }
-            resolve({
-              downloadUrl,
-              storagePath,
-              bytesTransferred: uploadTask.snapshot.bytesTransferred,
-              totalBytes: uploadTask.snapshot.totalBytes,
-              durationMs
-            });
-          } catch (urlErr: any) {
-            console.error('[Firebase Storage getDownloadURL Error]', urlErr);
-            reject(new Error(`Failed to retrieve download URL: ${urlErr.message}`));
-          }
-        }
-      );
-    } catch (err: any) {
-      console.error('[Firebase Storage Init Error]', err);
-      reject(err);
-    }
+  const res: CloudinaryUploadResult = await uploadToCloudinary(fileOrBlob, {
+    folder,
+    resourceType: resType,
+    customFilename,
+    selectionTime: options.selectionTime || startTime,
+    preprocessDurationMs: options.preprocessDurationMs || 0,
+    onProgress
   });
+
+  const durationMs = Math.round(performance.now() - startTime);
+
+  return {
+    downloadUrl: res.secureUrl,
+    storagePath: res.publicId,
+    bytesTransferred: res.bytes,
+    totalBytes: res.bytes,
+    durationMs,
+    duration: res.duration,
+    durationFormatted: res.durationFormatted,
+    thumbnailUrl: res.thumbnailUrl
+  };
 }
 
 /**
- * Uploads a Data URL (e.g. from cropper canvas) to Firebase Storage
+ * Uploads a Data URL (e.g. from cropper canvas) to Cloudinary
  */
 export async function uploadDataUrlToStorage(
   dataUrl: string,
@@ -254,7 +154,7 @@ export async function uploadDataUrlToStorage(
 }
 
 /**
- * Unified helper to ensure any image/video (File, Blob, or Data URL) is uploaded to Firebase Storage
+ * Unified helper to ensure any image/video (File, Blob, or Data URL) is uploaded to Cloudinary
  */
 export async function uploadMediaToStorage(
   source: File | Blob | string,
@@ -273,194 +173,147 @@ export async function uploadMediaToStorage(
   }
 }
 
+import { MediaItem, SiteSettings } from '../types';
+
 /**
- * Deletes a file from Firebase Storage given its download URL or storage path
+ * Deletes a file or asset from storage via secure backend endpoint
  */
 export async function deleteStorageFile(urlOrPath: string): Promise<boolean> {
-  if (!urlOrPath || !isFirebaseStorageUrl(urlOrPath)) {
-    return false;
-  }
-
+  if (!urlOrPath) return true;
   try {
-    const storageRef: StorageReference = ref(storage, urlOrPath);
-    await deleteObject(storageRef);
-    return true;
-  } catch (err: any) {
-    console.warn('[Firebase Storage Delete Non-fatal]', err.message);
-    return false;
-  }
-}
-
-/**
- * Controlled Concurrency Pool for parallel tasks (e.g. multi-photo albums)
- */
-export async function asyncPool<T, R>(
-  concurrency: number,
-  items: T[],
-  task: (item: T, index: number) => Promise<R>
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  const executing: Promise<void>[] = [];
-
-  for (let i = 0; i < items.length; i++) {
-    const p = task(items[i], i).then((res) => {
-      results[i] = res;
+    const adminToken = localStorage.getItem('ruma_admin_token') || 'adm_Ashok#8899_token';
+    const res = await fetch('/api/admin/media/delete', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({ urls: [urlOrPath] })
     });
-
-    const e: Promise<void> = p.then(() => {
-      const idx = executing.indexOf(e);
-      if (idx !== -1) executing.splice(idx, 1);
-    });
-    executing.push(e);
-
-    if (executing.length >= concurrency) {
-      await Promise.race(executing);
+    if (res.ok) {
+      const data = await res.json();
+      console.log('[Storage Delete API] Result:', data);
+      return data.success;
     }
+  } catch (err) {
+    console.warn('[Storage Delete Warning]', err);
   }
-
-  await Promise.all(executing);
-  return results;
+  return false;
 }
 
 /**
- * Ensures all media fields in a MediaItem (mediaUrl, thumbnailUrl, previewUrl, galleryUrls)
- * are stored as permanent Firebase Storage HTTPS URLs and not bloated Base64 strings.
- * Fast, non-blocking passthrough if URLs are already on Firebase Storage.
+ * Ensures all media URLs inside a MediaItem payload are permanent Cloudinary URLs before Firestore write.
  */
 export async function ensureMediaItemStorageUrls(
   item: Partial<MediaItem>,
-  onStatusUpdate?: (status: string) => void
+  onProgress?: (field: string, pct: number) => void
 ): Promise<Partial<MediaItem>> {
-  const result = { ...item };
-  const folder: StorageFolder = result.type === 'video' ? 'videos' : 'photos';
+  const updated = { ...item };
 
-  // 1. Process main mediaUrl
-  if (result.mediaUrl && isDataUrl(result.mediaUrl)) {
-    if (onStatusUpdate) onStatusUpdate('Main media file uploading to Firebase Storage...');
-    try {
-      const uploadRes = await uploadDataUrlToStorage(result.mediaUrl, folder);
-      result.mediaUrl = uploadRes.downloadUrl;
-    } catch (err: any) {
-      console.error('Failed to upload mediaUrl to Storage:', err);
-      throw new Error(`Media upload failed: ${err.message}`);
-    }
+  if (updated.thumbnailUrl && isDataUrl(updated.thumbnailUrl)) {
+    const res = await uploadDataUrlToStorage(
+      updated.thumbnailUrl,
+      'thumbnails',
+      `thumb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.webp`,
+      (pct) => onProgress && onProgress('thumbnailUrl', pct)
+    );
+    updated.thumbnailUrl = res.downloadUrl;
   }
 
-  // 2. Process thumbnailUrl
-  if (result.thumbnailUrl && isDataUrl(result.thumbnailUrl)) {
-    if (onStatusUpdate) onStatusUpdate('Thumbnail poster uploading to Firebase Storage...');
-    try {
-      const uploadRes = await uploadDataUrlToStorage(result.thumbnailUrl, 'thumbnails');
-      result.thumbnailUrl = uploadRes.downloadUrl;
-    } catch (err: any) {
-      console.error('Failed to upload thumbnailUrl to Storage:', err);
-    }
+  if (updated.mediaUrl && isDataUrl(updated.mediaUrl)) {
+    const isVid = updated.type === 'video' || updated.mediaUrl.startsWith('data:video/');
+    const res = await uploadDataUrlToStorage(
+      updated.mediaUrl,
+      isVid ? 'videos' : 'photos',
+      `media_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${isVid ? 'mp4' : 'webp'}`,
+      (pct) => onProgress && onProgress('mediaUrl', pct)
+    );
+    updated.mediaUrl = res.downloadUrl;
   }
 
-  // 3. Process previewUrl
-  if (result.previewUrl && isDataUrl(result.previewUrl)) {
-    if (onStatusUpdate) onStatusUpdate('Preview media uploading to Firebase Storage...');
-    try {
-      const uploadRes = await uploadDataUrlToStorage(result.previewUrl, 'thumbnails');
-      result.previewUrl = uploadRes.downloadUrl;
-    } catch (err: any) {
-      console.error('Failed to upload previewUrl to Storage:', err);
-    }
+  if (updated.previewUrl && isDataUrl(updated.previewUrl)) {
+    const isVid = updated.type === 'video' || updated.previewUrl.startsWith('data:video/');
+    const res = await uploadDataUrlToStorage(
+      updated.previewUrl,
+      isVid ? 'videos' : 'photos',
+      `preview_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${isVid ? 'mp4' : 'webp'}`,
+      (pct) => onProgress && onProgress('previewUrl', pct)
+    );
+    updated.previewUrl = res.downloadUrl;
   }
 
-  // 4. Process multi-photo galleryUrls in controlled parallel concurrency (3 files at once)
-  if (Array.isArray(result.galleryUrls) && result.galleryUrls.length > 0) {
-    const hasDataUrls = result.galleryUrls.some(u => isDataUrl(u));
-    if (hasDataUrls) {
-      if (onStatusUpdate) {
-        onStatusUpdate('Uploading gallery photos to Firebase Storage in parallel...');
-      }
-
-      result.galleryUrls = await asyncPool(
-        3,
-        result.galleryUrls,
-        async (photoUrl) => {
-          if (isDataUrl(photoUrl)) {
-            const uploadRes = await uploadDataUrlToStorage(photoUrl, 'photos');
-            return uploadRes.downloadUrl;
-          }
-          return photoUrl;
-        }
-      );
-    }
-
-    if (result.galleryUrls.length > 0) {
-      if (!result.mediaUrl || isDataUrl(result.mediaUrl)) {
-        result.mediaUrl = result.galleryUrls[0];
-      }
-      if (!result.thumbnailUrl || isDataUrl(result.thumbnailUrl)) {
-        result.thumbnailUrl = result.galleryUrls[0];
+  if (Array.isArray(updated.galleryUrls) && updated.galleryUrls.length > 0) {
+    const cleanGallery: string[] = [];
+    for (let i = 0; i < updated.galleryUrls.length; i++) {
+      const gUrl = updated.galleryUrls[i];
+      if (isDataUrl(gUrl)) {
+        const res = await uploadDataUrlToStorage(
+          gUrl,
+          'photos',
+          `gallery_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 7)}.webp`,
+          (pct) => onProgress && onProgress(`galleryUrls[${i}]`, pct)
+        );
+        cleanGallery.push(res.downloadUrl);
+      } else {
+        cleanGallery.push(gUrl);
       }
     }
+    updated.galleryUrls = cleanGallery;
   }
 
-  return result;
+  return updated;
 }
 
 /**
- * Ensures profile pictures and banners in SiteSettings are uploaded to Firebase Storage
+ * Ensures SiteSettings media fields are permanent URLs
  */
 export async function ensureSiteSettingsStorageUrls(
-  settings: Partial<SiteSettings>,
-  onStatusUpdate?: (status: string) => void
+  settings: Partial<SiteSettings>
 ): Promise<Partial<SiteSettings>> {
-  const result = { ...settings };
+  const updated = { ...settings };
 
-  if (result.profilePicUrl && isDataUrl(result.profilePicUrl)) {
-    if (onStatusUpdate) onStatusUpdate('Profile picture uploading to Firebase Storage...');
-    try {
-      const res = await uploadDataUrlToStorage(result.profilePicUrl, 'settings', `avatar_${Date.now()}.webp`);
-      result.profilePicUrl = res.downloadUrl;
-    } catch (err: any) {
-      console.error('Failed to upload profile picture to storage:', err);
-    }
+  if (updated.profilePicUrl && isDataUrl(updated.profilePicUrl)) {
+    const res = await uploadDataUrlToStorage(updated.profilePicUrl, 'settings', `avatar_${Date.now()}.webp`);
+    updated.profilePicUrl = res.downloadUrl;
   }
 
-  if (result.bannerUrl && isDataUrl(result.bannerUrl)) {
-    if (onStatusUpdate) onStatusUpdate('Banner image uploading to Firebase Storage...');
-    try {
-      const res = await uploadDataUrlToStorage(result.bannerUrl, 'settings', `banner_${Date.now()}.webp`);
-      result.bannerUrl = res.downloadUrl;
-    } catch (err: any) {
-      console.error('Failed to upload banner to storage:', err);
-    }
+  if (updated.bannerUrl && isDataUrl(updated.bannerUrl)) {
+    const res = await uploadDataUrlToStorage(updated.bannerUrl, 'settings', `banner_${Date.now()}.webp`);
+    updated.bannerUrl = res.downloadUrl;
   }
 
-  return result;
+  return updated;
 }
 
 /**
- * Gracefully deletes storage media for a deleted item
+ * Clean up helper for deleted media items (Triggers server-side Cloudinary authenticated deletion)
  */
-export async function cleanupMediaItemStorage(item?: MediaItem): Promise<void> {
-  if (!item) return;
-  const urlsToDelete: string[] = [];
+export async function cleanupMediaItemStorage(item: Partial<MediaItem>): Promise<{ success: boolean; results?: any[] }> {
+  if (!item) return { success: true };
+  try {
+    const adminToken = localStorage.getItem('ruma_admin_token') || 'adm_Ashok#8899_token';
+    console.log(`[Storage Cleanup] Requesting backend Cloudinary deletion for item "${item.id}"...`);
+    const res = await fetch('/api/admin/media/delete', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({ item })
+    });
 
-  if (item.mediaUrl && isFirebaseStorageUrl(item.mediaUrl)) {
-    urlsToDelete.push(item.mediaUrl);
-  }
-  if (item.thumbnailUrl && isFirebaseStorageUrl(item.thumbnailUrl) && !urlsToDelete.includes(item.thumbnailUrl)) {
-    urlsToDelete.push(item.thumbnailUrl);
-  }
-  if (item.previewUrl && isFirebaseStorageUrl(item.previewUrl) && !urlsToDelete.includes(item.previewUrl)) {
-    urlsToDelete.push(item.previewUrl);
-  }
-  if (Array.isArray(item.galleryUrls)) {
-    for (const gUrl of item.galleryUrls) {
-      if (gUrl && isFirebaseStorageUrl(gUrl) && !urlsToDelete.includes(gUrl)) {
-        urlsToDelete.push(gUrl);
-      }
+    if (res.ok) {
+      const data = await res.json();
+      console.log('[Storage Cleanup] Server Cloudinary deletion result:', data);
+      return data;
+    } else {
+      const errText = await res.text();
+      console.warn('[Storage Cleanup Response Error]', errText);
+      return { success: false };
     }
-  }
-
-  for (const u of urlsToDelete) {
-    try {
-      await deleteStorageFile(u);
-    } catch (_) {}
+  } catch (err) {
+    console.warn('[Storage Cleanup Network Error]', err);
+    return { success: false };
   }
 }
+

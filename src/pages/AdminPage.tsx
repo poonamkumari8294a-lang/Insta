@@ -347,6 +347,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     if (!deletingItem) return;
     setIsDeleting(true);
     const targetId = deletingItem.id;
+    const itemToDelete = { ...deletingItem };
     // Optimistic UI removal
     const nextList = contentList.filter(c => c.id !== targetId);
     setContentList(nextList);
@@ -354,7 +355,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     setDeletingItem(null);
     showToast('🗑️ पोस्ट सफलतापूर्वक डिलीट हो गई');
     try {
-      await deleteAdminContent(targetId);
+      await deleteAdminContent(targetId, itemToDelete);
     } catch (err: any) {
       showToast(err.message || 'डिलीट करने में विफल (Failed to delete)', 'error');
     } finally {
@@ -402,6 +403,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     if (selectedContentIds.length === 0) return;
     setBulkActionLoading(true);
     const targetIds = [...selectedContentIds];
+    const itemsToDelete = contentList.filter(c => targetIds.includes(c.id));
     // Optimistic UI removal
     const nextList = contentList.filter(c => !targetIds.includes(c.id));
     setContentList(nextList);
@@ -409,10 +411,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     setSelectedContentIds([]);
     setShowBulkDeleteConfirm(false);
     try {
-      for (const id of targetIds) {
-        await deleteAdminContent(id);
+      for (const item of itemsToDelete) {
+        await deleteAdminContent(item.id, item);
       }
-      showToast(`🗑️ ${targetIds.length} पोस्ट्स सफलतापूर्वक डिलीट हो गईं`);
+      showToast(`🗑️ ${itemsToDelete.length} पोस्ट्स सफलतापूर्वक डिलीट हो गईं`);
     } catch (err: any) {
       showToast(err.message || 'Bulk delete failed', 'error');
     } finally {

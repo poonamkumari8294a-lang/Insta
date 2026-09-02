@@ -1,7 +1,5 @@
 import React, { useState, useRef } from 'react';
 import {
-  Upload,
-  Image as ImageIcon,
   CheckCircle2,
   X,
   Crop,
@@ -13,7 +11,7 @@ import {
   CloudUpload,
   AlertCircle
 } from 'lucide-react';
-import { compressImageToBlob, formatFileSize } from '../utils/mediaUpload';
+import { compressImageToBlob, shouldCompressImage, formatFileSize } from '../utils/mediaUpload';
 import { uploadFileToStorage, uploadDataUrlToStorage } from '../services/storage';
 import { ImageCropperModal } from './ImageCropperModal';
 
@@ -70,10 +68,10 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
       return;
     }
 
-    setProcessingProgress(`Cloud में ${total} फ़ोटो अपलोड हो रही हैं...`);
+    setProcessingProgress(`Uploading ${total} photos to Cloudinary...`);
 
     try {
-      // Controlled Parallel Concurrency (up to 4 files at once for optimal throughput)
+      // Controlled Parallel Concurrency = 4
       const CONCURRENCY = 4;
       const fileProgressMap = new Array<number>(total).fill(0);
       const successfulUrls: string[] = [];
@@ -88,31 +86,43 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
       };
 
       const uploadSingleFile = async (file: File, index: number): Promise<string | null> => {
+        const itemSelectionTime = performance.now();
         try {
-          // 1. Fast zero-copy Blob compression with hardware acceleration
-          const { blob, mimeType } = await compressImageToBlob(file, 1600, 1600, 0.82);
-          
-          // 2. Upload to Firebase Storage
+          let payloadToUpload: File | Blob = file;
+          let preprocessMs = 0;
+
+          // Only compress if file is large (>2MB)
+          if (shouldCompressImage(file)) {
+            const prepResult = await compressImageToBlob(file, 1920, 1920, 0.80);
+            payloadToUpload = prepResult.blob;
+            preprocessMs = prepResult.durationMs;
+          }
+
+          // Direct Stream to Cloudinary
           const uploadResult = await uploadFileToStorage(
-            blob,
+            payloadToUpload,
             'photos',
-            `album_${Date.now()}_${index}_${Math.random().toString(36).substring(2, 7)}.${mimeType.includes('webp') ? 'webp' : 'jpg'}`,
+            `album_${Date.now()}_${index}_${Math.random().toString(36).substring(2, 7)}.${payloadToUpload.type?.includes('webp') ? 'webp' : 'jpg'}`,
             (pct) => {
               updateAggregateProgress(index, pct);
+            },
+            {
+              selectionTime: itemSelectionTime,
+              preprocessDurationMs: preprocessMs
             }
           );
 
           updateAggregateProgress(index, 100);
           return uploadResult.downloadUrl;
         } catch (fileErr: any) {
-          console.warn(`[MultiPhoto Upload Failed for file ${index}]`, fileErr);
+          console.warn(`[MultiPhoto Upload Failed for file #${index + 1}]`, fileErr);
           failedIndices.push(index);
-          updateAggregateProgress(index, 100); // Allow aggregate to complete
+          updateAggregateProgress(index, 100);
           return null;
         }
       };
 
-      // Execute with controlled concurrency
+      // Execute in worker pool of size 4
       const executing: Promise<void>[] = [];
       for (let i = 0; i < total; i++) {
         const p = uploadSingleFile(validFiles[i], i).then((url) => {
@@ -138,7 +148,6 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
         const updatedList = [...photos, ...successfulUrls];
         onChange(updatedList);
 
-        // If no cover set yet, set the first photo as cover
         if (!currentCover && onCoverChange && updatedList.length > 0) {
           onCoverChange(updatedList[0]);
         }
@@ -146,7 +155,7 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
 
       if (failedIndices.length > 0) {
         setUploadError(
-          `${successfulUrls.length} फ़ोटो अपलोड हो गईं, लेकिन ${failedIndices.length} फ़ोटो में नेटवर्क समस्या आई।`
+          `${successfulUrls.length} photos uploaded successfully to Cloudinary. ${failedIndices.length} failed due to network.`
         );
       }
     } catch (err: any) {
@@ -167,7 +176,6 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
     const updated = photos.filter((_, idx) => idx !== indexToRemove);
     onChange(updated);
 
-    // If removed photo was current cover, reset cover to first item
     if (removedUrl === currentCover && onCoverChange) {
       onCoverChange(updated.length > 0 ? updated[0] : '');
     }
@@ -195,7 +203,7 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
 
     if (targetIdx !== null && targetIdx >= 0 && targetIdx < photos.length) {
       setIsProcessing(true);
-      setProcessingProgress('क्रॉप की गई फोटो Cloud Storage में अपलोड हो रही है...');
+      setProcessingProgress('Uploading cropped photo...');
       try {
         const uploadResult = await uploadDataUrlToStorage(
           croppedDataUrl,
@@ -253,7 +261,7 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
         {photos.length > 0 && (
           <span className="text-[11px] font-black bg-pink-100 text-pink-700 border border-pink-200 px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
             <Sparkles className="w-3 h-3 text-pink-600" />
-            <span>{photos.length} Photos Cloud Synced</span>
+            <span>{photos.length} Photos Cloudinary Synced</span>
           </span>
         )}
       </div>
@@ -275,7 +283,7 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
           <button
             type="button"
             onClick={() => setUploadError(null)}
-            className="text-rose-500 hover:text-rose-800 p-1"
+            className="text-rose-500 hover:text-rose-800 p-1 cursor-pointer"
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -310,27 +318,23 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
       >
         <div className="flex flex-col items-center justify-center space-y-2">
           <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-500/20 to-purple-500/20 text-pink-600 flex items-center justify-center shadow-xs">
-            {isProcessing ? (
-              <CloudUpload className="w-5 h-5 animate-pulse text-pink-600" />
-            ) : (
-              <CloudUpload className="w-5 h-5" />
-            )}
+            <CloudUpload className={`w-5 h-5 ${isProcessing ? 'animate-pulse' : ''}`} />
           </div>
 
           {isProcessing ? (
             <div className="w-full max-w-xs space-y-1.5">
               <div className="flex items-center justify-between text-xs font-black text-purple-950">
-                <span>{processingProgress}</span>
-                <span className="text-pink-600">{uploadPercent}%</span>
+                <span className="truncate max-w-[200px] text-left">{processingProgress}</span>
+                <span className="text-pink-600 font-mono text-sm">{uploadPercent}%</span>
               </div>
               <div className="w-full h-2.5 bg-purple-100 rounded-full overflow-hidden border border-purple-200">
                 <div
-                  className="h-full bg-gradient-to-r from-pink-500 to-rose-500 rounded-full transition-all duration-300"
-                  style={{ width: `${Math.max(5, uploadPercent)}%` }}
+                  className="h-full bg-gradient-to-r from-pink-500 to-rose-500 rounded-full transition-all duration-150"
+                  style={{ width: `${Math.max(2, uploadPercent)}%` }}
                 />
               </div>
               <p className="text-[10px] text-purple-900/60 font-medium">
-                फ़ोटो Firebase Storage में समानांतर (Parallel) अपलोड हो रही हैं
+                Parallel Stream to Cloudinary CDN (Concurrency: 4)
               </p>
             </div>
           ) : (
@@ -339,14 +343,14 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
                 <span>📸 एक साथ कई फोटो चुनें (Select Multiple Photos for Album)</span>
               </p>
               <p className="text-[11px] text-purple-900/60 mt-0.5">
-                गैलरी से 1 से लेकर 20+ फ़ोटो एक साथ चुनें • Direct Fast Parallel Firebase Storage Sync
+                गैलरी से 1 से लेकर 20+ फ़ोटो एक साथ चुनें • High Speed Direct Cloudinary CDN Upload
               </p>
               <button
                 type="button"
-                className="mt-2 px-4 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-[11px] font-black shadow-md shadow-pink-500/20 flex items-center gap-1.5 mx-auto"
+                className="mt-2 px-4 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-[11px] font-black shadow-md shadow-pink-500/20 flex items-center gap-1.5 mx-auto cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>फ़ोटो जोड़ें (+ Add to Cloud Album)</span>
+                <span>फ़ोटो जोड़ें (+ Add to Album)</span>
               </button>
             </div>
           )}

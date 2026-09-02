@@ -1481,11 +1481,11 @@ export async function updateAdminContent(id: string, updates: Partial<MediaItem>
 }
 
 /**
- * Deletes content in Firestore + updates in-memory cache immediately (0 Extra Reads)
+ * Deletes content in Firestore + updates in-memory cache immediately + destroys linked Cloudinary assets via secure backend
  */
-export async function deleteAdminContent(id: string): Promise<boolean> {
+export async function deleteAdminContent(id: string, itemOverride?: MediaItem): Promise<boolean> {
   const currentList = memoryContentList || getCachedContentListSync();
-  const targetItem = currentList.find(i => i.id === id);
+  const targetItem = itemOverride || currentList.find(i => i.id === id);
 
   // 1. Delete from Cloud Firestore
   try {
@@ -1497,9 +1497,17 @@ export async function deleteAdminContent(id: string): Promise<boolean> {
     throw new Error(`क्लाउड से डिलीट विफल: ${err.message || 'नेटवर्क त्रुटि'}`);
   }
 
-  // 2. Clean up storage files in background if available
+  // 2. Clean up storage & Cloudinary assets via secure backend
   if (targetItem) {
-    cleanupMediaItemStorage(targetItem).catch(err => console.warn('[Storage Cleanup Non-fatal]', err));
+    try {
+      cleanupMediaItemStorage(targetItem).then(res => {
+        console.log(`[Storage Cleanup] Post "${id}" Cloudinary deletion result:`, res);
+      }).catch(err => {
+        console.warn('[Storage Cleanup Non-fatal]', err);
+      });
+    } catch (cleanErr) {
+      console.warn('[Storage Cleanup Invocation Error]', cleanErr);
+    }
   }
 
   // 3. Write-through update to local memory & cache (Zero subsequent getDocs needed!)
