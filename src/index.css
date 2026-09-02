@@ -434,13 +434,53 @@
   -webkit-touch-callout: none;
 }
 
-.protected-media-container img,
-.protected-media-container video {
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-user-drag: none;
-  -webkit-touch-callout: none;
-  image-rendering: -webkit-optimize-contrast;
+/* =========================================================
+   PERMANENT REMOVAL OF NETLIFY DRAWER & BADGE OVERLAYS
+   Hides any Netlify feedback toolbar, collaboration drawer,
+   "Powered by Netlify" badges, and preview toolbars.
+   ========================================================= */
+iframe[src*="netlify.com"],
+iframe[src*="netlify.app"],
+iframe[src*="cdp"],
+iframe[src*="drawer"],
+iframe[src*="badge"],
+iframe[title*="Netlify" i],
+iframe[id*="netlify" i],
+iframe[class*="netlify" i],
+div[id*="netlify" i],
+div[class*="netlify" i],
+div[id*="feedback-drawer" i],
+div[class*="feedback-drawer" i],
+div[data-netlify-drawer],
+[data-netlify-drawer],
+[data-netlify-badge],
+netlify-drawer,
+netlify-badge,
+#netlify-drawer,
+#netlify-badge,
+.netlify-drawer,
+.netlify-badge,
+#ntl-drawer,
+.ntl-drawer,
+body > iframe:not([src*="google"]):not([src*="youtube"]) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  max-width: 0 !important;
+  max-height: 0 !important;
+  overflow: hidden !important;
+  position: fixed !important;
+  bottom: -99999px !important;
+  right: -99999px !important;
+  top: -99999px !important;
+  left: -99999px !important;
+  z-index: -99999 !important;
+  transform: scale(0) !important;
+  clip: rect(0, 0, 0, 0) !important;
+  clip-path: inset(50%) !important;
 }
 
 

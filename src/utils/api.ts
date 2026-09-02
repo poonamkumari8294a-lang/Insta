@@ -1379,6 +1379,24 @@ export async function verifyAdminOrder(orderId: string, transactionRef?: string)
           transactionRef: txRef
         };
         await setDoc(orderRef, updated, { merge: true });
+
+        // Grant server-side permanent WhatsApp & VIP entitlement in Firestore
+        const targetPhone = (updated.customerPhone || current.customerPhone || '').replace(/[^0-9]/g, '');
+        if (targetPhone) {
+          try {
+            const entRef = doc(firestore, 'user_entitlements', `user_${targetPhone}`);
+            await setDoc(entRef, {
+              id: `user_${targetPhone}`,
+              phone: targetPhone,
+              whatsappAccess: true,
+              vipAccess: true,
+              customerSessionId: updated.customerSessionId || '',
+              updatedAt: new Date().toISOString()
+            }, { merge: true });
+          } catch (entErr) {
+            console.warn('[Entitlement save non-fatal]', entErr);
+          }
+        }
         
         // Write-through update to memory cache
         if (memoryAdminOrders) {
@@ -1468,6 +1486,25 @@ export async function submitPaymentUtr(
             contentTitle: updated.contentTitle,
             amount: updated.amount
           });
+
+          if (isInstant) {
+            try {
+              const cleanPhone = finalPhone.replace(/[^0-9]/g, '');
+              if (cleanPhone) {
+                const entRef = doc(firestore, 'user_entitlements', `user_${cleanPhone}`);
+                await setDoc(entRef, {
+                  id: `user_${cleanPhone}`,
+                  phone: cleanPhone,
+                  whatsappAccess: true,
+                  vipAccess: true,
+                  customerSessionId: updated.customerSessionId || '',
+                  updatedAt: new Date().toISOString()
+                }, { merge: true });
+              }
+            } catch (entErr) {
+              console.warn('[Instant entitlement save non-fatal]', entErr);
+            }
+          }
         }
 
         return {
@@ -1743,7 +1780,182 @@ export async function updateAdminSettings(settings: Partial<SiteSettings>): Prom
     localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(cleanSettings));
   } catch (_) {}
 
+  // 3. Dispatch broadcast event for 0ms zero-refresh sync across all components
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('site-settings-updated', { detail: cleanSettings }));
+  }
+
   return cleanSettings;
+}
+
+// ============================================================================
+// 11.1 User Entitlements & WhatsApp Access Verification (Server-Backed)
+// ============================================================================
+export async function checkUserWhatsAppAccess(overridePhone?: string): Promise<{
+  hasAccess: boolean;
+  whatsappNumber?: string;
+  source?: string;
+}> {
+  const settings = memorySiteSettings || getCachedSiteSettingsSync();
+  const rawWhatsApp = settings?.supportWhatsApp || '+63 9465507887';
+
+  // 1. If admin opened WhatsApp access to all users
+  if (settings?.whatsappAccessMode === 'all') {
+    return { hasAccess: true, whatsappNumber: rawWhatsApp, source: 'public_open' };
+  }
+
+  // 2. Check local entitlement cache flag
+  if (typeof window !== 'undefined' && localStorage.getItem('ruma_whatsapp_access_granted') === 'true') {
+    return { hasAccess: true, whatsappNumber: rawWhatsApp, source: 'cached_local' };
+  }
+
+  // 3. Check if phone is known
+  const storedUser = getStoredUserProfile();
+  const phone = (overridePhone || storedUser?.phone || '').replace(/[^0-9]/g, '');
+
+  if (phone && !isCloudQuotaExhausted()) {
+    try {
+      // Check user_entitlements
+      const entRef = doc(firestore, 'user_entitlements', `user_${phone}`);
+      const entSnap = await withTimeout(getDoc(entRef), 2500);
+      if (entSnap.exists() && entSnap.data()?.whatsappAccess === true) {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('ruma_whatsapp_access_granted', 'true');
+        }
+        return { hasAccess: true, whatsappNumber: rawWhatsApp, source: 'firestore_entitlement' };
+      }
+
+      // Check paid orders in Firestore for this phone
+      const ordersRef = collection(firestore, 'orders');
+      const q = query(ordersRef, where('customerPhone', '==', phone), where('status', '==', 'paid'), firestoreLimit(1));
+      const orderSnap = await withTimeout(getDocs(q), 2500);
+      if (!orderSnap.empty) {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('ruma_whatsapp_access_granted', 'true');
+        }
+        // Save entitlement for fast subsequent lookup
+        try {
+          await setDoc(entRef, {
+            id: `user_${phone}`,
+            phone,
+            whatsappAccess: true,
+            vipAccess: true,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        } catch (_) {}
+        return { hasAccess: true, whatsappNumber: rawWhatsApp, source: 'firestore_order' };
+      }
+    } catch (err) {
+      console.warn('[WhatsApp Access check non-fatal]', err);
+    }
+  }
+
+  // 4. Check orders in local storage
+  const localOrdersStr = typeof window !== 'undefined' ? localStorage.getItem('ruma_user_orders') : null;
+  if (localOrdersStr) {
+    try {
+      const localOrders: OrderItem[] = JSON.parse(localOrdersStr);
+      const hasPaid = localOrders.some(o => o.status === 'paid');
+      if (hasPaid) {
+        return { hasAccess: true, whatsappNumber: rawWhatsApp, source: 'local_order' };
+      }
+    } catch (_) {}
+  }
+
+  return { hasAccess: false, whatsappNumber: undefined };
+}
+
+export async function verifyAndUnlockWhatsAppByPhone(phoneInput: string): Promise<{
+  success: boolean;
+  hasAccess: boolean;
+  message: string;
+  whatsappNumber?: string;
+}> {
+  const cleanPhone = phoneInput.replace(/[^0-9]/g, '');
+  if (!cleanPhone || cleanPhone.length < 10) {
+    return {
+      success: false,
+      hasAccess: false,
+      message: 'कृपया वैध 10-अंकों का मोबाइल नंबर दर्ज करें।'
+    };
+  }
+
+  const settings = memorySiteSettings || getCachedSiteSettingsSync();
+  const rawWhatsApp = settings?.supportWhatsApp || '+63 9465507887';
+
+  // Save in local user profile so it persists
+  const currentProfile = getStoredUserProfile() || { name: 'VIP Member', phone: cleanPhone, streakDays: 1, lastSpinDate: '', coins: 50 };
+  currentProfile.phone = cleanPhone;
+  saveStoredUserProfile(currentProfile);
+
+  if (!isCloudQuotaExhausted()) {
+    try {
+      // 1. Look up user_entitlements
+      const entRef = doc(firestore, 'user_entitlements', `user_${cleanPhone}`);
+      const entSnap = await withTimeout(getDoc(entRef), 3000);
+      if (entSnap.exists() && entSnap.data()?.whatsappAccess === true) {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('ruma_whatsapp_access_granted', 'true');
+          window.dispatchEvent(new CustomEvent('whatsapp-access-unlocked', { detail: { phone: cleanPhone } }));
+        }
+        return {
+          success: true,
+          hasAccess: true,
+          message: 'वेरिफिकेशन सफल! आपका VIP WhatsApp संपर्क अनलॉक हो गया है।',
+          whatsappNumber: rawWhatsApp
+        };
+      }
+
+      // 2. Query orders collection for paid order with this phone
+      const ordersRef = collection(firestore, 'orders');
+      const q = query(ordersRef, where('customerPhone', '==', cleanPhone), where('status', '==', 'paid'), firestoreLimit(1));
+      const orderSnap = await withTimeout(getDocs(q), 3000);
+
+      if (!orderSnap.empty) {
+        await setDoc(entRef, {
+          id: `user_${cleanPhone}`,
+          phone: cleanPhone,
+          whatsappAccess: true,
+          vipAccess: true,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('ruma_whatsapp_access_granted', 'true');
+          window.dispatchEvent(new CustomEvent('whatsapp-access-unlocked', { detail: { phone: cleanPhone } }));
+        }
+
+        return {
+          success: true,
+          hasAccess: true,
+          message: 'वेरिफिकेशन सफल! आपका VIP WhatsApp संपर्क अनलॉक हो गया है।',
+          whatsappNumber: rawWhatsApp
+        };
+      }
+
+      // Check if order is waiting verification
+      const pendingQ = query(ordersRef, where('customerPhone', '==', cleanPhone), firestoreLimit(1));
+      const pendingSnap = await withTimeout(getDocs(pendingQ), 3000);
+      if (!pendingSnap.empty) {
+        const pOrder = pendingSnap.docs[0].data() as OrderItem;
+        if (pOrder.status === 'waiting_verification' || pOrder.status === 'pending') {
+          return {
+            success: false,
+            hasAccess: false,
+            message: 'आपका पेमेंट अभी एडमिन द्वारा वेरिफिकेशन में है। सत्यापन पूरा होते ही WhatsApp अपने आप अनलॉक हो जाएगा।'
+          };
+        }
+      }
+    } catch (err: any) {
+      console.warn('[verifyAndUnlockWhatsAppByPhone Error]', err);
+    }
+  }
+
+  return {
+    success: false,
+    hasAccess: false,
+    message: 'इस मोबाइल नंबर पर कोई अप्रूव्ड VIP पेमेंट नहीं मिला। कृपया पहले VIP पास खरीदें या सही मोबाइल नंबर डालें।'
+  };
 }
 
 // ============================================================================
@@ -1812,4 +2024,34 @@ export const approveOrderPayment = adminApproveOrder;
 export const rejectOrderPayment = adminRejectOrder;
 export const deleteOrder = deleteAdminOrder;
 export const verifyOrderPayment = verifyAdminOrder;
+
+export { CLIENT_SITE_SETTINGS } from '../data/defaultData';
+
+export const getSecretUrl = (): string => {
+  try {
+    return `${window.location.origin}${window.location.pathname}#admin`;
+  } catch (_) {
+    return 'https://.../#admin';
+  }
+};
+
+export async function triggerPushNotificationToSubscribers(payload?: {
+  title?: string;
+  body?: string;
+  url?: string;
+}): Promise<{ success: boolean; sentCount?: number; error?: string }> {
+  try {
+    const settings = memorySiteSettings || getCachedSiteSettingsSync();
+    const { sendTestNotification } = await import('../services/notificationService');
+    const res = await sendTestNotification(settings, false);
+    return {
+      success: res.success,
+      sentCount: res.recipientCount,
+      error: res.success ? undefined : res.message
+    };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to trigger notification' };
+  }
+}
+
 

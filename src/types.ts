@@ -98,6 +98,9 @@ export interface VipPlan {
   perks: string[];
   popular?: boolean;
   enabled: boolean;
+  whatsappAccess?: boolean;
+  vipAccess?: boolean;
+  contentAccess?: boolean;
 }
 
 export interface StoryHighlight {
@@ -133,19 +136,34 @@ export interface SiteSettings {
   bio: string;
   tagline: string;
   profilePicUrl: string;
+  profilePicPublicId?: string;
+  profilePicResourceType?: string;
   bannerUrl: string;
+  bannerPublicId?: string;
+  bannerResourceType?: string;
   instagramUrl: string;
   instagramHandle: string;
   badgeText?: string;
+  isVerified?: boolean;
+  category?: string;
+  location?: string;
+  websiteLink?: string;
   upiId: string;
+  paymentNumber?: string;
   postsCount: number;
-  followersCount: number;
+  followersCount: number | string;
+  followingCount?: number | string;
   viewsCount: string;
   announcement: string;
   announcementEnabled: boolean;
   supportEmail: string;
   supportTelegram: string;
   supportWhatsApp?: string;
+  whatsappNumber?: string;
+  whatsappAccessMode?: 'paid_only' | 'all';
+  youtubeUrl?: string;
+  facebookUrl?: string;
+  otherSocialLinks?: { platform: string; url: string }[];
   paymentVerificationMode?: 'manual_approval' | 'instant_utr';
   adminPasscode?: string;
   vipPlans?: VipPlan[];
@@ -157,6 +175,19 @@ export interface SiteSettings {
   vapidKey?: string;
   demoPurged?: boolean;
   isSeeded?: boolean;
+  updatedAt?: string;
+}
+
+export interface UserEntitlement {
+  id: string;
+  phone: string;
+  customerSessionId?: string;
+  whatsappAccess: boolean;
+  vipAccess?: boolean;
+  unlockedPlans?: string[];
+  lastVerifiedAt?: string;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface NotificationToken {

@@ -32,6 +32,77 @@
     <link rel="dns-prefetch" href="https://res.cloudinary.com">
     <link rel="dns-prefetch" href="https://firestore.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@600;800;900&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- Netlify Drawer, Badge & Collaboration Toolbar Suppressor -->
+    <script>
+      (function() {
+        try {
+          window.NETLIFY_DRAWER_DISABLED = true;
+          window.ntl_drawer_state = 'hidden';
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('ntl-drawer-state', 'hidden');
+          }
+          if (typeof sessionStorage !== 'undefined') {
+            sessionStorage.setItem('ntl-drawer-state', 'hidden');
+          }
+        } catch (e) {}
+
+        function stripNetlifyOverlays() {
+          try {
+            var selectors = [
+              'netlify-drawer',
+              'netlify-badge',
+              '#netlify-drawer',
+              '#netlify-badge',
+              '#ntl-drawer',
+              '.netlify-drawer',
+              '.netlify-badge',
+              '.ntl-drawer',
+              '[data-netlify-drawer]',
+              '[data-netlify-badge]',
+              'iframe[src*="netlify.com"]',
+              'iframe[src*="netlify.app"]',
+              'iframe[src*="cdp"]',
+              'iframe[src*="drawer"]',
+              'iframe[src*="badge"]',
+              'iframe[title*="Netlify" i]',
+              'script[src*="netlify.com/drawer"]'
+            ];
+            for (var s = 0; s < selectors.length; s++) {
+              var els = document.querySelectorAll(selectors[s]);
+              for (var i = 0; i < els.length; i++) {
+                var el = els[i];
+                if (el && el.parentNode) {
+                  el.parentNode.removeChild(el);
+                }
+              }
+            }
+
+            var bodyFrames = document.querySelectorAll('body > iframe');
+            for (var j = 0; j < bodyFrames.length; j++) {
+              var frame = bodyFrames[j];
+              var src = (frame.getAttribute('src') || '').toLowerCase();
+              if (src.indexOf('netlify') !== -1 || src.indexOf('cdp') !== -1 || src === '' || src.indexOf('badge') !== -1) {
+                if (frame.parentNode) frame.parentNode.removeChild(frame);
+              }
+            }
+          } catch (err) {}
+        }
+
+        if (typeof MutationObserver !== 'undefined') {
+          var observer = new MutationObserver(function() {
+            stripNetlifyOverlays();
+          });
+          observer.observe(document.documentElement, { childList: true, subtree: true });
+        }
+
+        document.addEventListener('DOMContentLoaded', stripNetlifyOverlays);
+        window.addEventListener('load', stripNetlifyOverlays);
+        setTimeout(stripNetlifyOverlays, 500);
+        setTimeout(stripNetlifyOverlays, 1500);
+        setTimeout(stripNetlifyOverlays, 3000);
+      })();
+    </script>
   </head>
   <body class="bg-[#fdf2f8] text-purple-950 antialiased selection:bg-pink-500 selection:text-white min-h-screen overflow-x-clip">
     <div id="root"></div>

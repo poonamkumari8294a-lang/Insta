@@ -193,7 +193,7 @@ export const HomePage: React.FC<HomePageProps> = ({
 
                         <div className="p-3.5 rounded-2xl bg-white/70 border border-purple-100 text-center min-w-[90px] shadow-sm">
                           <span className="font-display text-base sm:text-xl font-black text-purple-950 block">
-                            {settings.followersCount.toLocaleString()}
+                            {typeof settings.followersCount === 'number' ? settings.followersCount.toLocaleString() : settings.followersCount}
                           </span>
                           <span className="text-[10px] sm:text-xs text-purple-900/70 font-semibold">Followers</span>
                         </div>
