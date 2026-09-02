@@ -21,12 +21,15 @@ import {
   verifyAdminOrder,
   adminApproveOrder,
   adminRejectOrder,
+  restorePreviousOriginalData,
   formatINR
 } from '../utils/api';
 import { HomepageControlTab } from '../components/HomepageControlTab';
 import { StoryHighlightsManager } from '../components/StoryHighlightsManager';
 import { MediaUploadZone } from '../components/MediaUploadZone';
 import { MultiPhotoUploadZone } from '../components/MultiPhotoUploadZone';
+import { UserManagementSection } from '../components/UserManagementSection';
+import { PaymentManagementSection } from '../components/PaymentManagementSection';
 import {
   sendNewPostNotification,
   sendTestNotification,
@@ -409,6 +412,27 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       showToast(err.message || 'डिलीट करने में विफल (Failed to delete)', 'error');
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleRestoreAllOriginalData = async () => {
+    if (!window.confirm('क्या आप पिछला सारा डेटा, प्रोफाइल सेटिंग्स और सभी 8 ओरिजिनल पोस्ट्स वापस लाना चाहते हैं?')) {
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await restorePreviousOriginalData();
+      const updatedContent = await fetchAdminContent(true);
+      const updatedSettings = await fetchSiteSettings(true);
+      setContentList(updatedContent);
+      setSiteSettings(updatedSettings);
+      if (onContentUpdated) onContentUpdated(updatedContent);
+      if (onSettingsUpdated) onSettingsUpdated(updatedSettings);
+      showToast(`🎉 ${res.message}`);
+    } catch (err: any) {
+      showToast(err.message || 'रीस्टोर करने में विफल', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1332,6 +1356,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({
             <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
               <button
                 type="button"
+                onClick={handleRestoreAllOriginalData}
+                className="px-4 py-2.5 rounded-2xl text-xs font-bold text-purple-950 bg-gradient-to-r from-purple-100 to-pink-100 hover:from-purple-200 hover:to-pink-200 border border-purple-300 flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                title="पिछला सारा डेटा व ओरिजिनल पोस्ट्स रीस्टोर करें"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-purple-700" />
+                <span>पिछला डेटा व पोस्ट्स लाएं (Restore Data)</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={handlePurgeAllDemoData}
                 className="px-4 py-2.5 rounded-2xl text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
                 title="सभी डिफ़ॉल्ट डेमो पोस्ट्स हटाएं"
@@ -1483,8 +1517,29 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           </div>
 
           {/* Content Cards Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {filteredContent.map((item) => {
+          {filteredContent.length === 0 ? (
+            <div className="p-8 sm:p-12 text-center glass-card rounded-3xl border-2 border-dashed border-purple-200 space-y-4 shadow-sm my-6">
+              <div className="p-3.5 w-fit mx-auto rounded-2xl bg-pink-100 text-pink-600">
+                <Film className="w-8 h-8" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-black text-purple-950">कोई पोस्ट नहीं मिली (No Content Items Found)</h3>
+                <p className="text-xs text-purple-900/70 max-w-md mx-auto font-medium">
+                  यदि आपके पिछले पोस्ट हट गए हैं या डेटा खाली दिख रहा है, तो नीचे दिए गए बटन पर क्लिक करके सभी पुराने 8 पोस्ट और डेटा तुरंत रीस्टोर करें।
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleRestoreAllOriginalData}
+                className="glow-pink-btn px-6 py-3 rounded-2xl text-xs font-black text-white inline-flex items-center gap-2 shadow-lg cursor-pointer"
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span>🔄 पिछला सारा डेटा व 8 पोस्ट्स वापस लाएं (Restore All Content)</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {filteredContent.map((item) => {
               const isSelected = selectedContentIds.includes(item.id);
               return (
                 <div
@@ -1594,6 +1649,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               );
             })}
           </div>
+        )}
 
         </div>
       )}
@@ -1625,517 +1681,26 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       )}
 
       {/* ---------------------------------------------------- */}
-      {/* TAB 4: ORDERS MANAGEMENT */}
+      {/* TAB 4: ORDERS & PAYMENT MANAGEMENT (AUDIT & SCREENSHOTS) */}
       {/* ---------------------------------------------------- */}
       {activeTab === 'orders' && (
-        <div className="space-y-6 animate-in fade-in duration-200">
-          
-          {/* Pending Verification Notice Banner */}
-          {ordersList.filter(o => o.status === 'waiting_verification').length > 0 && (
-            <div className="p-4 rounded-3xl bg-amber-500/15 border-2 border-amber-400 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 rounded-2xl bg-amber-400 text-amber-950 font-black shrink-0">
-                  <ShieldAlert className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="text-xs sm:text-sm font-black text-amber-950">
-                    {ordersList.filter(o => o.status === 'waiting_verification').length} Payment(s) Waiting For Verification!
-                  </h4>
-                  <p className="text-[11px] text-amber-900/80 font-medium">
-                    ग्राहकों ने UTR सबमिट किया है। अपने PhonePe / Bank SMS में UTR चेक करें और <strong>"Approve & Unlock"</strong> दबाएं।
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setOrderStatusFilter('waiting_verification')}
-                className="px-4 py-2 rounded-xl bg-amber-500 text-amber-950 font-black text-xs hover:bg-amber-400 transition-colors shadow-sm whitespace-nowrap"
-              >
-                Show Pending ({ordersList.filter(o => o.status === 'waiting_verification').length})
-              </button>
-            </div>
-          )}
-
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h2 className="font-display font-black text-xl text-purple-950">Payment Orders & UTR Audit</h2>
-              <p className="text-xs text-purple-900/70 font-medium">Track, audit, and approve verified UPI bank transfers.</p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={orderSearch}
-                onChange={(e) => setOrderSearch(e.target.value)}
-                placeholder="Search order ID, title or UTR..."
-                className="bg-white/90 border border-purple-200 rounded-2xl px-3 py-2 text-xs text-purple-950 placeholder-purple-900/40 focus:outline-none focus:border-pink-500 shadow-sm font-medium"
-              />
-
-              <select
-                value={orderStatusFilter}
-                onChange={(e) => setOrderStatusFilter(e.target.value)}
-                className="bg-white/90 border border-purple-200 rounded-2xl px-3 py-2 text-xs text-purple-950 shadow-sm font-semibold"
-              >
-                <option value="all">All Statuses ({ordersList.length})</option>
-                <option value="waiting_verification">⏳ Review UTR ({ordersList.filter(o => o.status === 'waiting_verification').length})</option>
-                <option value="paid">✅ Paid ({ordersList.filter(o => o.status === 'paid').length})</option>
-                <option value="pending">🕒 Pending ({ordersList.filter(o => o.status === 'pending').length})</option>
-                <option value="failed">❌ Failed / Rejected ({ordersList.filter(o => o.status === 'failed').length})</option>
-                <option value="expired">⌛ Expired ({ordersList.filter(o => o.status === 'expired').length})</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="glass-card rounded-3xl overflow-hidden border border-white/80 shadow-lg">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-purple-100 bg-white/60 text-purple-900/60 uppercase text-[10px] font-black">
-                    <th className="py-3 px-4">Order ID</th>
-                    <th className="py-3 px-4">👤 Customer (Lead)</th>
-                    <th className="py-3 px-4">Content</th>
-                    <th className="py-3 px-4">Amount</th>
-                    <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-4">📸 Receipt / Screenshot</th>
-                    <th className="py-3 px-4">Submitted UTR / Ref</th>
-                    <th className="py-3 px-4">Created</th>
-                    <th className="py-3 px-4 text-right">Verification Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-purple-100">
-                  {filteredOrders.length === 0 ? (
-                    <tr>
-                      <td colSpan={9} className="text-center py-8 text-purple-900/40 font-medium">
-                        No orders matching filters.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredOrders.map((o) => (
-                      <tr
-                        key={o.orderId}
-                        className={
-                          o.status === 'waiting_verification'
-                            ? 'bg-amber-50/60 hover:bg-amber-50 font-semibold'
-                            : 'hover:bg-purple-50/50'
-                        }
-                      >
-                        <td className="py-3.5 px-4 font-mono font-bold text-pink-700">
-                          {o.orderId}
-                        </td>
-                        <td className="py-3.5 px-4">
-                          {o.customerName || o.customerPhone ? (
-                            <div className="space-y-0.5">
-                              <div className="font-bold text-purple-950 flex items-center gap-1 text-[11px]">
-                                <User className="w-3 h-3 text-pink-600" />
-                                <span>{o.customerName || 'VIP Buyer'}</span>
-                              </div>
-                              {o.customerPhone && (
-                                <a
-                                  href={`https://wa.me/91${o.customerPhone.replace(/[^0-9]/g, '')}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-[11px] text-emerald-700 font-mono font-bold hover:underline flex items-center gap-1 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 w-fit"
-                                  title="WhatsApp पर चैट करें"
-                                >
-                                  <Phone className="w-2.5 h-2.5 text-emerald-600" />
-                                  <span>+91 {o.customerPhone}</span>
-                                </a>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-purple-900/40 text-[11px]">Direct Guest</span>
-                          )}
-                        </td>
-                        <td className="py-3.5 px-4 font-bold text-purple-950 max-w-[160px] truncate">
-                          {o.contentTitle}
-                        </td>
-                        <td className="py-3.5 px-4 font-black text-purple-950">
-                          {formatINR(o.amount)}
-                        </td>
-                        <td className="py-3.5 px-4">
-                          <span
-                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                              o.status === 'paid'
-                                ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                                : o.status === 'waiting_verification'
-                                ? 'bg-amber-200 text-amber-900 border border-amber-300 animate-pulse'
-                                : o.status === 'failed'
-                                ? 'bg-rose-100 text-rose-700 border border-rose-200'
-                                : o.status === 'expired'
-                                ? 'bg-zinc-100 text-zinc-600'
-                                : 'bg-purple-100 text-purple-700 border border-purple-200'
-                            }`}
-                          >
-                            {o.status === 'waiting_verification' ? '⏳ Review UTR' : o.status}
-                          </span>
-                        </td>
-                        <td className="py-3.5 px-4">
-                          {o.screenshotUrl ? (
-                            <button
-                              type="button"
-                              onClick={() => setViewingReceiptOrder(o)}
-                              className="group inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-pink-50 hover:bg-pink-100 border border-pink-200 text-pink-800 text-[11px] font-bold shadow-2xs transition-all cursor-pointer"
-                              title="क्लिक करके पेमेंट स्क्रीनशॉट देखें"
-                            >
-                              <img
-                                src={o.screenshotUrl}
-                                alt="Receipt"
-                                className="w-5 h-5 rounded-md object-cover border border-pink-300"
-                              />
-                              <span>रसीद देखें (View)</span>
-                            </button>
-                          ) : (
-                            <span className="text-purple-900/40 text-[11px] font-medium">—</span>
-                          )}
-                        </td>
-                        <td className="py-3.5 px-4">
-                          {o.transactionRef ? (
-                            <span className="font-mono font-bold text-xs px-2.5 py-1 rounded-lg bg-white border border-purple-200 text-purple-950 shadow-xs">
-                              {o.transactionRef}
-                            </span>
-                          ) : (
-                            <span className="text-purple-900/40 font-mono text-[11px]">—</span>
-                          )}
-                        </td>
-                        <td className="py-3.5 px-4 text-purple-900/60 font-medium text-[11px]">
-                          {new Date(o.createdAt).toLocaleString()}
-                        </td>
-                        <td className="py-3.5 px-4 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            {o.status === 'waiting_verification' ? (
-                              <>
-                                <button
-                                  onClick={() => handleApproveOrder(o.orderId)}
-                                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black shadow-sm flex items-center gap-1 transition-transform active:scale-95 cursor-pointer"
-                                  title="Approve payment & unlock content for user"
-                                >
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  <span>Approve</span>
-                                </button>
-                                <button
-                                  onClick={() => setRejectingOrder(o)}
-                                  className="px-2.5 py-1.5 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-700 text-[11px] font-bold transition-colors cursor-pointer"
-                                  title="Reject fake claim"
-                                >
-                                  <XCircle className="w-3.5 h-3.5" />
-                                  <span>Reject</span>
-                                </button>
-                              </>
-                            ) : o.status === 'pending' ? (
-                              <button
-                                onClick={() => {
-                                  setVerifyingOrder(o);
-                                  setVerifyingTxnRef(`ADMIN_VERIFIED_${Date.now()}`);
-                                }}
-                                className="px-3 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-[11px] font-black shadow-sm transition-transform active:scale-95 cursor-pointer"
-                              >
-                                Verify & Issue
-                              </button>
-                            ) : o.status === 'paid' ? (
-                              <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-black">
-                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                                <span>Paid</span>
-                              </span>
-                            ) : (
-                              <span className="text-[11px] text-purple-900/50 font-medium">
-                                {o.status === 'failed' ? 'Rejected' : 'Closed'}
-                              </span>
-                            )}
-
-                            {/* Delete Order Button */}
-                            <button
-                              type="button"
-                              onClick={() => setDeletingOrder(o)}
-                              className="p-1.5 rounded-xl bg-purple-50 hover:bg-rose-100 text-purple-400 hover:text-rose-600 border border-purple-100 transition-colors cursor-pointer"
-                              title="Delete / Archive Order from database"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-        </div>
+        <PaymentManagementSection
+          ordersList={ordersList}
+          onReload={loadAdminData}
+          showToast={showToast}
+        />
       )}
 
       {/* ---------------------------------------------------- */}
-      {/* TAB: USERS & VIP MEMBERS MANAGEMENT */}
+      {/* TAB 5: USERS & VIP MEMBERS MANAGEMENT (FULL SUITE) */}
       {/* ---------------------------------------------------- */}
       {activeTab === 'users' && (
-        <div className="space-y-6 animate-in fade-in duration-200">
-          
-          {/* Header & Stats Banner */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-3xl bg-white/80 backdrop-blur-xl border border-white/90 shadow-sm">
-            <div>
-              <h2 className="font-display font-black text-xl text-purple-950 flex items-center gap-2">
-                <Users className="w-6 h-6 text-pink-600" />
-                <span>Users & VIP Members Management (यूजर व VIP सदस्य)</span>
-              </h2>
-              <p className="text-xs text-purple-900/70 font-medium mt-0.5">
-                Manage registered users, grant/revoke VIP access, export contacts to CSV, or delete users.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                onClick={() => setShowAddUserModal(true)}
-                className="px-4 py-2.5 rounded-2xl bg-pink-600 hover:bg-pink-500 text-white text-xs font-black shadow-md shadow-pink-600/20 flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
-              >
-                <PlusCircle className="w-4 h-4" />
-                <span>+ Add User / VIP Member</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (vipLeads.length === 0) {
-                    showToast('कोई यूजर उपलब्ध नहीं है (No users to export)', 'info');
-                    return;
-                  }
-                  const csvRows = ['Name,Phone,Email,Tier,Status,RegisteredDate,Notes'];
-                  vipLeads.forEach(l => {
-                    csvRows.push(`"${l.name || 'VIP User'}","${l.phone || ''}","${l.email || ''}","${l.tier || 'Gold VIP'}","${l.vipStatus || 'active'}","${new Date(l.createdAt).toLocaleString()}","${l.notes || ''}"`);
-                  });
-                  const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `users_and_members_${Date.now()}.csv`;
-                  a.click();
-                  URL.revokeObjectURL(url);
-                  showToast('✅ सभी यूजर्स CSV में डाउनलोड हो गए (Exported to CSV)');
-                }}
-                className="px-4 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black shadow-md shadow-emerald-600/20 flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
-              >
-                <Download className="w-4 h-4" />
-                <span>Export CSV</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Quick Metrics */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="glass-card rounded-2xl p-4 border border-white/80 shadow-xs">
-              <span className="text-[11px] text-purple-900/60 font-bold block">Total Registered</span>
-              <span className="text-xl font-black text-purple-950">{vipLeads.length}</span>
-            </div>
-            <div className="glass-card rounded-2xl p-4 border border-amber-200 bg-amber-50/40 shadow-xs">
-              <span className="text-[11px] text-amber-900 font-bold block flex items-center gap-1">
-                <Crown className="w-3.5 h-3.5 text-amber-500" /> Active VIPs
-              </span>
-              <span className="text-xl font-black text-amber-800">
-                {vipLeads.filter(l => l.vipStatus === 'active').length}
-              </span>
-            </div>
-            <div className="glass-card rounded-2xl p-4 border border-white/80 shadow-xs">
-              <span className="text-[11px] text-purple-900/60 font-bold block">Free / Visitors</span>
-              <span className="text-xl font-black text-purple-950">
-                {vipLeads.filter(l => l.vipStatus !== 'active').length}
-              </span>
-            </div>
-            <div className="glass-card rounded-2xl p-4 border border-emerald-200 bg-emerald-50/40 shadow-xs">
-              <span className="text-[11px] text-emerald-900 font-bold block">Orders Linked</span>
-              <span className="text-xl font-black text-emerald-800">
-                {ordersList.length}
-              </span>
-            </div>
-          </div>
-
-          {/* Search and VIP Filter Pills */}
-          <div className="p-4 rounded-3xl bg-white/80 backdrop-blur-xl border border-white/90 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-purple-900/40 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={leadSearch}
-                onChange={(e) => setLeadSearch(e.target.value)}
-                placeholder="Search user by name, phone number, email or tier..."
-                className="w-full bg-white border border-purple-200 rounded-2xl pl-9 pr-3 py-2 text-xs text-purple-950 placeholder-purple-900/40 shadow-xs font-medium"
-              />
-            </div>
-
-            <div className="flex items-center gap-1.5 overflow-x-auto">
-              <button
-                type="button"
-                onClick={() => setUserVipFilter('all')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
-                  userVipFilter === 'all'
-                    ? 'bg-purple-900 text-white'
-                    : 'bg-purple-50 hover:bg-purple-100 text-purple-900'
-                }`}
-              >
-                All Users ({vipLeads.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setUserVipFilter('active')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 ${
-                  userVipFilter === 'active'
-                    ? 'bg-amber-500 text-purple-950 font-black'
-                    : 'bg-amber-50 hover:bg-amber-100 text-amber-900'
-                }`}
-              >
-                <Crown className="w-3 h-3 text-amber-600" />
-                <span>Active VIPs ({vipLeads.filter(l => l.vipStatus === 'active').length})</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setUserVipFilter('free')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
-                  userVipFilter === 'free'
-                    ? 'bg-purple-900 text-white'
-                    : 'bg-purple-50 hover:bg-purple-100 text-purple-900'
-                }`}
-              >
-                Free Members ({vipLeads.filter(l => l.vipStatus !== 'active').length})
-              </button>
-            </div>
-          </div>
-
-          {/* Users Table */}
-          <div className="glass-card rounded-3xl border border-white/80 overflow-hidden shadow-md">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-purple-950">
-                <thead className="bg-purple-100/60 text-purple-950/80 font-black uppercase text-[10px] tracking-wider border-b border-purple-200">
-                  <tr>
-                    <th className="py-3 px-4">User / Member</th>
-                    <th className="py-3 px-4">Phone / WhatsApp</th>
-                    <th className="py-3 px-4">VIP Status & Tier</th>
-                    <th className="py-3 px-4">Registered On</th>
-                    <th className="py-3 px-4 text-center">Toggle VIP</th>
-                    <th className="py-3 px-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-purple-100 bg-white/60">
-                  {filteredUsers.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="py-12 text-center text-purple-900/60 font-medium">
-                        <Users className="w-8 h-8 text-purple-300 mx-auto mb-2" />
-                        No users found matching current filters.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredUsers.map((lead, idx) => {
-                      const cleanPhone = (lead.phone || '').replace(/[^0-9]/g, '');
-                      const waNumber = cleanPhone.startsWith('91') ? cleanPhone : `91${cleanPhone}`;
-                      const isVip = lead.vipStatus === 'active';
-
-                      return (
-                        <tr key={lead.id || idx} className="hover:bg-purple-50/70 transition-colors">
-                          <td className="py-3.5 px-4 font-bold text-purple-950">
-                            <div className="flex items-center gap-2.5">
-                              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-xs shadow-2xs ${
-                                isVip 
-                                  ? 'bg-gradient-to-tr from-amber-400 to-yellow-200 text-purple-950 border border-amber-300' 
-                                  : 'bg-pink-100 text-pink-600 border border-pink-200'
-                              }`}>
-                                {(lead.name || 'U').charAt(0).toUpperCase()}
-                              </div>
-                              <div>
-                                <div className="flex items-center gap-1.5">
-                                  <span className="font-black text-purple-950">{lead.name || 'VIP Member'}</span>
-                                  {isVip && <Crown className="w-3.5 h-3.5 text-amber-500 fill-amber-400" />}
-                                </div>
-                                {lead.email && (
-                                  <span className="text-[10px] text-purple-900/50 block font-normal">{lead.email}</span>
-                                )}
-                              </div>
-                            </div>
-                          </td>
-
-                          <td className="py-3.5 px-4 font-bold text-purple-900 tracking-wide">
-                            {cleanPhone ? (
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-mono text-xs">+91 {cleanPhone.slice(-10)}</span>
-                                <a
-                                  href={`https://wa.me/${waNumber}?text=${encodeURIComponent(`Hello ${lead.name || ''}! Ruma Cute Girl VIP Gallery se aapka VIP account update information.`)}`}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="p-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-600 border border-emerald-200 transition-colors"
-                                  title="WhatsApp Chat"
-                                >
-                                  <MessageCircle className="w-3 h-3" />
-                                </a>
-                              </div>
-                            ) : (
-                              <span className="text-purple-400 text-[11px]">Direct Lead</span>
-                            )}
-                          </td>
-
-                          <td className="py-3.5 px-4">
-                            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border shadow-2xs ${
-                              isVip 
-                                ? 'bg-amber-100 text-amber-900 border-amber-300' 
-                                : 'bg-purple-100 text-purple-800 border-purple-200'
-                            }`}>
-                              {isVip ? (
-                                <>
-                                  <Crown className="w-3 h-3 text-amber-600" />
-                                  <span>{lead.tier || 'Gold VIP'}</span>
-                                </>
-                              ) : (
-                                <span>{lead.tier || 'Free Member'}</span>
-                              )}
-                            </span>
-                          </td>
-
-                          <td className="py-3.5 px-4 text-purple-900/60 font-medium text-[11px]">
-                            {lead.createdAt ? new Date(lead.createdAt).toLocaleDateString() : 'Recent'}
-                          </td>
-
-                          <td className="py-3.5 px-4 text-center">
-                            <button
-                              type="button"
-                              onClick={() => handleToggleUserVip(lead)}
-                              className={`px-3 py-1.5 rounded-xl text-[11px] font-black transition-all active:scale-95 cursor-pointer shadow-2xs ${
-                                isVip
-                                  ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
-                                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200'
-                              }`}
-                              title={isVip ? 'Revoke VIP Status' : 'Grant VIP Status'}
-                            >
-                              {isVip ? 'Revoke VIP' : '👑 Make VIP'}
-                            </button>
-                          </td>
-
-                          <td className="py-3.5 px-4 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
-                              {cleanPhone && (
-                                <a
-                                  href={`tel:+91${cleanPhone.slice(-10)}`}
-                                  className="p-1.5 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 text-xs font-bold transition-colors"
-                                  title="Call user"
-                                >
-                                  <Phone className="w-3.5 h-3.5 text-purple-700" />
-                                </a>
-                              )}
-                              
-                              {/* Delete User Button */}
-                              <button
-                                type="button"
-                                onClick={() => setDeletingLead(lead)}
-                                className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-colors cursor-pointer"
-                                title="यूजर को हमेशा के लिए डिलीट करें (Delete user)"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+        <UserManagementSection
+          vipLeads={vipLeads}
+          ordersList={ordersList}
+          onReload={loadAdminData}
+          showToast={showToast}
+        />
       )}
 
       {/* ---------------------------------------------------- */}

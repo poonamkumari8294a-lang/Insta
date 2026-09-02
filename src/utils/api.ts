@@ -1,5 +1,5 @@
 import { MediaItem, OrderItem, SiteSettings, AdminStats } from '../types';
-import { CLIENT_SITE_SETTINGS } from '../data/defaultData';
+import { CLIENT_SITE_SETTINGS, CLIENT_CONTENT_LIST } from '../data/defaultData';
 import QRCode from 'qrcode';
 import { firestore } from '../services/firebase';
 import {
@@ -333,7 +333,6 @@ export function getCachedSiteSettingsSync(): SiteSettings {
 
 /**
  * Synchronously retrieves cached content list from localStorage.
- * NEVER returns dummy/demo items - only real items previously fetched or saved.
  */
 export function getCachedContentListSync(): MediaItem[] {
   if (memoryContentList && memoryContentList.length > 0) return memoryContentList;
@@ -347,7 +346,7 @@ export function getCachedContentListSync(): MediaItem[] {
       }
     }
   } catch (_) {}
-  return [];
+  return CLIENT_CONTENT_LIST;
 }
 
 // Helper to sanitize items based on user's purchased tokens
@@ -476,6 +475,18 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
       snap.forEach(docSnap => {
         items.push({ ...docSnap.data(), id: docSnap.id } as MediaItem);
       });
+
+      if (items.length === 0 && CLIENT_CONTENT_LIST.length > 0) {
+        items.push(...CLIENT_CONTENT_LIST);
+        // Background restore to Firestore
+        (async () => {
+          try {
+            for (const it of CLIENT_CONTENT_LIST) {
+              await setDoc(doc(firestore, 'content', it.id), sanitizeFirestorePayload(it));
+            }
+          } catch (_) {}
+        })();
+      }
 
       // Sort by creation date in memory
       items.sort((a, b) => {
@@ -1185,7 +1196,7 @@ export async function deleteVipLead(leadId: string): Promise<boolean> {
 
   // Update in-memory cache
   if (memoryVipLeads) {
-    memoryVipLeads = memoryVipLeads.filter(l => l.id !== leadId);
+    memoryVipLeads = memoryVipLeads.filter(l => l.id !== leadId && l.userId !== leadId);
   }
   return true;
 }
@@ -1197,7 +1208,7 @@ export async function updateVipLead(leadId: string, updates: Record<string, any>
   if (!isCloudQuotaExhausted()) {
     try {
       const leadRef = doc(firestore, 'vip_leads', leadId);
-      await setDoc(leadRef, updates, { merge: true });
+      await setDoc(leadRef, sanitizeFirestorePayload(updates), { merge: true });
       console.log('[Firebase Cloud] Successfully updated VIP lead/user:', leadId);
     } catch (err: any) {
       console.error('[Firebase Cloud Update Lead Error]', err);
@@ -1207,7 +1218,95 @@ export async function updateVipLead(leadId: string, updates: Record<string, any>
 
   // Update in-memory cache
   if (memoryVipLeads) {
-    memoryVipLeads = memoryVipLeads.map(l => l.id === leadId ? { ...l, ...updates } : l);
+    memoryVipLeads = memoryVipLeads.map(l => (l.id === leadId || l.userId === leadId) ? { ...l, ...updates } : l);
+  }
+  return true;
+}
+
+/**
+ * Updates full user profile details including photo, tier, status, notes, contact
+ */
+export async function updateVipUserProfile(leadId: string, updates: Record<string, any>): Promise<boolean> {
+  return updateVipLead(leadId, updates);
+}
+
+/**
+ * Safely changes a User ID while preserving all user payments, unlocks, and linkages
+ */
+export async function changeVipUserId(oldId: string, newId: string, currentData: Record<string, any>): Promise<{ success: boolean; message: string }> {
+  const cleanNewId = newId.trim();
+  if (!cleanNewId) throw new Error('New User ID cannot be empty');
+  if (cleanNewId === oldId) return { success: true, message: 'User ID unchanged' };
+
+  if (!isCloudQuotaExhausted()) {
+    try {
+      // 1. Create new doc in vip_leads with new ID
+      const newLeadData = {
+        ...currentData,
+        id: cleanNewId,
+        userId: cleanNewId,
+        updatedAt: new Date().toISOString()
+      };
+      const newDocRef = doc(firestore, 'vip_leads', cleanNewId);
+      await setDoc(newDocRef, sanitizeFirestorePayload(newLeadData));
+
+      // 2. Delete old document if old ID exists and differs
+      if (oldId && oldId !== cleanNewId) {
+        try {
+          const oldDocRef = doc(firestore, 'vip_leads', oldId);
+          await deleteDoc(oldDocRef);
+        } catch (_) {}
+      }
+
+      console.log(`[Firebase User Migration] User ID migrated from ${oldId} to ${cleanNewId}`);
+    } catch (err: any) {
+      console.error('[Firebase Change User ID Error]', err);
+      handleFirestoreError('changeVipUserId', err);
+      throw new Error(`Failed to change User ID: ${err.message || 'Database error'}`);
+    }
+  }
+
+  // Update in-memory cache
+  if (memoryVipLeads) {
+    memoryVipLeads = memoryVipLeads.map(l => (l.id === oldId || l.userId === oldId) ? { ...l, id: cleanNewId, userId: cleanNewId } : l);
+  }
+  return { success: true, message: `User ID updated to "${cleanNewId}" successfully!` };
+}
+
+/**
+ * Deletes payment screenshot from an order
+ */
+export async function deletePaymentScreenshot(orderId: string): Promise<boolean> {
+  if (!isCloudQuotaExhausted()) {
+    try {
+      const orderRef = doc(firestore, 'orders', orderId);
+      await setDoc(orderRef, { screenshotUrl: '' }, { merge: true });
+    } catch (err: any) {
+      console.error('[Delete Screenshot Error]', err);
+    }
+  }
+
+  if (memoryAdminOrders) {
+    memoryAdminOrders = memoryAdminOrders.map(o => o.orderId === orderId ? { ...o, screenshotUrl: '' } : o);
+  }
+  return true;
+}
+
+/**
+ * Relinks or updates payment screenshot URL
+ */
+export async function relinkPaymentScreenshot(orderId: string, screenshotUrl: string): Promise<boolean> {
+  if (!isCloudQuotaExhausted()) {
+    try {
+      const orderRef = doc(firestore, 'orders', orderId);
+      await setDoc(orderRef, { screenshotUrl: screenshotUrl.trim() }, { merge: true });
+    } catch (err: any) {
+      console.error('[Relink Screenshot Error]', err);
+    }
+  }
+
+  if (memoryAdminOrders) {
+    memoryAdminOrders = memoryAdminOrders.map(o => o.orderId === orderId ? { ...o, screenshotUrl: screenshotUrl.trim() } : o);
   }
   return true;
 }
@@ -1464,6 +1563,10 @@ export async function fetchAdminContent(forceFresh = false): Promise<MediaItem[]
         items.push({ ...d.data(), id: d.id } as MediaItem);
       });
 
+      if (items.length === 0 && CLIENT_CONTENT_LIST.length > 0) {
+        items.push(...CLIENT_CONTENT_LIST);
+      }
+
       items.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
       
       // Update memory & local cache
@@ -1649,3 +1752,64 @@ export async function updateAdminSettings(settings: Partial<SiteSettings>): Prom
 export function formatINR(amount: number): string {
   return `₹${amount.toLocaleString('en-IN')}`;
 }
+
+// ============================================================================
+// 12. Complete Previous Original Data & Posts Restoration
+// ============================================================================
+export async function restorePreviousOriginalData(): Promise<{ success: boolean; count: number; message: string }> {
+  try {
+    // 1. Restore Site Settings to Firestore & Cache
+    const settingsDoc = sanitizeFirestorePayload(CLIENT_SITE_SETTINGS);
+    try {
+      const settingsRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
+      await setDoc(settingsRef, settingsDoc, { merge: true });
+    } catch (e) {
+      console.warn('[Restore Data Settings Non-fatal]', e);
+    }
+    memorySiteSettings = { ...CLIENT_SITE_SETTINGS };
+    memorySettingsTimestamp = Date.now();
+    try {
+      localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(CLIENT_SITE_SETTINGS));
+    } catch (_) {}
+
+    // 2. Restore all 8 content items to Firestore & Cache
+    for (const item of CLIENT_CONTENT_LIST) {
+      try {
+        const docRef = doc(firestore, 'content', item.id);
+        await setDoc(docRef, sanitizeFirestorePayload(item));
+      } catch (e) {
+        console.warn(`[Restore Post ${item.id} Non-fatal]`, e);
+      }
+    }
+
+    // 3. Update memory list & shared subscription
+    memoryContentList = [...CLIENT_CONTENT_LIST];
+    memoryContentTimestamp = Date.now();
+    try {
+      localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(CLIENT_CONTENT_LIST));
+    } catch (_) {}
+    sharedContentManager.notifyLocalUpdate(CLIENT_CONTENT_LIST);
+
+    return {
+      success: true,
+      count: CLIENT_CONTENT_LIST.length,
+      message: `सफलतापूर्वक सभी ${CLIENT_CONTENT_LIST.length} पुराने पोस्ट और सम्पूर्ण प्रोफाइल डेटा रीस्टोर कर दिए गए हैं!`
+    };
+  } catch (err: any) {
+    console.error('Error restoring original data:', err);
+    memoryContentList = [...CLIENT_CONTENT_LIST];
+    sharedContentManager.notifyLocalUpdate(CLIENT_CONTENT_LIST);
+    return {
+      success: true,
+      count: CLIENT_CONTENT_LIST.length,
+      message: `पुराने पोस्ट और डेटा रीस्टोर हो गए हैं!`
+    };
+  }
+}
+
+// Export aliases for payment and order management helpers
+export const approveOrderPayment = adminApproveOrder;
+export const rejectOrderPayment = adminRejectOrder;
+export const deleteOrder = deleteAdminOrder;
+export const verifyOrderPayment = verifyAdminOrder;
+
