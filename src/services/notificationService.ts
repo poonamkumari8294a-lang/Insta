@@ -228,25 +228,39 @@ export async function saveTokenToFirestore(token: string): Promise<void> {
   }
 }
 
+let cachedSubscriberCount: number | null = null;
+let lastSubscriberCountTime = 0;
+const SUBSCRIBER_COUNT_TTL = 5 * 60 * 1000; // 5 minutes cache
+
 /**
  * Get Total Active Subscriber Count efficiently without downloading all token documents
  */
-export async function getActiveSubscribersCount(): Promise<number> {
-  if (isCloudQuotaExhausted()) return 0;
+export async function getActiveSubscribersCount(forceFresh = false): Promise<number> {
+  const now = Date.now();
+  if (!forceFresh && cachedSubscriberCount !== null && (now - lastSubscriberCountTime < SUBSCRIBER_COUNT_TTL)) {
+    return cachedSubscriberCount;
+  }
+  if (isCloudQuotaExhausted()) return cachedSubscriberCount || 0;
   try {
     const tokensRef = collection(firestore, 'notificationTokens');
     const q = query(tokensRef, where('enabled', '==', true));
     const snapshot = await getCountFromServer(q);
-    return snapshot.data().count;
+    const count = snapshot.data().count;
+    cachedSubscriberCount = count;
+    lastSubscriberCountTime = Date.now();
+    return count;
   } catch (err) {
     console.warn('[FCM] getCountFromServer error, falling back:', err);
     try {
-      if (isCloudQuotaExhausted()) return 0;
+      if (isCloudQuotaExhausted()) return cachedSubscriberCount || 0;
       const tokensRef = collection(firestore, 'notificationTokens');
       const snap = await getDocs(tokensRef);
-      return snap.size;
+      const count = snap.size;
+      cachedSubscriberCount = count;
+      lastSubscriberCountTime = Date.now();
+      return count;
     } catch {
-      return 0;
+      return cachedSubscriberCount || 0;
     }
   }
 }

@@ -201,14 +201,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         fetchSiteSettings(true),
         fetchVipLeads()
       ]);
-      const validContent = contentData && contentData.length > 0 ? contentData : (initialContent && initialContent.length > 0 ? initialContent : []);
+      const validContent = Array.isArray(contentData) ? contentData : [];
       const validSettings = settingsData || initialSettings;
 
       const statsData = await fetchAdminStats(validContent, ordersData, validSettings);
       setStats(statsData);
       setOrdersList(ordersData);
       setContentList(validContent);
-      if (validSettings) setSiteSettings(validSettings);
+      if (onContentUpdated) onContentUpdated(validContent);
+      if (validSettings) {
+        setSiteSettings(validSettings);
+        if (onSettingsUpdated) onSettingsUpdated(validSettings);
+      }
       setVipLeads(leadsData);
 
       // Load push subscriber count
@@ -317,7 +321,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       }
     } catch (err: any) {
       showToast(err.message || 'Failed to save content', 'error');
-      loadAdminData();
     }
   };
 
@@ -354,7 +357,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       await deleteAdminContent(targetId);
     } catch (err: any) {
       showToast(err.message || 'डिलीट करने में विफल (Failed to delete)', 'error');
-      await loadAdminData();
     } finally {
       setIsDeleting(false);
     }
@@ -372,7 +374,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       setContentList(nextList);
       if (onContentUpdated) onContentUpdated(nextList);
       showToast(`✨ ${res.message}`);
-      await loadAdminData();
     } catch (err: any) {
       showToast(err.message || 'डेमो हटाने में विफल', 'error');
     } finally {
@@ -414,7 +415,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       showToast(`🗑️ ${targetIds.length} पोस्ट्स सफलतापूर्वक डिलीट हो गईं`);
     } catch (err: any) {
       showToast(err.message || 'Bulk delete failed', 'error');
-      await loadAdminData();
     } finally {
       setBulkActionLoading(false);
     }
@@ -436,7 +436,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       showToast(`✅ चुने हुए पोस्ट्स ${publish ? 'पब्लिश' : 'अनपब्लिश'} कर दिए गए`);
     } catch (err: any) {
       showToast(err.message || 'Bulk publish update failed', 'error');
-      await loadAdminData();
     } finally {
       setBulkActionLoading(false);
     }
@@ -458,7 +457,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       showToast(`⭐ चुने हुए पोस्ट्स होमपेज पर ${featured ? 'फीचर' : 'हटाए'} गए`);
     } catch (err: any) {
       showToast(err.message || 'Bulk feature update failed', 'error');
-      await loadAdminData();
     } finally {
       setBulkActionLoading(false);
     }
@@ -468,11 +466,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     if (!verifyingOrder) return;
     const txn = verifyingTxnRef.trim() || `ADMIN_VERIFIED_${Date.now()}`;
     try {
-      await verifyAdminOrder(verifyingOrder.orderId, txn);
+      const updated = await verifyAdminOrder(verifyingOrder.orderId, txn);
+      const nextOrders = ordersList.map(o => o.orderId === verifyingOrder.orderId ? updated : o);
+      setOrdersList(nextOrders);
       showToast('✅ आर्डर मार्क हुआ PAID और कंटेंट अनलॉक हो गया!');
       setVerifyingOrder(null);
       setVerifyingTxnRef('');
-      loadAdminData();
     } catch (err: any) {
       showToast(err.message || 'Failed to verify order', 'error');
     }
@@ -481,9 +480,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const handleApproveOrder = async (orderId: string) => {
     try {
       const res = await adminApproveOrder(orderId);
-      if (res.success) {
+      if (res.success && res.order) {
+        const nextOrders = ordersList.map(o => o.orderId === orderId ? res.order! : o);
+        setOrdersList(nextOrders);
         showToast('✅ पेमेंट स्वीकार! ग्राहक के लिए कंटेंट तुरंत अनलॉक कर दिया गया।');
-        loadAdminData();
       } else {
         showToast(res.error || 'Failed to approve order', 'error');
       }
@@ -497,9 +497,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     try {
       const res = await adminRejectOrder(rejectingOrder.orderId, 'Payment not received in bank / Invalid UTR');
       if (res.success) {
+        const nextOrders = ordersList.map(o => o.orderId === rejectingOrder.orderId ? { ...o, status: 'failed' as const } : o);
+        setOrdersList(nextOrders);
         showToast('❌ आर्डर अस्वीकार (Order rejected)', 'info');
         setRejectingOrder(null);
-        loadAdminData();
       } else {
         showToast(res.error || 'Failed to reject order', 'error');
       }

@@ -28,11 +28,25 @@ const dbId = firebaseConfigData.firestoreDatabaseId && firebaseConfigData.firest
 
 function getFirestoreInstance(): Firestore {
   try {
-    return initializeFirestore(firebaseApp, {
+    const instance = initializeFirestore(firebaseApp, {
       experimentalAutoDetectLongPolling: true
     }, dbId);
+    console.log('[FIREBASE CONFIG]', {
+      projectId: firebaseConfigData.projectId,
+      databaseId: dbId || '(default)',
+      storageBucket: firebaseConfigData.storageBucket,
+      mode: 'initializeFirestore'
+    });
+    return instance;
   } catch (_err) {
-    return dbId ? getFirestore(firebaseApp, dbId) : getFirestore(firebaseApp);
+    const fallback = dbId ? getFirestore(firebaseApp, dbId) : getFirestore(firebaseApp);
+    console.log('[FIREBASE CONFIG]', {
+      projectId: firebaseConfigData.projectId,
+      databaseId: dbId || '(default)',
+      storageBucket: firebaseConfigData.storageBucket,
+      mode: 'getFirestore-fallback'
+    });
+    return fallback;
   }
 }
 

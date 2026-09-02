@@ -111,17 +111,18 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
 
     try {
       if (isImageFile) {
-        // Fast, zero-copy Image compression to Blob
-        const { blob, mimeType } = await compressImageToBlob(file, 1920, 1920, 0.85);
+        setUploadStatus('फ़ोटो ऑप्टिमाइज़ हो रही है...');
+        // Fast, zero-copy Image compression to Blob with hardware acceleration
+        const { blob, mimeType } = await compressImageToBlob(file, 1600, 1600, 0.82);
         
-        setUploadStatus('Firebase Storage में अपलोड हो रहा है...');
+        setUploadStatus('Firebase Storage से कनेक्ट हो रहा है...');
         const uploadResult = await uploadFileToStorage(
           blob,
           determinedFolder,
           `img_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${mimeType.includes('webp') ? 'webp' : 'jpg'}`,
-          (pct) => {
+          (pct, statusText) => {
             setUploadProgress(pct);
-            setUploadStatus(`Firebase Storage में अपलोड हो रहा है (${pct}%)...`);
+            setUploadStatus(statusText);
           }
         );
 
@@ -160,14 +161,14 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
         })();
 
         // Start video upload right away
-        setUploadStatus('Firebase Storage में वीडियो अपलोड हो रहा है...');
+        setUploadStatus('Firebase Storage से कनेक्ट हो रहा है...');
         const uploadResult = await uploadFileToStorage(
           file,
           'videos',
           `video_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`,
-          (pct) => {
+          (pct, statusText) => {
             setUploadProgress(pct);
-            setUploadStatus(`Firebase Storage में वीडियो अपलोड हो रहा है (${pct}%)...`);
+            setUploadStatus(statusText);
           }
         );
 
@@ -188,9 +189,9 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({
           file,
           'documents',
           `doc_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`,
-          (pct) => {
+          (pct, statusText) => {
             setUploadProgress(pct);
-            setUploadStatus(`Firebase Storage में दस्तावेज़ अपलोड हो रहा है (${pct}%)...`);
+            setUploadStatus(statusText);
           }
         );
 

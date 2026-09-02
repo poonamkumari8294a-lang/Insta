@@ -2,12 +2,13 @@ import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { MediaItem, SiteSettings } from './types';
 import {
   fetchSiteSettings,
-  fetchContentList,
+  subscribeToContentList,
   getCachedSiteSettingsSync,
   getCachedContentListSync,
   getStoredTokens,
   hasLocalSettingsCache,
-  isCloudQuotaExhausted
+  isCloudQuotaExhausted,
+  resetQuotaCircuitBreaker
 } from './utils/api';
 import { Header } from './components/Header';
 import { Footer } from './components/Footer';
@@ -125,60 +126,52 @@ export default function App() {
     setIsShareModalOpen(true);
   };
 
-  // Initial Data Load & Background Refresh
-  const loadData = async (silent = false) => {
-    if (!silent) setLoading(true);
+  // Manual Refresh / Initial Data Load
+  const loadData = async (force = false) => {
     setError(null);
     try {
       refreshTokens();
-      const [settingsData, contentData] = await Promise.all([
-        fetchSiteSettings(true),
-        fetchContentList(true)
-      ]);
+      const settingsData = await fetchSiteSettings(force);
       setSettings(settingsData);
-      setContent(contentData);
     } catch (err: any) {
-      console.warn('App sync error:', err);
-      if (!silent) setError(err.message || 'Failed to connect to backend service');
+      console.warn('App settings sync:', err);
+      if (!initialHasCache) {
+        setError(err.message || 'Connecting to server...');
+      }
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    // Initial fetch from live Firestore
-    loadData(!initialHasCache ? false : true);
+    // 1. Initial settings fetch with caching
+    loadData(false);
 
-    // Smart visibility listener: Refresh only when user returns to app and screen is active
-    let lastRefreshTime = Date.now();
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && Date.now() - lastRefreshTime > 60000) {
-        lastRefreshTime = Date.now();
-        loadData(true);
+    // 2. Real-time content synchronization via Singleton Shared Listener
+    const unsubscribeContent = subscribeToContentList(
+      (items) => {
+        setContent(items);
+        setLoading(false);
+        setError(null);
+      },
+      (err) => {
+        console.warn('Content subscription fallback active:', err?.message || err);
+        setLoading(false);
       }
-    };
+    );
 
-    // Periodic silent refresh (throttled to 5 minutes to prevent Firestore quota exhaustion)
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible' && !isCloudQuotaExhausted()) {
-        lastRefreshTime = Date.now();
-        loadData(true);
-      }
-    }, 300000);
-
-    // Listen for hash & URL changes (e.g. typing #admin in URL bar)
+    // 3. Listen for hash & URL changes
     const handleUrlChange = () => {
       const { route, mediaId } = getRouteFromUrl();
       setCurrentRoute(route);
       if (mediaId) setSelectedMediaId(mediaId);
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('hashchange', handleUrlChange);
     window.addEventListener('popstate', handleUrlChange);
+
     return () => {
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      unsubscribeContent();
       window.removeEventListener('hashchange', handleUrlChange);
       window.removeEventListener('popstate', handleUrlChange);
     };
@@ -186,9 +179,6 @@ export default function App() {
 
   // Handle URL changes & browser history
   const navigateTo = (route: string, mediaId?: string) => {
-    if (currentRoute === 'admin' && route !== 'admin') {
-      loadData(true);
-    }
     setCurrentRoute(route);
     if (mediaId) {
       setSelectedMediaId(mediaId);
@@ -234,7 +224,7 @@ export default function App() {
   const unlockedIds = Object.keys(unlockedTokens);
   const unlockedItems = content.filter((c) => unlockedIds.includes(c.id) || c.access === 'free');
 
-  if (loading && !settings) {
+  if (loading && !settings && content.length === 0) {
     return (
       <div className="min-h-screen bg-[#fdf2f8] flex flex-col items-center justify-center p-4 relative overflow-hidden">
         {/* Floating Frosted Ambient Blurs */}
@@ -248,21 +238,28 @@ export default function App() {
             </div>
           </div>
           <h2 className="font-display font-black text-xl text-purple-950">Loading VIP Gallery</h2>
-          <p className="text-xs text-purple-900/70 font-medium">Connecting to instant payment server & media vault...</p>
+          <p className="text-xs text-purple-900/70 font-medium">Connecting to live cloud server & media vault...</p>
         </div>
       </div>
     );
   }
 
-  if (error && !settings) {
+  if (error && !settings && content.length === 0) {
     return (
       <div className="min-h-screen bg-[#fdf2f8] flex flex-col items-center justify-center p-4">
-        <div className="glass-card rounded-3xl p-8 max-w-md text-center space-y-4 border border-rose-200">
-          <h2 className="font-display font-black text-xl text-rose-900">Connection Error</h2>
-          <p className="text-xs text-rose-800">{error}</p>
+        <div className="glass-card rounded-3xl p-8 max-w-md text-center space-y-4 border border-rose-200 shadow-xl">
+          <h2 className="font-display font-black text-xl text-purple-950">Cloud Data Temporarily Unavailable</h2>
+          <p className="text-xs text-purple-900/70">
+            {isCloudQuotaExhausted()
+              ? 'डेटाबेस कोटा सीमा समाप्त हो गई है। कृपया थोड़ी देर बाद पुनः प्रयास करें।'
+              : (error || 'Failed to connect to cloud server.')}
+          </p>
           <button
-            onClick={loadData}
-            className="glow-pink-btn px-6 py-2.5 rounded-xl text-xs font-bold text-white flex items-center gap-2 mx-auto"
+            onClick={() => {
+              resetQuotaCircuitBreaker();
+              loadData(true);
+            }}
+            className="glow-pink-btn px-6 py-2.5 rounded-xl text-xs font-bold text-white flex items-center gap-2 mx-auto cursor-pointer"
           >
             <RefreshCw className="w-4 h-4" />
             <span>Retry Connection</span>
@@ -376,124 +373,92 @@ export default function App() {
               initialContent={content}
               initialSettings={settings}
               onBackToSite={() => {
-                loadData(true);
                 navigateTo('home');
-              }}
-              onSettingsUpdated={(newSettings) => {
-                setSettings(newSettings);
-                loadData(true);
               }}
               onContentUpdated={(newContent) => {
                 setContent(newContent);
-                loadData(true);
+              }}
+              onSettingsUpdated={(newSettings) => {
+                setSettings(newSettings);
               }}
             />
           </Suspense>
         )}
       </main>
 
-      {/* Live Social Proof Real-Time Unlock Activity Toast */}
-      {content.length > 0 && currentRoute !== 'admin' && !purchasingItem && (
-        <LiveUnlockActivityToast
-          items={content}
-          onItemClick={(item) => handleBuyMedia(item)}
-        />
+      {/* Main Global Footer */}
+      {settings && currentRoute !== 'admin' && (
+        <Footer settings={settings} onNavigate={(route) => navigateTo(route)} />
       )}
 
-      {/* Footer */}
-      {settings && (
-        <Footer
-          settings={settings}
+      {/* Floating Bottom Nav for One-Thumb Mobile Use */}
+      {currentRoute !== 'admin' && (
+        <BottomMobileNav
+          activeTab={currentRoute}
           onNavigate={(route) => navigateTo(route)}
+          unlockedCount={unlockedIds.length}
+          onOpenPurchased={() => setIsPurchasedDrawerOpen(true)}
         />
       )}
 
-      {/* Bottom Floating Mobile Navigation */}
-      <BottomMobileNav
-        activeTab={currentRoute}
-        unlockedCount={unlockedIds.length}
-        onNavigate={(route) => navigateTo(route)}
-        onOpenPurchases={() => setIsPurchasedDrawerOpen(true)}
-        onOpenShare={() => handleOpenShare(null)}
-      />
-
-      {/* Lazy Loaded Modals & Drawers */}
+      {/* Modals and Overlays */}
       <Suspense fallback={null}>
-        {/* Payment Checkout Modal (UPI Dynamic QR) */}
         {purchasingItem && (
           <PaymentModal
             item={purchasingItem}
+            isOpen={Boolean(purchasingItem)}
             onClose={() => setPurchasingItem(null)}
             onSuccess={handlePaymentSuccess}
           />
         )}
 
-        {/* Media Fullscreen Viewer Modal */}
-        {settings && activeMediaItem && (
+        {activeMediaItem && (
           <MediaModal
             item={activeMediaItem}
+            isOpen={Boolean(activeMediaItem)}
             onClose={() => setActiveMediaItem(null)}
-            creatorName={settings.creatorName}
+            onBuy={handleBuyMedia}
+            isUnlocked={unlockedIds.includes(activeMediaItem.id)}
           />
         )}
 
-        {/* Share Modal (Social links, WhatsApp, Instagram, Telegram, QR code download) */}
-        {isShareModalOpen && (
-          <ShareModal
-            isOpen={isShareModalOpen}
-            onClose={() => setIsShareModalOpen(false)}
-            item={shareItem}
-            settings={settings}
-          />
-        )}
-
-        {/* My Unlocks Slide-over Drawer */}
         {isPurchasedDrawerOpen && (
           <PurchasedDrawer
             isOpen={isPurchasedDrawerOpen}
             onClose={() => setIsPurchasedDrawerOpen(false)}
             unlockedItems={unlockedItems}
-            onOpenItem={(item) => {
-              setIsPurchasedDrawerOpen(false);
-              handleOpenMedia(item);
-            }}
-            onExplore={() => {
-              setIsPurchasedDrawerOpen(false);
-              navigateTo('content');
-            }}
+            onOpenMedia={handleOpenMedia}
+          />
+        )}
+
+        {isShareModalOpen && (
+          <ShareModal
+            isOpen={isShareModalOpen}
+            onClose={() => setIsShareModalOpen(false)}
+            item={shareItem}
           />
         )}
       </Suspense>
 
-      {/* Web Push Notification Opt-in Prompt (Non-intrusive, only on public user views) */}
-      {currentRoute !== 'admin' && (
-        <NotificationPermissionBanner
-          vapidKey={settings?.vapidKey}
-          onSubscribed={(token) => {
-            console.log('[App] Push token registered:', token);
-          }}
-        />
-      )}
+      {/* Web Push Notification Opt-in Prompt Banner */}
+      {settings && <NotificationPermissionBanner settings={settings} />}
 
-      {/* Foreground Notification In-App Alert Toast */}
-      {foregroundNotification && (
-        <ForegroundNotificationToast
-          notification={foregroundNotification}
-          onClose={() => setForegroundNotification(null)}
-          onNavigate={(url) => {
-            if (url.includes('#media/')) {
-              const id = url.split('#media/')[1];
-              navigateTo('detail', id);
-            } else if (url.includes('#detail/')) {
-              const id = url.split('#detail/')[1];
-              navigateTo('detail', id);
-            } else {
-              navigateTo('home');
-            }
-          }}
-        />
-      )}
+      {/* Foreground Notification Toast Popups */}
+      <ForegroundNotificationToast
+        notification={foregroundNotification}
+        onClose={() => setForegroundNotification(null)}
+        onNavigate={(url) => {
+          if (url.includes('#media/')) {
+            const mediaId = url.split('#media/')[1];
+            navigateTo('detail', mediaId);
+          } else {
+            navigateTo('content');
+          }
+        }}
+      />
 
+      {/* Live Unlock Activity Social Proof Toasts */}
+      {currentRoute !== 'admin' && <LiveUnlockActivityToast content={content} />}
     </div>
   );
 }

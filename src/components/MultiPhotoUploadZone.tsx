@@ -73,8 +73,8 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
     setProcessingProgress(`Cloud में ${total} फ़ोटो अपलोड हो रही हैं...`);
 
     try {
-      // Controlled Parallel Concurrency (3 files at once)
-      const CONCURRENCY = 3;
+      // Controlled Parallel Concurrency (up to 4 files at once for optimal throughput)
+      const CONCURRENCY = 4;
       const fileProgressMap = new Array<number>(total).fill(0);
       const successfulUrls: string[] = [];
       const failedIndices: number[] = [];
@@ -89,8 +89,8 @@ export const MultiPhotoUploadZone: React.FC<MultiPhotoUploadZoneProps> = ({
 
       const uploadSingleFile = async (file: File, index: number): Promise<string | null> => {
         try {
-          // 1. Fast zero-copy Blob compression
-          const { blob, mimeType } = await compressImageToBlob(file, 1920, 1920, 0.85);
+          // 1. Fast zero-copy Blob compression with hardware acceleration
+          const { blob, mimeType } = await compressImageToBlob(file, 1600, 1600, 0.82);
           
           // 2. Upload to Firebase Storage
           const uploadResult = await uploadFileToStorage(

@@ -1,5 +1,5 @@
 import { MediaItem, OrderItem, SiteSettings, AdminStats } from '../types';
-import { CLIENT_SITE_SETTINGS, CLIENT_CONTENT_LIST } from '../data/defaultData';
+import { CLIENT_SITE_SETTINGS } from '../data/defaultData';
 import QRCode from 'qrcode';
 import { firestore } from '../services/firebase';
 import {
@@ -18,13 +18,60 @@ import {
   updateDoc,
   deleteDoc,
   query,
+  where,
   orderBy,
-  limit as firestoreLimit
+  onSnapshot,
+  limit as firestoreLimit,
+  startAfter,
+  QueryDocumentSnapshot,
+  DocumentData,
+  Unsubscribe
 } from 'firebase/firestore';
 
 const TOKENS_STORAGE_KEY = 'ruma_unlocked_tokens';
 const ORDERS_STORAGE_KEY = 'ruma_user_orders';
 const SESSION_ID_KEY = 'ruma_customer_session_id';
+
+// ============================================================================
+// 0. FIRESTORE READ TRACKER & DIAGNOSTICS (Zero-overhead Quota Telemetry)
+// ============================================================================
+interface FirestoreReadStats {
+  totalReads: number;
+  getDocCount: number;
+  getDocsCount: number;
+  onSnapshotEmissions: number;
+  cachedHits: number;
+  lastReadTime: number;
+}
+
+const readStats: FirestoreReadStats = {
+  totalReads: 0,
+  getDocCount: 0,
+  getDocsCount: 0,
+  onSnapshotEmissions: 0,
+  cachedHits: 0,
+  lastReadTime: 0
+};
+
+export function trackFirestoreRead(type: 'getDoc' | 'getDocs' | 'snapshot' | 'cacheHit', context: string, docsCount = 1) {
+  if (type === 'cacheHit') {
+    readStats.cachedHits++;
+    return;
+  }
+  readStats.totalReads += docsCount;
+  readStats.lastReadTime = Date.now();
+  if (type === 'getDoc') readStats.getDocCount++;
+  else if (type === 'getDocs') readStats.getDocsCount += docsCount;
+  else if (type === 'snapshot') readStats.onSnapshotEmissions += docsCount;
+
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`[FIRESTORE READ #${readStats.totalReads}] (${type}) ${context} [Docs: ${docsCount}] | Total Reads: ${readStats.totalReads}, Cache Hits: ${readStats.cachedHits}`);
+  }
+}
+
+export function getFirestoreReadStats(): FirestoreReadStats {
+  return { ...readStats };
+}
 
 // Customer Session ID helper
 export function getOrCreateSessionId(): string {
@@ -136,14 +183,16 @@ export function removeAdminToken() {
 }
 
 // ============================================================================
-// FIREBASE CLOUD FIRESTORE INTEGRATION & ZERO-DOWNTIME QUOTA RESILIENCE
+// FIREBASE CLOUD FIRESTORE INTEGRATION & QUOTA CIRCUIT BREAKER
 // ============================================================================
 
 const SETTINGS_DOC_ID = 'site_config';
 
-// Smart Quota Limit Circuit Breaker (ONLY for genuine Firestore Quota Exhaustion)
+// Exponential backoff quota circuit breaker
 let quotaCooldownUntil = 0;
-const QUOTA_COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes cooldown
+let consecutiveQuotaErrors = 0;
+const INITIAL_COOLDOWN_MS = 2 * 60 * 1000; // 2 minutes
+const MAX_COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes max
 
 export function isQuotaError(err: any): boolean {
   if (!err) return false;
@@ -157,10 +206,12 @@ export function isQuotaError(err: any): boolean {
   );
 }
 
-function handleFirestoreError(context: string, err: any) {
+export function handleFirestoreError(context: string, err: any) {
   if (isQuotaError(err)) {
-    quotaCooldownUntil = Date.now() + QUOTA_COOLDOWN_MS;
-    console.warn(`[Firebase Quota Limit] ${context}: Free daily read quota reached. Activating offline fallback cache.`);
+    consecutiveQuotaErrors++;
+    const cooldown = Math.min(INITIAL_COOLDOWN_MS * Math.pow(2, consecutiveQuotaErrors - 1), MAX_COOLDOWN_MS);
+    quotaCooldownUntil = Date.now() + cooldown;
+    console.warn(`[Firebase Quota Limit] ${context}: Free daily read quota reached. Cooldown for ${Math.round(cooldown / 1000)}s.`);
   } else {
     console.warn(`[Firebase ${context} Error]`, err?.message || err);
   }
@@ -170,8 +221,13 @@ export function isCloudQuotaExhausted(): boolean {
   return Date.now() < quotaCooldownUntil;
 }
 
-// Timeout helper so slow network requests on mobile don't hang indefinitely (7s timeout)
-async function withTimeout<T>(promise: Promise<T>, ms = 7000): Promise<T> {
+export function resetQuotaCircuitBreaker() {
+  quotaCooldownUntil = 0;
+  consecutiveQuotaErrors = 0;
+}
+
+// Timeout helper so slow mobile networks don't hang indefinitely (6s timeout)
+async function withTimeout<T>(promise: Promise<T>, ms = 6000): Promise<T> {
   let timeoutHandle: any;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutHandle = setTimeout(() => {
@@ -218,58 +274,13 @@ export function sanitizeFirestorePayload<T extends Record<string, any>>(obj: T):
   return clean as T;
 }
 
-/**
- * Ensures Firestore is seeded with default content and settings on first run only
- */
-let seedingPromise: Promise<void> | null = null;
-
-async function ensureFirestoreSeeded(): Promise<void> {
-  if (isCloudQuotaExhausted() || seedingPromise) return;
-
-  seedingPromise = (async () => {
-    try {
-      // 1. Check/seed settings
-      const settingsRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
-      const settingsSnap = await getDoc(settingsRef);
-      
-      if (!settingsSnap.exists()) {
-        console.log('[Firebase Cloud] First-time setup: Initializing Cloud Settings...');
-        await setDoc(settingsRef, sanitizeFirestorePayload({
-          ...CLIENT_SITE_SETTINGS,
-          isSeeded: true
-        }));
-      } else {
-        const data = settingsSnap.data();
-        if (data?.demoPurged) {
-          // If demo content has been purged by admin, never re-seed demo items
-          return;
-        }
-      }
-
-      // 2. Check/seed initial content if content collection is currently empty and not explicitly purged
-      const contentRef = collection(firestore, 'content');
-      const contentSnap = await getDocs(query(contentRef, firestoreLimit(1)));
-      if (contentSnap.empty && !settingsSnap.data()?.demoPurged) {
-        console.log('[Firebase Cloud] Content collection empty. Seeding initial posts to Cloud Firestore...');
-        for (const item of CLIENT_CONTENT_LIST) {
-          const itemRef = doc(firestore, 'content', item.id);
-          await setDoc(itemRef, sanitizeFirestorePayload(item));
-        }
-        console.log('[Firebase Cloud] Seeded initial content successfully.');
-      }
-    } catch (err) {
-      handleFirestoreError('ensureFirestoreSeeded', err);
-    }
-  })();
-
-  return seedingPromise;
-}
-
 // ============================================================================
-// In-Memory Fast Cache & SWR LocalStorage for Instant 0ms Cold Start
+// In-Memory Fast Cache & LocalStorage Synchronization (0ms Hydration)
 // ============================================================================
-const SETTINGS_CACHE_KEY = 'ruma_cached_settings_v2';
-const CONTENT_CACHE_KEY = 'ruma_cached_content_v2';
+const SETTINGS_CACHE_KEY = 'ruma_cached_settings_v3';
+const CONTENT_CACHE_KEY = 'ruma_cached_content_v3';
+const ORDERS_CACHE_KEY = 'ruma_cached_orders_v3';
+const LEADS_CACHE_KEY = 'ruma_cached_leads_v3';
 
 export function hasLocalSettingsCache(): boolean {
   try {
@@ -279,16 +290,33 @@ export function hasLocalSettingsCache(): boolean {
   }
 }
 
+// In-memory singletons
 let memorySiteSettings: SiteSettings | null = null;
 let memorySettingsTimestamp = 0;
+
 let memoryContentList: MediaItem[] | null = null;
 let memoryContentTimestamp = 0;
-let activeContentPromise: Promise<MediaItem[]> | null = null;
+
+let memoryAdminOrders: OrderItem[] | null = null;
+let memoryOrdersTimestamp = 0;
+
+let memoryVipLeads: any[] | null = null;
+let memoryLeadsTimestamp = 0;
+
+// In-flight promise deduplication
 let activeSettingsPromise: Promise<SiteSettings> | null = null;
-const CACHE_TTL_MS = 10000; // 10s fresh cache for instant responsiveness
+let activeContentPromise: Promise<MediaItem[]> | null = null;
+let activeAdminContentPromise: Promise<MediaItem[]> | null = null;
+let activeOrdersPromise: Promise<OrderItem[]> | null = null;
+let activeLeadsPromise: Promise<any[]> | null = null;
+
+// TTL Config: 5 minutes default in-memory caching to minimize Firestore reads
+const SETTINGS_CACHE_TTL = 5 * 60 * 1000;
+const CONTENT_CACHE_TTL = 3 * 60 * 1000;
+const ADMIN_DATA_TTL = 3 * 60 * 1000;
 
 /**
- * Synchronously retrieves cached settings from localStorage for fast initial render
+ * Synchronously retrieves cached settings from localStorage
  */
 export function getCachedSiteSettingsSync(): SiteSettings {
   if (memorySiteSettings) return memorySiteSettings;
@@ -304,7 +332,8 @@ export function getCachedSiteSettingsSync(): SiteSettings {
 }
 
 /**
- * Synchronously retrieves cached content list from localStorage for fast initial render
+ * Synchronously retrieves cached content list from localStorage.
+ * NEVER returns dummy/demo items - only real items previously fetched or saved.
  */
 export function getCachedContentListSync(): MediaItem[] {
   if (memoryContentList && memoryContentList.length > 0) return memoryContentList;
@@ -318,11 +347,11 @@ export function getCachedContentListSync(): MediaItem[] {
       }
     }
   } catch (_) {}
-  return CLIENT_CONTENT_LIST;
+  return [];
 }
 
 // Helper to sanitize items based on user's purchased tokens
-function applyUserAccessTokens(items: MediaItem[]): MediaItem[] {
+export function applyUserAccessTokens(items: MediaItem[]): MediaItem[] {
   const userTokens = getStoredTokens();
   return items.map(item => {
     const isUnlocked = item.access === 'free' || Boolean(userTokens[item.id]);
@@ -336,26 +365,34 @@ function applyUserAccessTokens(items: MediaItem[]): MediaItem[] {
   });
 }
 
-// ----------------------------------------------------------------------------
-// 1. Fetch Site Settings (Live Cloud Sync with In-Memory Acceleration & Deduplication)
-// ----------------------------------------------------------------------------
+// ============================================================================
+// 1. Fetch Site Settings (Smart Cached + Single-Promise Deduplication)
+// ============================================================================
 export async function fetchSiteSettings(forceFresh = false): Promise<SiteSettings> {
   const now = Date.now();
-  if (!forceFresh && memorySiteSettings && (now - memorySettingsTimestamp < CACHE_TTL_MS)) {
+  if (!forceFresh && memorySiteSettings && (now - memorySettingsTimestamp < SETTINGS_CACHE_TTL)) {
+    trackFirestoreRead('cacheHit', 'settings:in-memory');
     return memorySiteSettings;
   }
 
+  if (isCloudQuotaExhausted()) {
+    trackFirestoreRead('cacheHit', 'settings:quota-cooldown');
+    return memorySiteSettings || getCachedSiteSettingsSync();
+  }
+
   if (activeSettingsPromise) {
+    trackFirestoreRead('cacheHit', 'settings:in-flight-dedup');
     return activeSettingsPromise;
   }
 
   activeSettingsPromise = (async () => {
     try {
+      trackFirestoreRead('getDoc', 'settings/site_config', 1);
       const settingsRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
-      const snap = await withTimeout(getDoc(settingsRef), 7000);
+      const snap = await withTimeout(getDoc(settingsRef), 6000);
+      
       if (snap.exists()) {
         const data = snap.data() as Partial<SiteSettings>;
-        // Prioritize live Firestore data completely
         const merged: SiteSettings = {
           ...CLIENT_SITE_SETTINGS,
           ...data,
@@ -373,15 +410,16 @@ export async function fetchSiteSettings(forceFresh = false): Promise<SiteSetting
         } catch (_) {}
         return merged;
       } else {
-        // Document does not exist yet in Firestore - create initial
         const initial = sanitizeFirestorePayload(CLIENT_SITE_SETTINGS);
         try {
           await setDoc(settingsRef, initial);
         } catch (_) {}
         memorySiteSettings = initial;
+        memorySettingsTimestamp = Date.now();
         return initial;
       }
-    } catch (err) {
+    } catch (err: any) {
+      console.warn('[Firebase] fetchSiteSettings fallback to cache:', err?.message || err);
       handleFirestoreError('fetchSiteSettings', err);
       return memorySiteSettings || getCachedSiteSettingsSync();
     } finally {
@@ -392,49 +430,54 @@ export async function fetchSiteSettings(forceFresh = false): Promise<SiteSetting
   return activeSettingsPromise;
 }
 
-// ----------------------------------------------------------------------------
-// 2. Fetch Content List (Live Cloud Sync with Robust In-Memory Sorting)
-// ----------------------------------------------------------------------------
+// ============================================================================
+// 2. Fetch User Content List (Optimized Query: published==true, limit=30)
+// ============================================================================
 export async function fetchContentList(forceFresh = false): Promise<MediaItem[]> {
   const now = Date.now();
-  if (!forceFresh && memoryContentList && (now - memoryContentTimestamp < CACHE_TTL_MS)) {
+  if (!forceFresh && memoryContentList && (now - memoryContentTimestamp < CONTENT_CACHE_TTL)) {
+    trackFirestoreRead('cacheHit', 'content:in-memory');
     return applyUserAccessTokens(memoryContentList);
   }
 
+  if (isCloudQuotaExhausted()) {
+    trackFirestoreRead('cacheHit', 'content:quota-cooldown');
+    const cachedList = memoryContentList || getCachedContentListSync();
+    return applyUserAccessTokens(cachedList);
+  }
+
   if (activeContentPromise) {
+    trackFirestoreRead('cacheHit', 'content:in-flight-dedup');
     return activeContentPromise;
   }
 
   activeContentPromise = (async () => {
     try {
       const contentRef = collection(firestore, 'content');
-      // Fetch all docs from live Firestore
-      const snap = await withTimeout(getDocs(contentRef), 7500);
-
-      const items: MediaItem[] = [];
-
-      snap.forEach(docSnap => {
-        const item = { ...docSnap.data(), id: docSnap.id } as MediaItem;
-        if (item.published !== false) {
-          items.push(item);
-        }
-      });
-
-      // If no custom content exists yet in Firestore and not explicitly purged, seed starter content
-      if (items.length === 0) {
-        const settings = memorySiteSettings || await fetchSiteSettings();
-        if (!settings.demoPurged) {
-          console.log('[Firebase Cloud] Content collection empty. Populating with initial catalog...');
-          for (const starter of CLIENT_CONTENT_LIST) {
-            try {
-              await setDoc(doc(firestore, 'content', starter.id), sanitizeFirestorePayload(starter));
-            } catch (_) {}
-            items.push(starter);
-          }
-        }
+      // Efficient user feed query: Only published items, newest first, limit to 30 items
+      let snap;
+      try {
+        const q = query(
+          contentRef,
+          where('published', '==', true),
+          orderBy('createdAt', 'desc'),
+          firestoreLimit(30)
+        );
+        trackFirestoreRead('getDocs', 'content:published-feed', 1);
+        snap = await withTimeout(getDocs(q), 7000);
+      } catch (_queryErr) {
+        // Fallback simple query without composite index requirement
+        const qSimple = query(contentRef, where('published', '==', true), firestoreLimit(30));
+        trackFirestoreRead('getDocs', 'content:published-fallback', 1);
+        snap = await withTimeout(getDocs(qSimple), 7000);
       }
 
-      // Sort by creation date (newest first)
+      const items: MediaItem[] = [];
+      snap.forEach(docSnap => {
+        items.push({ ...docSnap.data(), id: docSnap.id } as MediaItem);
+      });
+
+      // Sort by creation date in memory
       items.sort((a, b) => {
         const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
         const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
@@ -449,10 +492,12 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
       } catch (_) {}
 
       return applyUserAccessTokens(items);
-    } catch (err) {
+    } catch (err: any) {
+      console.warn('[Firebase] fetchContentList fallback to cache:', err?.message || err);
       handleFirestoreError('fetchContentList', err);
-      const fallback = memoryContentList || getCachedContentListSync();
-      return applyUserAccessTokens(fallback);
+      
+      const fallbackList = memoryContentList || getCachedContentListSync();
+      return applyUserAccessTokens(fallbackList);
     } finally {
       activeContentPromise = null;
     }
@@ -461,53 +506,201 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
   return activeContentPromise;
 }
 
-// ----------------------------------------------------------------------------
-// 3. Fetch Single Content Item (Guaranteed Live Firestore & Fallback Resolution)
-// ----------------------------------------------------------------------------
+// ============================================================================
+// 2.5. Centralized Singleton Shared Content Subscription Manager
+// (Guarantees ONLY ONE single Firestore onSnapshot listener for entire application)
+// ============================================================================
+type ContentListener = (items: MediaItem[]) => void;
+type ErrorListener = (error: any) => void;
+
+class ContentSubscriptionManager {
+  private subscribers: Map<number, { onUpdate: ContentListener; onError?: ErrorListener }> = new Map();
+  private nextSubId = 1;
+  private unsubscribeFirestore: Unsubscribe | null = null;
+  private isConnecting = false;
+
+  public subscribe(onUpdate: ContentListener, onError?: ErrorListener): () => void {
+    const id = this.nextSubId++;
+    this.subscribers.set(id, { onUpdate, onError });
+
+    // Send immediate cached data if available (0ms instantaneous delivery)
+    if (memoryContentList && memoryContentList.length > 0) {
+      onUpdate(applyUserAccessTokens(memoryContentList));
+    } else {
+      const cached = getCachedContentListSync();
+      if (cached.length > 0) {
+        onUpdate(applyUserAccessTokens(cached));
+      }
+    }
+
+    // Attach single Firestore listener if this is the first subscriber
+    if (this.subscribers.size === 1 && !this.unsubscribeFirestore && !this.isConnecting) {
+      this.connectFirestore();
+    }
+
+    // Return cleanup function
+    return () => {
+      this.subscribers.delete(id);
+      if (this.subscribers.size === 0 && this.unsubscribeFirestore) {
+        try {
+          this.unsubscribeFirestore();
+        } catch (_) {}
+        this.unsubscribeFirestore = null;
+        console.log('[FIRESTORE LISTENER] Detached shared content listener (0 active subscribers)');
+      }
+    };
+  }
+
+  public notifyLocalUpdate(updatedList: MediaItem[]) {
+    memoryContentList = updatedList;
+    memoryContentTimestamp = Date.now();
+    try {
+      localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(updatedList));
+    } catch (_) {}
+    const sanitized = applyUserAccessTokens(updatedList);
+    this.subscribers.forEach(sub => {
+      try {
+        sub.onUpdate(sanitized);
+      } catch (e) {
+        console.error('Subscriber callback error:', e);
+      }
+    });
+  }
+
+  private connectFirestore() {
+    if (isCloudQuotaExhausted()) return;
+    this.isConnecting = true;
+
+    try {
+      const contentRef = collection(firestore, 'content');
+      const q = query(
+        contentRef,
+        where('published', '==', true),
+        orderBy('createdAt', 'desc'),
+        firestoreLimit(40)
+      );
+
+      console.log('[FIRESTORE LISTENER] Initializing shared singleton onSnapshot listener...');
+      this.unsubscribeFirestore = onSnapshot(
+        q,
+        (snap) => {
+          this.isConnecting = false;
+          trackFirestoreRead('snapshot', 'shared-content-listener', snap.docChanges().length || 1);
+          
+          const items: MediaItem[] = [];
+          snap.forEach(docSnap => {
+            items.push({ ...docSnap.data(), id: docSnap.id } as MediaItem);
+          });
+
+          items.sort((a, b) => {
+            const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            return timeB - timeA;
+          });
+
+          this.notifyLocalUpdate(items);
+        },
+        (error) => {
+          this.isConnecting = false;
+          console.warn('[Firebase Shared Listener Error]', error?.message || error);
+          handleFirestoreError('subscribeToContentList', error);
+          
+          if (this.unsubscribeFirestore) {
+            try {
+              this.unsubscribeFirestore();
+            } catch (_) {}
+            this.unsubscribeFirestore = null;
+          }
+
+          this.subscribers.forEach(sub => {
+            if (sub.onError) sub.onError(error);
+          });
+        }
+      );
+    } catch (err) {
+      this.isConnecting = false;
+      console.warn('[Firebase Shared Listener Setup Error]', err);
+    }
+  }
+}
+
+export const sharedContentManager = new ContentSubscriptionManager();
+
+export function subscribeToContentList(
+  onUpdate: (items: MediaItem[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  return sharedContentManager.subscribe(onUpdate, onError);
+}
+
+// ============================================================================
+// 3. Fetch Single Content Item (Zero-Read Cache-First lookup)
+// ============================================================================
 export async function fetchContentDetail(id: string): Promise<MediaItem> {
   if (!id) throw new Error('Invalid content ID');
 
-  if (!isCloudQuotaExhausted()) {
-    try {
-      const itemRef = doc(firestore, 'content', id);
-      const snap = await withTimeout(getDoc(itemRef), 4000);
-      if (snap.exists()) {
-        const item = { ...snap.data(), id: snap.id } as MediaItem;
-        const userTokens = getStoredTokens();
-        const isUnlocked = item.access === 'free' || Boolean(userTokens[item.id]);
-        return {
-          ...item,
-          mediaUrl: isUnlocked ? item.mediaUrl : (item.previewUrl || item.thumbnailUrl),
-          galleryUrls: isUnlocked 
-            ? (item.galleryUrls && item.galleryUrls.length > 0 ? item.galleryUrls : (item.mediaUrl ? [item.mediaUrl] : [item.thumbnailUrl]))
-            : (item.previewUrl ? [item.previewUrl] : [item.thumbnailUrl])
-        };
-      }
-    } catch (err) {
-      handleFirestoreError('fetchContentDetail', err);
+  const getFromCache = (): MediaItem | null => {
+    const list = memoryContentList || getCachedContentListSync();
+    const found = list.find(c => c.id === id);
+    if (found) {
+      trackFirestoreRead('cacheHit', `content-detail:${id}`);
+      const userTokens = getStoredTokens();
+      const isUnlocked = found.access === 'free' || Boolean(userTokens[found.id]);
+      return {
+        ...found,
+        mediaUrl: isUnlocked ? found.mediaUrl : (found.previewUrl || found.thumbnailUrl),
+        galleryUrls: isUnlocked 
+          ? (found.galleryUrls && found.galleryUrls.length > 0 ? found.galleryUrls : (found.mediaUrl ? [found.mediaUrl] : [found.thumbnailUrl]))
+          : (found.previewUrl ? [found.previewUrl] : [found.thumbnailUrl])
+      };
     }
-  }
-
-  const list = memoryContentList || getCachedContentListSync();
-  const fallback = list.find(c => c.id === id) || CLIENT_CONTENT_LIST.find(c => c.id === id);
-  if (!fallback) {
-    throw new Error('Content not found');
-  }
-
-  const userTokens = getStoredTokens();
-  const isUnlocked = fallback.access === 'free' || Boolean(userTokens[fallback.id]);
-  return {
-    ...fallback,
-    mediaUrl: isUnlocked ? fallback.mediaUrl : (fallback.previewUrl || fallback.thumbnailUrl),
-    galleryUrls: isUnlocked 
-      ? (fallback.galleryUrls && fallback.galleryUrls.length > 0 ? fallback.galleryUrls : (fallback.mediaUrl ? [fallback.mediaUrl] : [fallback.thumbnailUrl]))
-      : (fallback.previewUrl ? [fallback.previewUrl] : [fallback.thumbnailUrl])
+    return null;
   };
+
+  // 1. Return from memory or local cache if available (0 Firestore reads!)
+  const cached = getFromCache();
+  if (cached) return cached;
+
+  if (isCloudQuotaExhausted()) {
+    throw new Error('क्लाउड डेटा अस्थायी रूप से अनुपलब्ध है। कृपया बाद में प्रयास करें।');
+  }
+
+  // 2. Fetch single document from Firestore only if cache missed
+  try {
+    trackFirestoreRead('getDoc', `content/${id}`, 1);
+    const itemRef = doc(firestore, 'content', id);
+    const snap = await withTimeout(getDoc(itemRef), 5000);
+    if (snap.exists()) {
+      const item = { ...snap.data(), id: snap.id } as MediaItem;
+      const userTokens = getStoredTokens();
+      const isUnlocked = item.access === 'free' || Boolean(userTokens[item.id]);
+      
+      // Update memory cache with fetched item
+      if (memoryContentList) {
+        if (!memoryContentList.some(c => c.id === id)) {
+          memoryContentList = [item, ...memoryContentList];
+        }
+      }
+
+      return {
+        ...item,
+        mediaUrl: isUnlocked ? item.mediaUrl : (item.previewUrl || item.thumbnailUrl),
+        galleryUrls: isUnlocked 
+          ? (item.galleryUrls && item.galleryUrls.length > 0 ? item.galleryUrls : (item.mediaUrl ? [item.mediaUrl] : [item.thumbnailUrl]))
+          : (item.previewUrl ? [item.previewUrl] : [item.thumbnailUrl])
+      };
+    } else {
+      throw new Error(`Content item "${id}" not found`);
+    }
+  } catch (err: any) {
+    handleFirestoreError('fetchContentDetail', err);
+    throw new Error(err.message || `Content not found (ID: ${id})`);
+  }
 }
 
-// ----------------------------------------------------------------------------
-// 3.5. Purge Demo Content (Clears placeholder seed items so only creator uploads remain)
-// ----------------------------------------------------------------------------
+// ============================================================================
+// 3.5. Purge Demo Content (Clears placeholder seed items)
+// ============================================================================
 export async function purgeDemoContent(): Promise<{ deletedCount: number; message: string }> {
   const demoIds = ['rk-001', 'rk-002', 'rk-003', 'rk-004', 'rk-005', 'rk-006', 'rk-007'];
   let deletedCount = 0;
@@ -520,7 +713,6 @@ export async function purgeDemoContent(): Promise<{ deletedCount: number; messag
     } catch (_) {}
   }
 
-  // Persist demoPurged flag to Firestore settings so demo items never re-seed
   try {
     const settingsRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
     await setDoc(settingsRef, { demoPurged: true }, { merge: true });
@@ -528,22 +720,19 @@ export async function purgeDemoContent(): Promise<{ deletedCount: number; messag
 
   // Update local memory & cache
   if (memoryContentList) {
-    memoryContentList = memoryContentList.filter(c => !demoIds.includes(c.id));
-    memoryContentTimestamp = Date.now();
-    try {
-      localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(memoryContentList));
-    } catch (_) {}
+    const updated = memoryContentList.filter(c => !demoIds.includes(c.id));
+    sharedContentManager.notifyLocalUpdate(updated);
   }
 
   return {
     deletedCount,
-    message: `सफलतापूर्वक ${deletedCount} डेमो पोस्ट हटा दिए गए। अब सभी डिवाइसेस पर केवल आपका असली कंटेंट दिखेगा।`
+    message: `सफलतापूर्वक ${deletedCount} डेमो पोस्ट हटा दिए गए। अब केवल आपका असली कंटेंट दिखेगा।`
   };
 }
 
-// ----------------------------------------------------------------------------
-// 4. Create UPI Order (Instant 0ms QR Generation + Background Cloud Firestore Sync)
-// ----------------------------------------------------------------------------
+// ============================================================================
+// 4. Create UPI Order (Instant QR Generation + Background Cloud Write)
+// ============================================================================
 export async function createOrder(
   contentId: string,
   itemOverride?: MediaItem,
@@ -572,7 +761,27 @@ export async function createOrder(
 
   if (!item) {
     const cachedList = getCachedContentListSync();
-    item = cachedList.find(c => c.id === contentId) || CLIENT_CONTENT_LIST.find(c => c.id === contentId) || CLIENT_CONTENT_LIST[0];
+    const found = cachedList.find(c => c.id === contentId);
+    if (found) {
+      item = found;
+    } else {
+      item = {
+        id: contentId,
+        title: 'VIP Exclusive Post',
+        description: '',
+        type: 'photo',
+        access: 'premium',
+        price: 49,
+        thumbnailUrl: '',
+        mediaUrl: '',
+        galleryUrls: [],
+        tags: ['VIP'],
+        views: 0,
+        likes: 0,
+        published: true,
+        createdAt: new Date().toISOString()
+      };
+    }
   }
 
   const orderId = `ORD_${Date.now()}_${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
@@ -581,10 +790,8 @@ export async function createOrder(
   const payeeName = (settings?.creatorName || 'Ruma Kumari').trim();
   const transactionNote = `VIP Access - ${orderId}`;
 
-  // Standard Universal UPI URI
   const upiIntentUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(payeeName)}&am=${amount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(transactionNote)}`;
   
-  // Direct App-Specific Deep Links for instant 1-tap mobile checkout
   const appUrls = {
     generic: upiIntentUrl,
     phonepe: `phonepe://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(payeeName)}&am=${amount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(transactionNote)}`,
@@ -594,7 +801,6 @@ export async function createOrder(
     cred: `cred://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(payeeName)}&am=${amount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(transactionNote)}`
   };
 
-  // High-contrast, sharp QR Code generated locally in milliseconds
   let qrDataUrl = '';
   try {
     qrDataUrl = await QRCode.toDataURL(upiIntentUrl, {
@@ -608,11 +814,9 @@ export async function createOrder(
     });
   } catch (qrErr) {
     console.error('QR generation error:', qrErr);
-    // Fallback simple QR
     qrDataUrl = await QRCode.toDataURL(`upi://pay?pa=${encodeURIComponent(upiId)}&am=${amount}`);
   }
 
-  // Get user profile if not passed
   const storedUser = getStoredUserProfile();
   const nameToSave = customerName || storedUser?.name || '';
   const phoneToSave = customerPhone || storedUser?.phone || '';
@@ -636,17 +840,14 @@ export async function createOrder(
     expiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString()
   };
 
-  // Save to local session/cache immediately
   saveOrderId(orderId);
 
-  // Background non-blocking write to Cloud Firestore (does NOT make user wait)
+  // Background write to Cloud Firestore
   (async () => {
     try {
       const cleanOrder = sanitizeFirestorePayload(order);
       await setDoc(doc(firestore, 'orders', orderId), cleanOrder);
-      console.log('[Firebase Cloud] Instant Order Created in background:', orderId);
       
-      // Also save lead to vip_leads if phone exists
       if (phoneToSave) {
         saveVipLeadToCloud({
           name: nameToSave,
@@ -679,15 +880,14 @@ export async function updateOrderCustomer(orderId: string, customerName: string,
       customerName: customerName.trim(),
       customerPhone: customerPhone.trim()
     }, { merge: true });
-    console.log('[Firebase Cloud] Order customer updated:', orderId);
   } catch (e) {
     console.warn('Error updating order customer', e);
   }
 }
 
-// ----------------------------------------------------------------------------
+// ============================================================================
 // 5. Check Order Status
-// ----------------------------------------------------------------------------
+// ============================================================================
 export async function checkOrderStatus(orderId: string): Promise<{
   orderId: string;
   status: OrderItem['status'];
@@ -700,6 +900,7 @@ export async function checkOrderStatus(orderId: string): Promise<{
 }> {
   if (!isCloudQuotaExhausted()) {
     try {
+      trackFirestoreRead('getDoc', `orders/${orderId}`, 1);
       const orderRef = doc(firestore, 'orders', orderId);
       const snap = await withTimeout(getDoc(orderRef), 3000);
       if (snap.exists()) {
@@ -732,9 +933,9 @@ export async function checkOrderStatus(orderId: string): Promise<{
   };
 }
 
-// ----------------------------------------------------------------------------
-// 6. Verify User Payment (Instant UTR / Simulation for Fast Checkout)
-// ----------------------------------------------------------------------------
+// ============================================================================
+// 6. Verify User Payment (Instant UTR / Simulation)
+// ============================================================================
 export async function verifyUserPayment(orderId: string, transactionRef?: string): Promise<{
   success: boolean;
   order: OrderItem;
@@ -767,12 +968,12 @@ export async function verifyUserPayment(orderId: string, transactionRef?: string
     }
   }
 
-  const dummyOrder: OrderItem = {
+  const offlineOrder: OrderItem = {
     orderId,
-    contentId: 'rk-001',
+    contentId: 'rk-custom',
     contentTitle: 'VIP Unlocked Content',
     contentType: 'photo',
-    thumbnailUrl: CLIENT_CONTENT_LIST[0].thumbnailUrl,
+    thumbnailUrl: '',
     amount: 49,
     currency: 'INR',
     status: 'paid',
@@ -786,21 +987,20 @@ export async function verifyUserPayment(orderId: string, transactionRef?: string
     expiresAt: new Date().toISOString()
   };
 
-  saveAccessToken(dummyOrder.contentId, token);
-  return { success: true, order: dummyOrder };
+  saveAccessToken(offlineOrder.contentId, token);
+  return { success: true, order: offlineOrder };
 }
 
-// ----------------------------------------------------------------------------
+// ============================================================================
 // 7. Admin Authentication
-// ----------------------------------------------------------------------------
+// ============================================================================
 export async function adminLogin(passcode: string): Promise<{ success: boolean; token: string }> {
   const cleanInput = passcode.trim();
   if (!cleanInput) {
     throw new Error('कृपया एडमिन पासवर्ड दर्ज करें।');
   }
 
-  // Check custom passcode saved in Firebase Settings or secure default
-  const settings = await fetchSiteSettings();
+  const settings = memorySiteSettings || getCachedSiteSettingsSync();
   const configuredPasscode = (settings.adminPasscode && settings.adminPasscode.trim()) || 'Ashok#8899';
 
   if (cleanInput === configuredPasscode || cleanInput === 'Ashok#8899') {
@@ -812,17 +1012,17 @@ export async function adminLogin(passcode: string): Promise<{ success: boolean; 
   throw new Error('गलत एडमिन पासवर्ड! कृपया सही पासवर्ड दर्ज करें।');
 }
 
-// ----------------------------------------------------------------------------
-// 8. Admin Analytics & Stats (Aggregated from Data or Firestore)
-// ----------------------------------------------------------------------------
+// ============================================================================
+// 8. Admin Analytics & Stats (Cached Calculation)
+// ============================================================================
 export async function fetchAdminStats(
   contentOverride?: MediaItem[],
   ordersOverride?: OrderItem[],
   settingsOverride?: SiteSettings
 ): Promise<AdminStats & { paymentConfig: any }> {
-  const content = contentOverride || await fetchAdminContent();
-  const orders = ordersOverride || await fetchAdminOrders();
-  const settings = settingsOverride || await fetchSiteSettings();
+  const content = contentOverride || (memoryContentList || await fetchAdminContent());
+  const orders = ordersOverride || (memoryAdminOrders || await fetchAdminOrders());
+  const settings = settingsOverride || (memorySiteSettings || await fetchSiteSettings());
 
   const totalEarnings = orders.filter(o => o.status === 'paid').reduce((sum, o) => sum + o.amount, 0);
   const paidOrders = orders.filter(o => o.status === 'paid').length;
@@ -861,22 +1061,40 @@ export async function fetchAdminStats(
   };
 }
 
-// ----------------------------------------------------------------------------
-// 9. Admin Orders & VIP Leads
-// ----------------------------------------------------------------------------
-export async function fetchAdminOrders(): Promise<OrderItem[]> {
-  const ordersMap = new Map<string, OrderItem>();
+// ============================================================================
+// 9. Admin Orders & VIP Leads (Cached Queries with TTL)
+// ============================================================================
+export async function fetchAdminOrders(forceFresh = false): Promise<OrderItem[]> {
+  const now = Date.now();
+  if (!forceFresh && memoryAdminOrders && (now - memoryOrdersTimestamp < ADMIN_DATA_TTL)) {
+    trackFirestoreRead('cacheHit', 'orders:in-memory');
+    return memoryAdminOrders;
+  }
 
-  if (!isCloudQuotaExhausted()) {
+  if (isCloudQuotaExhausted()) {
+    trackFirestoreRead('cacheHit', 'orders:quota-cooldown');
+    return memoryAdminOrders || [];
+  }
+
+  if (activeOrdersPromise) {
+    trackFirestoreRead('cacheHit', 'orders:in-flight-dedup');
+    return activeOrdersPromise;
+  }
+
+  activeOrdersPromise = (async () => {
+    const ordersMap = new Map<string, OrderItem>();
+
     try {
       const ordersRef = collection(firestore, 'orders');
       let snap;
       try {
-        const q = query(ordersRef, orderBy('createdAt', 'desc'));
+        const q = query(ordersRef, orderBy('createdAt', 'desc'), firestoreLimit(50));
+        trackFirestoreRead('getDocs', 'orders:admin-list', 1);
         snap = await withTimeout(getDocs(q), 6000);
       } catch (_) {
-        // Fallback without ordering in case index or compound query issue occurs
-        snap = await withTimeout(getDocs(ordersRef), 6000);
+        const qSimple = query(ordersRef, firestoreLimit(50));
+        trackFirestoreRead('getDocs', 'orders:admin-fallback', 1);
+        snap = await withTimeout(getDocs(qSimple), 6000);
       }
 
       snap.forEach(d => {
@@ -888,49 +1106,49 @@ export async function fetchAdminOrders(): Promise<OrderItem[]> {
     } catch (err) {
       handleFirestoreError('fetchAdminOrders', err);
     }
-  }
 
-  // Also merge with stored local orders if available
-  try {
-    const storedIds = getStoredOrders();
-    for (const id of storedIds) {
-      if (!ordersMap.has(id)) {
-        // Create standard fallback entry
-        ordersMap.set(id, {
-          orderId: id,
-          contentId: 'rk-001',
-          contentTitle: 'VIP Unlocked Post',
-          contentType: 'photo',
-          thumbnailUrl: CLIENT_CONTENT_LIST[0].thumbnailUrl,
-          amount: 49,
-          currency: 'INR',
-          status: 'paid',
-          upiId: '6202292319pnb@ybl',
-          qrString: '',
-          customerSessionId: getOrCreateSessionId(),
-          createdAt: new Date().toISOString(),
-          expiresAt: new Date().toISOString()
-        });
-      }
-    }
-  } catch (_) {}
+    const orders = Array.from(ordersMap.values());
+    orders.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    memoryAdminOrders = orders;
+    memoryOrdersTimestamp = Date.now();
+    return orders;
+  })().finally(() => {
+    activeOrdersPromise = null;
+  });
 
-  const orders = Array.from(ordersMap.values());
-  orders.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-  return orders;
+  return activeOrdersPromise;
 }
 
-export async function fetchVipLeads(): Promise<any[]> {
-  const leads: any[] = [];
-  if (!isCloudQuotaExhausted()) {
+export async function fetchVipLeads(forceFresh = false): Promise<any[]> {
+  const now = Date.now();
+  if (!forceFresh && memoryVipLeads && (now - memoryLeadsTimestamp < ADMIN_DATA_TTL)) {
+    trackFirestoreRead('cacheHit', 'vip-leads:in-memory');
+    return memoryVipLeads;
+  }
+
+  if (isCloudQuotaExhausted()) {
+    trackFirestoreRead('cacheHit', 'vip-leads:quota-cooldown');
+    return memoryVipLeads || [];
+  }
+
+  if (activeLeadsPromise) {
+    trackFirestoreRead('cacheHit', 'vip-leads:in-flight-dedup');
+    return activeLeadsPromise;
+  }
+
+  activeLeadsPromise = (async () => {
+    const leads: any[] = [];
     try {
       const leadsRef = collection(firestore, 'vip_leads');
       let snap;
       try {
-        const q = query(leadsRef, orderBy('createdAt', 'desc'));
+        const q = query(leadsRef, orderBy('createdAt', 'desc'), firestoreLimit(50));
+        trackFirestoreRead('getDocs', 'vip-leads:admin-list', 1);
         snap = await withTimeout(getDocs(q), 6000);
       } catch (_) {
-        snap = await withTimeout(getDocs(leadsRef), 6000);
+        const qSimple = query(leadsRef, firestoreLimit(50));
+        trackFirestoreRead('getDocs', 'vip-leads:admin-fallback', 1);
+        snap = await withTimeout(getDocs(qSimple), 6000);
       }
       snap.forEach(d => {
         leads.push({ ...d.data(), id: d.id });
@@ -938,26 +1156,16 @@ export async function fetchVipLeads(): Promise<any[]> {
     } catch (err) {
       handleFirestoreError('fetchVipLeads', err);
     }
-  }
 
-  // Also include current user profile if phone exists and not already in leads
-  const storedUser = getStoredUserProfile();
-  if (storedUser && storedUser.phone) {
-    const cleanP = storedUser.phone.replace(/[^0-9]/g, '');
-    if (!leads.some(l => (l.phone || '').replace(/[^0-9]/g, '').includes(cleanP))) {
-      leads.unshift({
-        id: `local_${cleanP}`,
-        name: storedUser.name || 'VIP Registered Visitor',
-        phone: cleanP,
-        contentTitle: 'VIP Registration & Portal Access',
-        amount: 0,
-        createdAt: new Date().toISOString(),
-        source: 'local_registration'
-      });
-    }
-  }
+    const sortedLeads = leads.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    memoryVipLeads = sortedLeads;
+    memoryLeadsTimestamp = Date.now();
+    return sortedLeads;
+  })().finally(() => {
+    activeLeadsPromise = null;
+  });
 
-  return leads.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  return activeLeadsPromise;
 }
 
 export async function verifyAdminOrder(orderId: string, transactionRef?: string): Promise<OrderItem> {
@@ -979,6 +1187,11 @@ export async function verifyAdminOrder(orderId: string, transactionRef?: string)
           transactionRef: txRef
         };
         await setDoc(orderRef, updated, { merge: true });
+        
+        // Write-through update to memory cache
+        if (memoryAdminOrders) {
+          memoryAdminOrders = memoryAdminOrders.map(o => o.orderId === orderId ? updated : o);
+        }
         return updated;
       }
     } catch (err) {
@@ -988,10 +1201,10 @@ export async function verifyAdminOrder(orderId: string, transactionRef?: string)
 
   return {
     orderId,
-    contentId: 'rk-001',
+    contentId: 'rk-custom',
     contentTitle: 'VIP Unlocked',
     contentType: 'photo',
-    thumbnailUrl: CLIENT_CONTENT_LIST[0].thumbnailUrl,
+    thumbnailUrl: '',
     amount: 49,
     currency: 'INR',
     status: 'paid',
@@ -1014,7 +1227,7 @@ export async function submitPaymentUtr(
   customerName?: string,
   customerPhone?: string
 ): Promise<{ success: boolean; status?: OrderItem['status']; message?: string; order?: OrderItem; autoUnlocked?: boolean; error?: string }> {
-  const settings = await fetchSiteSettings();
+  const settings = memorySiteSettings || getCachedSiteSettingsSync();
   const isInstant = settings.paymentVerificationMode === 'instant_utr' || !settings.paymentVerificationMode;
   const token = `tok_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   const paidAt = new Date().toISOString();
@@ -1028,7 +1241,7 @@ export async function submitPaymentUtr(
     try {
       finalScreenshot = await uploadMediaToStorage(finalScreenshot, 'documents');
     } catch (e) {
-      console.warn('Screenshot upload to storage non-fatal:', e);
+      console.warn('Screenshot upload non-fatal:', e);
     }
   }
 
@@ -1055,7 +1268,6 @@ export async function submitPaymentUtr(
           saveAccessToken(updated.contentId, token);
         }
 
-        // If phone exists, also record lead
         if (finalPhone) {
           saveVipLeadToCloud({
             name: finalName || 'VIP Customer',
@@ -1081,7 +1293,7 @@ export async function submitPaymentUtr(
 
   // Fallback instant unlock
   const fallbackToken = `tok_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-  saveAccessToken('rk-001', fallbackToken);
+  saveAccessToken('rk-custom', fallbackToken);
   return {
     success: true,
     status: 'paid',
@@ -1117,6 +1329,9 @@ export async function adminRejectOrder(orderId: string, _reason?: string): Promi
       };
 
       await setDoc(orderRef, updated, { merge: true });
+      if (memoryAdminOrders) {
+        memoryAdminOrders = memoryAdminOrders.map(o => o.orderId === orderId ? updated : o);
+      }
       return { success: true, order: updated };
     } catch (err: any) {
       handleFirestoreError('adminRejectOrder', err);
@@ -1125,56 +1340,57 @@ export async function adminRejectOrder(orderId: string, _reason?: string): Promi
   return { success: true };
 }
 
-// ----------------------------------------------------------------------------
-// 10. Admin Content CRUD (Writes directly to Cloud Firestore & Memory Cache)
-// ----------------------------------------------------------------------------
+// ============================================================================
+// 10. Admin Content CRUD (Full Content List with Write-Through Memory Updates)
+// ============================================================================
 export async function fetchAdminContent(forceFresh = false): Promise<MediaItem[]> {
   const now = Date.now();
-  if (!forceFresh && memoryContentList && (now - memoryContentTimestamp < CACHE_TTL_MS)) {
+  if (!forceFresh && memoryContentList && (now - memoryContentTimestamp < ADMIN_DATA_TTL)) {
+    trackFirestoreRead('cacheHit', 'admin-content:in-memory');
     return memoryContentList;
   }
 
   if (isCloudQuotaExhausted()) {
-    const list = memoryContentList || getCachedContentListSync();
-    return list && list.length > 0 ? list : CLIENT_CONTENT_LIST;
+    trackFirestoreRead('cacheHit', 'admin-content:quota-cooldown');
+    return memoryContentList || getCachedContentListSync();
   }
 
-  try {
-    const contentRef = collection(firestore, 'content');
-    const snap = await withTimeout(getDocs(contentRef), 6500);
-    
-    const items: MediaItem[] = [];
-    snap.forEach(d => {
-      items.push({ ...d.data(), id: d.id } as MediaItem);
-    });
+  if (activeAdminContentPromise) {
+    trackFirestoreRead('cacheHit', 'admin-content:in-flight-dedup');
+    return activeAdminContentPromise;
+  }
 
-    if (items.length === 0) {
-      const settings = memorySiteSettings || await fetchSiteSettings();
-      if (!settings.demoPurged) {
-        for (const starter of CLIENT_CONTENT_LIST) {
-          try {
-            await setDoc(doc(firestore, 'content', starter.id), sanitizeFirestorePayload(starter));
-          } catch (_) {}
-          items.push(starter);
-        }
-      }
-    }
-
-    const finalList = items.length > 0 ? items : (memoryContentList || getCachedContentListSync() || CLIENT_CONTENT_LIST);
-    finalList.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-    memoryContentList = finalList;
-    memoryContentTimestamp = now;
+  activeAdminContentPromise = (async () => {
     try {
-      localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(finalList));
-    } catch (_) {}
-    return finalList;
-  } catch (err) {
-    handleFirestoreError('fetchAdminContent', err);
-    const fallback = memoryContentList || getCachedContentListSync() || CLIENT_CONTENT_LIST;
-    return fallback;
-  }
+      trackFirestoreRead('getDocs', 'content:admin-all', 1);
+      const contentRef = collection(firestore, 'content');
+      const snap = await withTimeout(getDocs(contentRef), 7000);
+      
+      const items: MediaItem[] = [];
+      snap.forEach(d => {
+        items.push({ ...d.data(), id: d.id } as MediaItem);
+      });
+
+      items.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      
+      // Update memory & local cache
+      sharedContentManager.notifyLocalUpdate(items);
+      return items;
+    } catch (err: any) {
+      console.warn('[Firebase] fetchAdminContent fallback to cache:', err?.message || err);
+      handleFirestoreError('fetchAdminContent', err);
+      return memoryContentList || getCachedContentListSync();
+    } finally {
+      activeAdminContentPromise = null;
+    }
+  })();
+
+  return activeAdminContentPromise;
 }
 
+/**
+ * Creates content in Firestore + updates in-memory cache immediately (0 Extra Reads)
+ */
 export async function createAdminContent(itemData: Partial<MediaItem>): Promise<MediaItem> {
   const newId = `rk-${Date.now()}`;
   
@@ -1188,7 +1404,7 @@ export async function createAdminContent(itemData: Partial<MediaItem>): Promise<
     type: storagePrepared.type || 'photo',
     access: storagePrepared.access || 'premium',
     price: storagePrepared.price !== undefined ? Number(storagePrepared.price) : 49,
-    thumbnailUrl: storagePrepared.thumbnailUrl || CLIENT_CONTENT_LIST[0].thumbnailUrl,
+    thumbnailUrl: storagePrepared.thumbnailUrl || '',
     mediaUrl: storagePrepared.mediaUrl || storagePrepared.thumbnailUrl || '',
     previewUrl: storagePrepared.previewUrl || storagePrepared.thumbnailUrl || '',
     galleryUrls: Array.isArray(storagePrepared.galleryUrls) ? storagePrepared.galleryUrls : [],
@@ -1207,17 +1423,11 @@ export async function createAdminContent(itemData: Partial<MediaItem>): Promise<
 
   const cleanItem = sanitizeFirestorePayload(rawItem);
 
-  // 1. Direct Cloud Firestore Write (Ensures post is stored on cloud for all users)
+  // 1. Direct Cloud Firestore Write
   try {
     const docRef = doc(firestore, 'content', newId);
     await setDoc(docRef, cleanItem);
-    console.log('[Firebase Cloud] Successfully stored post in Firestore for all devices:', newId);
-    
-    // Also mark demoPurged in settings so demo data is never re-seeded
-    try {
-      const settingsRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
-      await setDoc(settingsRef, { demoPurged: true }, { merge: true });
-    } catch (_) {}
+    console.log('[Firebase Cloud] Successfully stored post in Firestore:', newId);
   } catch (err: any) {
     console.error('[Firebase Cloud Write Error]', err);
     if (isQuotaError(err)) {
@@ -1228,19 +1438,18 @@ export async function createAdminContent(itemData: Partial<MediaItem>): Promise<
     }
   }
 
-  // 2. Update local memory & cache on success
+  // 2. Write-through update to local memory & cache (Zero subsequent getDocs needed!)
   const currentList = memoryContentList || getCachedContentListSync();
-  memoryContentList = [cleanItem, ...currentList.filter(i => i.id !== newId)];
-  memoryContentTimestamp = Date.now();
-  try {
-    localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(memoryContentList));
-  } catch (_) {}
+  const nextList = [cleanItem, ...currentList.filter(i => i.id !== newId)];
+  sharedContentManager.notifyLocalUpdate(nextList);
 
   return cleanItem;
 }
 
+/**
+ * Updates content in Firestore + updates in-memory cache immediately (0 Extra Reads)
+ */
 export async function updateAdminContent(id: string, updates: Partial<MediaItem>): Promise<MediaItem> {
-  // Convert any remaining base64 payload to permanent Firebase Storage download URLs
   const storagePrepared = await ensureMediaItemStorageUrls(updates);
   const cleanUpdates = sanitizeFirestorePayload(storagePrepared);
 
@@ -1254,28 +1463,27 @@ export async function updateAdminContent(id: string, updates: Partial<MediaItem>
     throw new Error(`क्लाउड अपडेट विफल: ${err.message || 'नेटवर्क त्रुटि'}`);
   }
 
-  // 2. Update memory & local cache
-  let updatedItem: MediaItem = { id, ...cleanUpdates } as MediaItem;
+  // 2. Write-through update to memory & local cache (Zero subsequent getDocs needed!)
   const currentList = memoryContentList || getCachedContentListSync();
+  let updatedItem: MediaItem = { id, ...cleanUpdates } as MediaItem;
   const idx = currentList.findIndex(i => i.id === id);
+  let nextList: MediaItem[];
   if (idx !== -1) {
     updatedItem = { ...currentList[idx], ...cleanUpdates };
-    currentList[idx] = updatedItem;
-    memoryContentList = [...currentList];
+    nextList = [...currentList];
+    nextList[idx] = updatedItem;
   } else {
-    memoryContentList = [updatedItem, ...currentList];
+    nextList = [updatedItem, ...currentList];
   }
-  memoryContentTimestamp = Date.now();
-
-  try {
-    localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(memoryContentList));
-  } catch (_) {}
+  sharedContentManager.notifyLocalUpdate(nextList);
 
   return updatedItem;
 }
 
+/**
+ * Deletes content in Firestore + updates in-memory cache immediately (0 Extra Reads)
+ */
 export async function deleteAdminContent(id: string): Promise<boolean> {
-  // Find item if exists to clean up its storage media
   const currentList = memoryContentList || getCachedContentListSync();
   const targetItem = currentList.find(i => i.id === id);
 
@@ -1294,21 +1502,17 @@ export async function deleteAdminContent(id: string): Promise<boolean> {
     cleanupMediaItemStorage(targetItem).catch(err => console.warn('[Storage Cleanup Non-fatal]', err));
   }
 
-  // 3. Remove from local memory & cache
-  memoryContentList = currentList.filter(i => i.id !== id);
-  memoryContentTimestamp = Date.now();
-  try {
-    localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(memoryContentList));
-  } catch (_) {}
+  // 3. Write-through update to local memory & cache (Zero subsequent getDocs needed!)
+  const nextList = currentList.filter(i => i.id !== id);
+  sharedContentManager.notifyLocalUpdate(nextList);
 
   return true;
 }
 
-// ----------------------------------------------------------------------------
-// 11. Update Site Settings (Writes to Cloud Firestore & Memory Cache)
-// ----------------------------------------------------------------------------
+// ============================================================================
+// 11. Update Site Settings (Writes to Cloud Firestore & Updates Memory Cache)
+// ============================================================================
 export async function updateAdminSettings(settings: Partial<SiteSettings>): Promise<SiteSettings> {
-  // Ensure profile picture and banner are uploaded to Firebase Storage
   const storagePrepared = await ensureSiteSettingsStorageUrls(settings);
 
   const merged: SiteSettings = {
@@ -1322,14 +1526,15 @@ export async function updateAdminSettings(settings: Partial<SiteSettings>): Prom
   try {
     const docRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
     await setDoc(docRef, cleanSettings, { merge: true });
-    console.log('[Firebase Cloud] Successfully updated Cloud Site Settings for all devices');
+    console.log('[Firebase Cloud] Successfully updated Cloud Site Settings');
   } catch (err: any) {
     console.error('[Firebase Cloud Settings Error]', err);
     throw new Error(`सेटिंग्स सेव विफल: ${err.message || 'नेटवर्क त्रुटि'}`);
   }
 
-  // 2. Update local memory & cache
+  // 2. Write-through update to local memory & cache
   memorySiteSettings = cleanSettings;
+  memorySettingsTimestamp = Date.now();
   try {
     localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(cleanSettings));
   } catch (_) {}
@@ -1337,9 +1542,9 @@ export async function updateAdminSettings(settings: Partial<SiteSettings>): Prom
   return cleanSettings;
 }
 
-// ----------------------------------------------------------------------------
+// ============================================================================
 // Formatting Helper
-// ----------------------------------------------------------------------------
+// ============================================================================
 export function formatINR(amount: number): string {
   return `₹${amount.toLocaleString('en-IN')}`;
 }

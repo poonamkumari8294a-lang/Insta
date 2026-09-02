@@ -7,8 +7,17 @@ import {
   StorageReference
 } from 'firebase/storage';
 import { MediaItem, SiteSettings } from '../types';
+import { formatFileSize } from '../utils/mediaUpload';
 
 export type StorageFolder = 'photos' | 'videos' | 'thumbnails' | 'documents' | 'settings' | 'general';
+
+export interface StorageUploadProgress {
+  progressPercent: number;
+  statusText: string;
+  bytesTransferred: number;
+  totalBytes: number;
+  speedText?: string;
+}
 
 export interface StorageUploadResult {
   downloadUrl: string;
@@ -86,9 +95,12 @@ export function uploadFileToStorage(
   fileOrBlob: File | Blob,
   folder: StorageFolder = 'photos',
   customFilename?: string,
-  onProgress?: (progressPercent: number, statusText: string) => void
+  onProgress?: (progressPercent: number, statusText: string, meta?: { bytesTransferred: number; totalBytes: number; speedText?: string }) => void,
+  retryCount = 0
 ): Promise<StorageUploadResult> {
   const startTime = performance.now();
+  let lastTransferred = 0;
+  let lastTime = startTime;
 
   return new Promise((resolve, reject) => {
     try {
@@ -127,26 +139,73 @@ export function uploadFileToStorage(
         }
       };
 
+      // Notify immediately of network connection start
+      if (onProgress) {
+        onProgress(1, 'Connecting to Firebase Storage...', {
+          bytesTransferred: 0,
+          totalBytes: fileOrBlob.size || 0,
+          speedText: 'Starting...'
+        });
+      }
+
       const uploadTask = uploadBytesResumable(storageRef, fileOrBlob, metadata);
 
       uploadTask.on(
         'state_changed',
         (snapshot) => {
-          const progress = snapshot.totalBytes > 0
-            ? Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)
-            : 0;
+          const currentTime = performance.now();
+          const timeDeltaSec = Math.max(0.1, (currentTime - lastTime) / 1000);
+          const bytesDelta = Math.max(0, snapshot.bytesTransferred - lastTransferred);
+          const currentSpeedBps = bytesDelta / timeDeltaSec;
+          const speedFormatted = `${formatFileSize(currentSpeedBps)}/s`;
+
+          lastTransferred = snapshot.bytesTransferred;
+          lastTime = currentTime;
+
+          const totalBytes = snapshot.totalBytes || fileOrBlob.size || 1;
+          const rawProgress = Math.round((snapshot.bytesTransferred / totalBytes) * 100);
+          // Scale from 1 to 99% during active transfer
+          const progress = Math.min(99, Math.max(1, rawProgress));
+          const transferredFormatted = `${formatFileSize(snapshot.bytesTransferred)} / ${formatFileSize(totalBytes)}`;
+
           if (onProgress) {
-            onProgress(progress, `Uploading to Firebase Storage (${progress}%)...`);
+            onProgress(progress, `Uploading (${transferredFormatted}) • ${speedFormatted}`, {
+              bytesTransferred: snapshot.bytesTransferred,
+              totalBytes,
+              speedText: speedFormatted
+            });
           }
         },
-        (error) => {
+        async (error) => {
           console.error('[Firebase Storage Upload Error]', error);
-          reject(new Error(`Storage Upload Failed: ${error.message || 'Network error'}`));
+          if (retryCount < 2) {
+            console.warn(`[Firebase Storage] Retrying upload (attempt ${retryCount + 2})...`);
+            if (onProgress) {
+              onProgress(1, 'Retrying upload to Firebase Storage...', {
+                bytesTransferred: 0,
+                totalBytes: fileOrBlob.size || 0
+              });
+            }
+            try {
+              const retryRes = await uploadFileToStorage(fileOrBlob, folder, customFilename, onProgress, retryCount + 1);
+              resolve(retryRes);
+            } catch (retryErr) {
+              reject(retryErr);
+            }
+          } else {
+            reject(new Error(`Storage Upload Failed: ${error.message || 'Network error'}`));
+          }
         },
         async () => {
           try {
             const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
             const durationMs = Math.round(performance.now() - startTime);
+            if (onProgress) {
+              onProgress(100, 'Upload complete!', {
+                bytesTransferred: uploadTask.snapshot.totalBytes,
+                totalBytes: uploadTask.snapshot.totalBytes
+              });
+            }
             if (process.env.NODE_ENV !== 'production') {
               console.log(`[Firebase Storage] Uploaded ${folder}/${filename} (${uploadTask.snapshot.totalBytes} bytes) in ${durationMs}ms`);
             }
@@ -177,7 +236,7 @@ export async function uploadDataUrlToStorage(
   dataUrl: string,
   folder: StorageFolder = 'photos',
   customFilename?: string,
-  onProgress?: (progressPercent: number, statusText: string) => void
+  onProgress?: (progressPercent: number, statusText: string, meta?: { bytesTransferred: number; totalBytes: number; speedText?: string }) => void
 ): Promise<StorageUploadResult> {
   // If already an HTTP/HTTPS URL, return as-is immediately
   if (!isDataUrl(dataUrl)) {
@@ -233,9 +292,9 @@ export async function deleteStorageFile(urlOrPath: string): Promise<boolean> {
 }
 
 /**
- * Controlled Concurrency Pool for parallel tasks
+ * Controlled Concurrency Pool for parallel tasks (e.g. multi-photo albums)
  */
-async function asyncPool<T, R>(
+export async function asyncPool<T, R>(
   concurrency: number,
   items: T[],
   task: (item: T, index: number) => Promise<R>
