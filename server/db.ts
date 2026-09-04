@@ -22,7 +22,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   instagramUrl: 'https://instagram.com/ruma__cutegirl',
   instagramHandle: '@ruma__cuteg...',
   badgeText: 'VIP Creator',
-  upiId: process.env.CREATOR_UPI_ID || '6202292319pnb@ybl',
+  upiId: process.env.CREATOR_UPI_ID || 'rima11q@ptyes',
   postsCount: 135,
   followersCount: 3358,
   viewsCount: '346.0K',
@@ -310,6 +310,7 @@ interface DatabaseSchema {
   content: MediaItem[];
   orders: OrderItem[];
   tokens: { token: string; contentId: string; orderId: string; expiresAt: string; createdAt: string }[];
+  deletedIds?: string[];
 }
 
 class Database {
@@ -324,11 +325,16 @@ class Database {
       if (fs.existsSync(DATA_FILE)) {
         const raw = fs.readFileSync(DATA_FILE, 'utf-8');
         const parsed = JSON.parse(raw);
+        const deletedSet = new Set<string>(Array.isArray(parsed.deletedIds) ? parsed.deletedIds : []);
+        const rawContent: MediaItem[] = parsed.content || INITIAL_CONTENT;
+        const filteredContent = rawContent.filter(c => !deletedSet.has(c.id));
+
         return {
           settings: { ...DEFAULT_SITE_SETTINGS, ...(parsed.settings || {}) },
-          content: parsed.content || INITIAL_CONTENT,
+          content: filteredContent,
           orders: parsed.orders || [],
-          tokens: parsed.tokens || []
+          tokens: parsed.tokens || [],
+          deletedIds: Array.from(deletedSet)
         };
       }
     } catch (err) {
@@ -338,7 +344,8 @@ class Database {
       settings: DEFAULT_SITE_SETTINGS,
       content: INITIAL_CONTENT,
       orders: [],
-      tokens: []
+      tokens: [],
+      deletedIds: []
     };
   }
 
@@ -363,13 +370,22 @@ class Database {
 
   // Content Operations
   public getAllContent(includeUnpublished = false): MediaItem[] {
+    const deletedSet = new Set<string>(this.data.deletedIds || []);
+    const liveContent = this.data.content.filter(c => !deletedSet.has(c.id));
     if (includeUnpublished) {
-      return this.data.content;
+      return liveContent;
     }
-    return this.data.content.filter(c => c.published);
+    return liveContent.filter(c => c.published);
+  }
+
+  public getDeletedIds(): string[] {
+    return this.data.deletedIds || [];
   }
 
   public getContentById(id: string): MediaItem | undefined {
+    if (this.data.deletedIds && this.data.deletedIds.includes(id)) {
+      return undefined;
+    }
     return this.data.content.find(c => c.id === id);
   }
 
@@ -395,13 +411,52 @@ class Database {
   }
 
   public deleteContent(id: string): boolean {
+    if (!this.data.deletedIds) {
+      this.data.deletedIds = [];
+    }
+    if (!this.data.deletedIds.includes(id)) {
+      this.data.deletedIds.push(id);
+    }
     const prevLen = this.data.content.length;
     this.data.content = this.data.content.filter(c => c.id !== id);
-    if (this.data.content.length !== prevLen) {
-      this.saveData();
-      return true;
+    this.saveData();
+    return true;
+  }
+
+  public purgeDemoContent(): { deletedCount: number; purgedIds: string[] } {
+    const demoIds = ['rk-001', 'rk-002', 'rk-003', 'rk-004', 'rk-005', 'rk-006', 'rk-007', 'rk-008'];
+    if (!this.data.deletedIds) {
+      this.data.deletedIds = [];
     }
-    return false;
+    const newlyPurged: string[] = [];
+    demoIds.forEach(id => {
+      if (!this.data.deletedIds!.includes(id)) {
+        this.data.deletedIds!.push(id);
+      }
+      newlyPurged.push(id);
+    });
+
+    // Also remove items tagged or badged as Starter Demo
+    const removedItems = this.data.content.filter(c => 
+      demoIds.includes(c.id) || 
+      c.badge === 'Starter Demo' || 
+      (Array.isArray(c.tags) && c.tags.includes('Starter Demo'))
+    );
+    removedItems.forEach(i => {
+      if (!this.data.deletedIds!.includes(i.id)) {
+        this.data.deletedIds!.push(i.id);
+        newlyPurged.push(i.id);
+      }
+    });
+
+    this.data.content = this.data.content.filter(c => 
+      !demoIds.includes(c.id) && 
+      c.badge !== 'Starter Demo' && 
+      !(Array.isArray(c.tags) && c.tags.includes('Starter Demo'))
+    );
+
+    this.saveData();
+    return { deletedCount: newlyPurged.length, purgedIds: newlyPurged };
   }
 
   public incrementViews(id: string) {

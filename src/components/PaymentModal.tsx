@@ -762,7 +762,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                         Payee UPI ID
                       </span>
                       <p className="font-mono font-black text-xs sm:text-sm text-purple-950 truncate">
-                        {orderData?.order.upiId || '6202292319pnb@ybl'}
+                        {orderData?.order.upiId || 'rima11q@ptyes'}
                       </p>
                     </div>
                     <button

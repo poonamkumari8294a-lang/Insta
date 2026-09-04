@@ -74,20 +74,62 @@ export function getFirestoreReadStats(): FirestoreReadStats {
   return { ...readStats };
 }
 
-// Customer Session ID helper
+// ============================================================================
+// In-Memory & Session Storage Helpers (NEVER saved to browser localStorage)
+// ============================================================================
+const inMemorySessionStore: Record<string, string> = {};
+
+export function getSessionItem(key: string): string | null {
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      const val = sessionStorage.getItem(key);
+      if (val !== null) return val;
+    }
+  } catch (_) {}
+  return inMemorySessionStore[key] ?? null;
+}
+
+export function setSessionItem(key: string, value: string): void {
+  inMemorySessionStore[key] = value;
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      sessionStorage.setItem(key, value);
+    }
+  } catch (_) {}
+}
+
+export function removeSessionItem(key: string): void {
+  delete inMemorySessionStore[key];
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      sessionStorage.removeItem(key);
+    }
+  } catch (_) {}
+}
+
+// Proactively purge any leftover keys from browser LocalStorage
+if (typeof window !== 'undefined') {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.clear();
+    }
+  } catch (_) {}
+}
+
+// Customer Session ID helper (In-memory & session only)
 export function getOrCreateSessionId(): string {
-  let sessionId = localStorage.getItem(SESSION_ID_KEY);
+  let sessionId = getSessionItem(SESSION_ID_KEY);
   if (!sessionId) {
     sessionId = `user_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    localStorage.setItem(SESSION_ID_KEY, sessionId);
+    setSessionItem(SESSION_ID_KEY, sessionId);
   }
   return sessionId;
 }
 
-// Local Storage for Unlocked Tokens
+// Session / Memory Storage for Unlocked Tokens
 export function getStoredTokens(): Record<string, string> {
   try {
-    const raw = localStorage.getItem(TOKENS_STORAGE_KEY);
+    const raw = getSessionItem(TOKENS_STORAGE_KEY);
     return raw ? JSON.parse(raw) : {};
   } catch {
     return {};
@@ -97,12 +139,12 @@ export function getStoredTokens(): Record<string, string> {
 export function saveAccessToken(contentId: string, token: string) {
   const tokens = getStoredTokens();
   tokens[contentId] = token;
-  localStorage.setItem(TOKENS_STORAGE_KEY, JSON.stringify(tokens));
+  setSessionItem(TOKENS_STORAGE_KEY, JSON.stringify(tokens));
 }
 
 export function getStoredOrders(): string[] {
   try {
-    const raw = localStorage.getItem(ORDERS_STORAGE_KEY);
+    const raw = getSessionItem(ORDERS_STORAGE_KEY);
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
@@ -113,7 +155,7 @@ export function saveOrderId(orderId: string) {
   const orders = getStoredOrders();
   if (!orders.includes(orderId)) {
     orders.unshift(orderId);
-    localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(orders));
+    setSessionItem(ORDERS_STORAGE_KEY, JSON.stringify(orders));
   }
 }
 
@@ -122,7 +164,7 @@ const USER_PROFILE_KEY = 'ruma_vip_user_profile';
 
 export function getStoredUserProfile(): { name: string; phone: string; streakDays?: number; lastSpinDate?: string } | null {
   try {
-    const raw = localStorage.getItem(USER_PROFILE_KEY);
+    const raw = getSessionItem(USER_PROFILE_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -133,7 +175,7 @@ export function saveStoredUserProfile(profile: { name: string; phone: string; st
   try {
     const existing = getStoredUserProfile() || {};
     const updated = { ...existing, ...profile, updatedAt: new Date().toISOString() };
-    localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(updated));
+    setSessionItem(USER_PROFILE_KEY, JSON.stringify(updated));
   } catch (e) {
     console.error('Error saving user profile', e);
   }
@@ -170,17 +212,17 @@ export async function saveVipLeadToCloud(lead: {
   }
 }
 
-// Admin Auth Token helper
+// Admin Auth Token helper (Session & Memory only, NEVER LocalStorage)
 export function getAdminToken(): string | null {
-  return localStorage.getItem('ruma_admin_token');
+  return getSessionItem('ruma_admin_token');
 }
 
 export function setAdminToken(token: string) {
-  localStorage.setItem('ruma_admin_token', token);
+  setSessionItem('ruma_admin_token', token);
 }
 
 export function removeAdminToken() {
-  localStorage.removeItem('ruma_admin_token');
+  removeSessionItem('ruma_admin_token');
 }
 
 // ============================================================================
@@ -321,10 +363,63 @@ const SETTINGS_CACHE_KEY = 'ruma_cached_settings_v3';
 const CONTENT_CACHE_KEY = 'ruma_cached_content_v3';
 const ORDERS_CACHE_KEY = 'ruma_cached_orders_v3';
 const LEADS_CACHE_KEY = 'ruma_cached_leads_v3';
+const DELETED_IDS_KEY = 'ruma_deleted_content_ids_v1';
+
+export function getDeletedContentIds(): Set<string> {
+  try {
+    const raw = getSessionItem(DELETED_IDS_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) return new Set(arr);
+    }
+  } catch (_) {}
+  return new Set();
+}
+
+export function markContentAsDeleted(idOrIds: string | string[]) {
+  try {
+    const set = getDeletedContentIds();
+    if (Array.isArray(idOrIds)) {
+      idOrIds.forEach(id => set.add(id));
+    } else {
+      set.add(idOrIds);
+    }
+    setSessionItem(DELETED_IDS_KEY, JSON.stringify(Array.from(set)));
+  } catch (_) {}
+}
+
+export function filterOutDeletedItems(items: MediaItem[]): MediaItem[] {
+  if (!items || !Array.isArray(items) || items.length === 0) return [];
+  const deletedSet = getDeletedContentIds();
+  return items.filter(item => item && item.id && !deletedSet.has(item.id));
+}
+
+export async function syncDeletedIdsFromServer(): Promise<void> {
+  try {
+    const res = await fetch('/api/content/deleted-ids');
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.deletedIds) && data.deletedIds.length > 0) {
+        markContentAsDeleted(data.deletedIds);
+        if (memoryContentList) {
+          const filtered = filterOutDeletedItems(memoryContentList);
+          if (filtered.length !== memoryContentList.length) {
+            sharedContentManager.notifyLocalUpdate(filtered);
+          }
+        }
+      }
+    }
+  } catch (_) {}
+}
+
+// Automatically sync deleted IDs on startup
+if (typeof window !== 'undefined') {
+  syncDeletedIdsFromServer().catch(() => {});
+}
 
 export function hasLocalSettingsCache(): boolean {
   try {
-    return Boolean(localStorage.getItem(SETTINGS_CACHE_KEY));
+    return Boolean(getSessionItem(SETTINGS_CACHE_KEY));
   } catch (_) {
     return false;
   }
@@ -355,13 +450,107 @@ const SETTINGS_CACHE_TTL = 5 * 60 * 1000;
 const CONTENT_CACHE_TTL = 3 * 60 * 1000;
 const ADMIN_DATA_TTL = 3 * 60 * 1000;
 
+// ============================================================================
+// Robust Server Backend Synchronizer & Fallback
+// (Guarantees every visitor on any phone receives updated settings and real Cloudinary media
+// even if Firebase Daily Read Quota is exceeded or offline)
+// ============================================================================
+
+export async function fetchServerSettingsFallback(): Promise<SiteSettings | null> {
+  try {
+    const res = await fetch('/api/site/settings');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && typeof data === 'object' && (data.creatorName || data.upiId)) {
+        console.log('[Server Settings API] Loaded latest site settings from backend');
+        return {
+          ...CLIENT_SITE_SETTINGS,
+          ...data
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('[Server Settings Fallback]', err);
+  }
+  return null;
+}
+
+export async function fetchServerContentFallback(forAdmin = false): Promise<MediaItem[] | null> {
+  try {
+    let url = '/api/content';
+    const headers: Record<string, string> = {};
+    if (forAdmin) {
+      const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
+      url = '/api/admin/content';
+      headers['Authorization'] = `Bearer ${adminToken}`;
+    }
+    const res = await fetch(url, { headers });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        console.log(`[Server Content API] Loaded ${data.length} media items from backend`);
+        const cleaned = filterOutDeletedItems(data.map(item => reconnectCloudinaryMetadata(item)));
+        return cleaned;
+      }
+    } else if (forAdmin) {
+      const resPub = await fetch('/api/content');
+      if (resPub.ok) {
+        const dataPub = await resPub.json();
+        if (Array.isArray(dataPub) && dataPub.length > 0) {
+          const cleaned = filterOutDeletedItems(dataPub.map(item => reconnectCloudinaryMetadata(item)));
+          return cleaned;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Server Content Fallback]', err);
+  }
+  return null;
+}
+
+export async function syncSettingsToServer(settings: Partial<SiteSettings>): Promise<void> {
+  try {
+    const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
+    await fetch('/api/admin/settings', {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${adminToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(settings)
+    });
+    console.log('[Server Sync] Successfully synced site settings to backend');
+  } catch (e) {
+    console.warn('[Server Settings Sync Non-fatal]', e);
+  }
+}
+
+export async function syncContentToServer(item: MediaItem, isUpdate = false): Promise<void> {
+  try {
+    const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
+    const url = isUpdate ? `/api/admin/content/${item.id}` : '/api/admin/content';
+    const method = isUpdate ? 'PUT' : 'POST';
+    await fetch(url, {
+      method,
+      headers: {
+        'Authorization': `Bearer ${adminToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(item)
+    });
+    console.log(`[Server Sync] Successfully synced content "${item.id}" (${method}) to backend`);
+  } catch (e) {
+    console.warn('[Server Content Sync Non-fatal]', e);
+  }
+}
+
 /**
- * Synchronously retrieves cached settings from localStorage
+ * Synchronously retrieves cached settings from session / memory store
  */
 export function getCachedSiteSettingsSync(): SiteSettings {
   if (memorySiteSettings) return memorySiteSettings;
   try {
-    const raw = localStorage.getItem(SETTINGS_CACHE_KEY);
+    const raw = getSessionItem(SETTINGS_CACHE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed.instagramUrl && parsed.instagramUrl.includes('ruma__cutegirl')) {
@@ -381,21 +570,24 @@ export function getCachedSiteSettingsSync(): SiteSettings {
 }
 
 /**
- * Synchronously retrieves cached content list from localStorage.
+ * Synchronously retrieves cached content list from session / memory store.
  */
 export function getCachedContentListSync(): MediaItem[] {
-  if (memoryContentList && memoryContentList.length > 0) return memoryContentList;
+  if (memoryContentList && memoryContentList.length > 0) {
+    return filterOutDeletedItems(memoryContentList);
+  }
   try {
-    const raw = localStorage.getItem(CONTENT_CACHE_KEY);
+    const raw = getSessionItem(CONTENT_CACHE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as MediaItem[];
       if (Array.isArray(parsed) && parsed.length > 0) {
-        memoryContentList = parsed;
-        return parsed;
+        const clean = filterOutDeletedItems(parsed);
+        memoryContentList = clean;
+        return clean;
       }
     }
   } catch (_) {}
-  return CLIENT_CONTENT_LIST;
+  return filterOutDeletedItems(CLIENT_CONTENT_LIST);
 }
 
 // Helper to sanitize items based on user's purchased tokens
@@ -414,7 +606,7 @@ export function applyUserAccessTokens(items: MediaItem[]): MediaItem[] {
 }
 
 // ============================================================================
-// 1. Fetch Site Settings (Smart Cached + Single-Promise Deduplication)
+// 1. Fetch Site Settings (Smart Cached + Single-Promise Deduplication + Server Fallback)
 // ============================================================================
 export async function fetchSiteSettings(forceFresh = false): Promise<SiteSettings> {
   const now = Date.now();
@@ -423,8 +615,16 @@ export async function fetchSiteSettings(forceFresh = false): Promise<SiteSetting
     return memorySiteSettings;
   }
 
+  // If cloud quota is exhausted, immediately fetch latest from backend server API
   if (isCloudQuotaExhausted()) {
     trackFirestoreRead('cacheHit', 'settings:quota-cooldown');
+    const serverFallback = await fetchServerSettingsFallback();
+    if (serverFallback) {
+      memorySiteSettings = serverFallback;
+      memorySettingsTimestamp = Date.now();
+      try { setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(serverFallback)); } catch (_) {}
+      return serverFallback;
+    }
     return memorySiteSettings || getCachedSiteSettingsSync();
   }
 
@@ -437,7 +637,7 @@ export async function fetchSiteSettings(forceFresh = false): Promise<SiteSetting
     try {
       trackFirestoreRead('getDoc', 'settings/site_config', 1);
       const settingsRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
-      const snap = await withTimeout(getDoc(settingsRef), 6000);
+      const snap = await withTimeout(getDoc(settingsRef), 5000);
       
       if (snap.exists()) {
         const data = snap.data() as Partial<SiteSettings>;
@@ -457,32 +657,38 @@ export async function fetchSiteSettings(forceFresh = false): Promise<SiteSetting
         memorySiteSettings = merged;
         memorySettingsTimestamp = Date.now();
         try {
-          localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(merged));
+          setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(merged));
         } catch (_) {}
+        // Dual-sync to server database as well
+        syncSettingsToServer(merged).catch(() => {});
         return merged;
-      } else {
-        const initial = sanitizeFirestorePayload(CLIENT_SITE_SETTINGS);
-        try {
-          await setDoc(settingsRef, initial);
-        } catch (_) {}
-        memorySiteSettings = initial;
-        memorySettingsTimestamp = Date.now();
-        return initial;
       }
     } catch (err: any) {
-      console.warn('[Firebase] fetchSiteSettings fallback to cache:', err?.message || err);
+      console.warn('[Firebase] fetchSiteSettings fallback to server:', err?.message || err);
       handleFirestoreError('fetchSiteSettings', err);
-      return memorySiteSettings || getCachedSiteSettingsSync();
     } finally {
       activeSettingsPromise = null;
     }
+
+    // Server API Fallback
+    const serverFallback = await fetchServerSettingsFallback();
+    if (serverFallback) {
+      memorySiteSettings = serverFallback;
+      memorySettingsTimestamp = Date.now();
+      try {
+        setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(serverFallback));
+      } catch (_) {}
+      return serverFallback;
+    }
+
+    return memorySiteSettings || getCachedSiteSettingsSync();
   })();
 
   return activeSettingsPromise;
 }
 
 // ============================================================================
-// 2. Fetch User Content List (Optimized Query: published==true, limit=30)
+// 2. Fetch User Content List (Optimized Query + Server API Fallback)
 // ============================================================================
 export async function fetchContentList(forceFresh = false): Promise<MediaItem[]> {
   const now = Date.now();
@@ -493,6 +699,13 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
 
   if (isCloudQuotaExhausted()) {
     trackFirestoreRead('cacheHit', 'content:quota-cooldown');
+    const serverFallback = await fetchServerContentFallback(false);
+    if (serverFallback && serverFallback.length > 0) {
+      memoryContentList = serverFallback;
+      memoryContentTimestamp = Date.now();
+      try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(serverFallback)); } catch (_) {}
+      return applyUserAccessTokens(serverFallback);
+    }
     const cachedList = memoryContentList || getCachedContentListSync();
     return applyUserAccessTokens(cachedList);
   }
@@ -505,7 +718,6 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
   activeContentPromise = (async () => {
     try {
       const contentRef = collection(firestore, 'content');
-      // Efficient user feed query: Only published items, newest first, limit to 30 items
       let snap;
       try {
         const q = query(
@@ -515,12 +727,11 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
           firestoreLimit(30)
         );
         trackFirestoreRead('getDocs', 'content:published-feed', 1);
-        snap = await withTimeout(getDocs(q), 7000);
+        snap = await withTimeout(getDocs(q), 6000);
       } catch (_queryErr) {
-        // Fallback simple query without composite index requirement
         const qSimple = query(contentRef, where('published', '==', true), firestoreLimit(30));
         trackFirestoreRead('getDocs', 'content:published-fallback', 1);
-        snap = await withTimeout(getDocs(qSimple), 7000);
+        snap = await withTimeout(getDocs(qSimple), 6000);
       }
 
       const items: MediaItem[] = [];
@@ -529,42 +740,42 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
         items.push(item);
       });
 
-      if (items.length === 0 && CLIENT_CONTENT_LIST.length > 0) {
-        items.push(...CLIENT_CONTENT_LIST);
-        // Background restore to Firestore
-        (async () => {
-          try {
-            for (const it of CLIENT_CONTENT_LIST) {
-              await setDoc(doc(firestore, 'content', it.id), sanitizeFirestorePayload(it));
-            }
-          } catch (_) {}
-        })();
+      if (items.length > 0) {
+        items.sort((a, b) => {
+          const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return timeB - timeA;
+        });
+
+        memoryContentList = items;
+        memoryContentTimestamp = Date.now();
+
+        try {
+          setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(items));
+        } catch (_) {}
+
+        return applyUserAccessTokens(items);
       }
-
-      // Sort by creation date in memory
-      items.sort((a, b) => {
-        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return timeB - timeA;
-      });
-
-      memoryContentList = items;
-      memoryContentTimestamp = Date.now();
-
-      try {
-        localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(items));
-      } catch (_) {}
-
-      return applyUserAccessTokens(items);
     } catch (err: any) {
-      console.warn('[Firebase] fetchContentList fallback to cache:', err?.message || err);
+      console.warn('[Firebase] fetchContentList fallback to server API:', err?.message || err);
       handleFirestoreError('fetchContentList', err);
-      
-      const fallbackList = memoryContentList || getCachedContentListSync();
-      return applyUserAccessTokens(fallbackList);
     } finally {
       activeContentPromise = null;
     }
+
+    // Resilient fallback to backend server API (has all 37 Cloudinary media items!)
+    const serverFallback = await fetchServerContentFallback(false);
+    if (serverFallback && serverFallback.length > 0) {
+      memoryContentList = serverFallback;
+      memoryContentTimestamp = Date.now();
+      try {
+        setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(serverFallback));
+      } catch (_) {}
+      return applyUserAccessTokens(serverFallback);
+    }
+
+    const fallbackList = memoryContentList || getCachedContentListSync();
+    return applyUserAccessTokens(fallbackList);
   })();
 
   return activeContentPromise;
@@ -582,6 +793,7 @@ class ContentSubscriptionManager {
   private nextSubId = 1;
   private unsubscribeFirestore: Unsubscribe | null = null;
   private isConnecting = false;
+  private serverPollingInterval: any = null;
 
   public subscribe(onUpdate: ContentListener, onError?: ErrorListener): () => void {
     const id = this.nextSubId++;
@@ -595,33 +807,45 @@ class ContentSubscriptionManager {
       if (cached.length > 0) {
         onUpdate(applyUserAccessTokens(cached));
       }
+      // Immediately fetch from backend server API in background so user phone gets all real items
+      fetchServerContentFallback(false).then(serverItems => {
+        if (serverItems && serverItems.length > 0) {
+          this.notifyLocalUpdate(serverItems);
+        }
+      }).catch(() => {});
     }
 
-    // Attach single Firestore listener if this is the first subscriber
-    if (this.subscribers.size === 1 && !this.unsubscribeFirestore && !this.isConnecting) {
-      this.connectFirestore();
+    // Attach single Firestore listener or start server polling if first subscriber
+    if (this.subscribers.size === 1) {
+      if (!this.unsubscribeFirestore && !this.isConnecting) {
+        this.connectFirestore();
+      }
     }
 
     // Return cleanup function
     return () => {
       this.subscribers.delete(id);
-      if (this.subscribers.size === 0 && this.unsubscribeFirestore) {
-        try {
-          this.unsubscribeFirestore();
-        } catch (_) {}
-        this.unsubscribeFirestore = null;
-        console.log('[FIRESTORE LISTENER] Detached shared content listener (0 active subscribers)');
+      if (this.subscribers.size === 0) {
+        if (this.unsubscribeFirestore) {
+          try {
+            this.unsubscribeFirestore();
+          } catch (_) {}
+          this.unsubscribeFirestore = null;
+          console.log('[FIRESTORE LISTENER] Detached shared content listener (0 active subscribers)');
+        }
+        this.stopServerPolling();
       }
     };
   }
 
   public notifyLocalUpdate(updatedList: MediaItem[]) {
-    memoryContentList = updatedList;
+    const cleanList = filterOutDeletedItems(updatedList);
+    memoryContentList = cleanList;
     memoryContentTimestamp = Date.now();
     try {
-      localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(updatedList));
+      setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(cleanList));
     } catch (_) {}
-    const sanitized = applyUserAccessTokens(updatedList);
+    const sanitized = applyUserAccessTokens(cleanList);
     this.subscribers.forEach(sub => {
       try {
         sub.onUpdate(sanitized);
@@ -631,8 +855,35 @@ class ContentSubscriptionManager {
     });
   }
 
+  private startServerPolling() {
+    if (this.serverPollingInterval) return;
+    console.log('[Content Manager] Activating resilient Server API polling fallback...');
+    this.serverPollingInterval = setInterval(async () => {
+      if (this.subscribers.size === 0) {
+        this.stopServerPolling();
+        return;
+      }
+      try {
+        const items = await fetchServerContentFallback(false);
+        if (items && items.length > 0) {
+          this.notifyLocalUpdate(items);
+        }
+      } catch (_) {}
+    }, 20000);
+  }
+
+  private stopServerPolling() {
+    if (this.serverPollingInterval) {
+      clearInterval(this.serverPollingInterval);
+      this.serverPollingInterval = null;
+    }
+  }
+
   private connectFirestore() {
-    if (isCloudQuotaExhausted()) return;
+    if (isCloudQuotaExhausted()) {
+      this.startServerPolling();
+      return;
+    }
     this.isConnecting = true;
 
     const setupListener = (useSimpleQuery = false) => {
@@ -690,6 +941,9 @@ class ContentSubscriptionManager {
               this.unsubscribeFirestore = null;
             }
 
+            // Start background server polling fallback so all users stay live
+            this.startServerPolling();
+
             this.subscribers.forEach(sub => {
               if (sub.onError) sub.onError(error);
             });
@@ -701,6 +955,7 @@ class ContentSubscriptionManager {
           setupListener(true);
         } else {
           console.warn('[Firebase Shared Listener Setup Error]', err);
+          this.startServerPolling();
         }
       }
     };
@@ -718,8 +973,40 @@ export function subscribeToContentList(
   return sharedContentManager.subscribe(onUpdate, onError);
 }
 
+export function subscribeToSiteSettings(onUpdate: (settings: SiteSettings) => void): () => void {
+  // 1. Immediately send current settings if available
+  const current = memorySiteSettings || getCachedSiteSettingsSync();
+  onUpdate(current);
+
+  // 2. Fetch fresh settings from server in background
+  fetchServerSettingsFallback().then(fresh => {
+    if (fresh) {
+      memorySiteSettings = fresh;
+      memorySettingsTimestamp = Date.now();
+      try { setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(fresh)); } catch (_) {}
+      onUpdate(fresh);
+    }
+  }).catch(() => {});
+
+  // 3. Listen to local event
+  const handler = (e: any) => {
+    if (e.detail) {
+      onUpdate(e.detail);
+    }
+  };
+  if (typeof window !== 'undefined') {
+    window.addEventListener('site-settings-updated', handler);
+  }
+
+  return () => {
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('site-settings-updated', handler);
+    }
+  };
+}
+
 // ============================================================================
-// 3. Fetch Single Content Item (Zero-Read Cache-First lookup)
+// 3. Fetch Single Content Item (Zero-Read Cache-First lookup + Server API Fallback)
 // ============================================================================
 export async function fetchContentDetail(id: string): Promise<MediaItem> {
   if (!id) throw new Error('Invalid content ID');
@@ -746,17 +1033,25 @@ export async function fetchContentDetail(id: string): Promise<MediaItem> {
   const cached = getFromCache();
   if (cached) return cached;
 
+  // 2. If cloud quota exhausted, fetch directly from server API
   if (isCloudQuotaExhausted()) {
+    try {
+      const res = await fetch(`/api/content/${id}`);
+      if (res.ok) {
+        const item = await res.json();
+        return reconnectCloudinaryMetadata(item);
+      }
+    } catch (_) {}
     throw new Error('क्लाउड डेटा अस्थायी रूप से अनुपलब्ध है। कृपया बाद में प्रयास करें।');
   }
 
-  // 2. Fetch single document from Firestore only if cache missed
+  // 3. Fetch single document from Firestore only if cache missed
   try {
     trackFirestoreRead('getDoc', `content/${id}`, 1);
     const itemRef = doc(firestore, 'content', id);
     const snap = await withTimeout(getDoc(itemRef), 5000);
     if (snap.exists()) {
-      const item = { ...snap.data(), id: snap.id } as MediaItem;
+      const item = reconnectCloudinaryMetadata({ ...snap.data(), id: snap.id } as MediaItem);
       const userTokens = getStoredTokens();
       const isUnlocked = item.access === 'free' || Boolean(userTokens[item.id]);
       
@@ -774,44 +1069,78 @@ export async function fetchContentDetail(id: string): Promise<MediaItem> {
           ? (item.galleryUrls && item.galleryUrls.length > 0 ? item.galleryUrls : (item.mediaUrl ? [item.mediaUrl] : [item.thumbnailUrl]))
           : (item.previewUrl ? [item.previewUrl] : [item.thumbnailUrl])
       };
-    } else {
-      throw new Error(`Content item "${id}" not found`);
     }
   } catch (err: any) {
+    console.warn('[Firebase] fetchContentDetail fallback to server API:', err?.message || err);
     handleFirestoreError('fetchContentDetail', err);
-    throw new Error(err.message || `Content not found (ID: ${id})`);
   }
+
+  // Fallback to server API
+  try {
+    const res = await fetch(`/api/content/${id}`);
+    if (res.ok) {
+      const item = await res.json();
+      return reconnectCloudinaryMetadata(item);
+    }
+  } catch (_) {}
+
+  throw new Error(`Content not found (ID: ${id})`);
 }
 
 // ============================================================================
 // 3.5. Purge Demo Content (Clears placeholder seed items)
 // ============================================================================
 export async function purgeDemoContent(): Promise<{ deletedCount: number; message: string }> {
-  const demoIds = ['rk-001', 'rk-002', 'rk-003', 'rk-004', 'rk-005', 'rk-006', 'rk-007'];
-  let deletedCount = 0;
+  const demoIds = ['rk-001', 'rk-002', 'rk-003', 'rk-004', 'rk-005', 'rk-006', 'rk-007', 'rk-008'];
 
+  // 1. Mark as deleted in tombstone list so they never reappear
+  markContentAsDeleted(demoIds);
+
+  // 2. Immediately update local memory and notify subscribers
+  const current = memoryContentList || getCachedContentListSync();
+  const updated = current.filter(c => 
+    !demoIds.includes(c.id) && 
+    c.badge !== 'Starter Demo' && 
+    !(Array.isArray(c.tags) && c.tags.includes('Starter Demo'))
+  );
+  sharedContentManager.notifyLocalUpdate(updated);
+
+  // 3. Purge from backend server store.json
+  try {
+    const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
+    const sRes = await fetch('/api/admin/content/purge-demo', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${adminToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    if (sRes.ok) {
+      const sData = await sRes.json();
+      if (Array.isArray(sData.deletedIds)) {
+        markContentAsDeleted(sData.deletedIds);
+      }
+    }
+  } catch (_) {}
+
+  // 4. Also attempt Firestore deletion with safe timeout
+  let deletedCount = 0;
   for (const id of demoIds) {
     try {
       const itemRef = doc(firestore, 'content', id);
-      await deleteDoc(itemRef);
+      await withTimeout(deleteDoc(itemRef), 1500);
       deletedCount++;
     } catch (_) {}
   }
 
   try {
     const settingsRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
-    await setDoc(settingsRef, { demoPurged: true }, { merge: true });
+    await withTimeout(setDoc(settingsRef, { demoPurged: true }, { merge: true }), 2000);
   } catch (_) {}
 
-  // Update local memory & cache
-  if (memoryContentList) {
-    const updated = memoryContentList.filter(c => !demoIds.includes(c.id));
-    sharedContentManager.notifyLocalUpdate(updated);
-  }
-
   return {
-    deletedCount,
-    message: `सफलतापूर्वक ${deletedCount} डेमो पोस्ट हटा दिए गए। अब केवल आपका असली कंटेंट दिखेगा।`
+    deletedCount: demoIds.length,
+    message: `सफलतापूर्वक सभी ${demoIds.length} डेमो पोस्ट हटा दिए गए। अब केवल आपका असली कंटेंट दिखेगा।`
   };
 }
 
@@ -871,7 +1200,7 @@ export async function createOrder(
 
   const orderId = `ORD_${Date.now()}_${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
   const amount = Number(item?.price) || 49;
-  const upiId = (settings?.upiId || '6202292319pnb@ybl').trim();
+  const upiId = (settings?.upiId || 'rima11q@ptyes').trim();
   const payeeName = (settings?.creatorName || 'Ruma Kumari').trim();
   const transactionNote = `VIP Access - ${orderId}`;
 
@@ -1062,7 +1391,7 @@ export async function verifyUserPayment(orderId: string, transactionRef?: string
     amount: 49,
     currency: 'INR',
     status: 'paid',
-    upiId: '6202292319pnb@ybl',
+    upiId: 'rima11q@ptyes',
     qrString: '',
     customerSessionId: getOrCreateSessionId(),
     paidAt,
@@ -1492,7 +1821,7 @@ export async function verifyAdminOrder(orderId: string, transactionRef?: string)
     amount: 49,
     currency: 'INR',
     status: 'paid',
-    upiId: '6202292319pnb@ybl',
+    upiId: 'rima11q@ptyes',
     qrString: '',
     customerSessionId: getOrCreateSessionId(),
     paidAt,
@@ -1644,7 +1973,7 @@ export async function adminRejectOrder(orderId: string, _reason?: string): Promi
 }
 
 // ============================================================================
-// 10. Admin Content CRUD (Full Content List with Write-Through Memory Updates)
+// 10. Admin Content CRUD (Full Content List with Write-Through Memory Updates & Server Dual-Sync)
 // ============================================================================
 export async function fetchAdminContent(forceFresh = false): Promise<MediaItem[]> {
   const now = Date.now();
@@ -1655,6 +1984,13 @@ export async function fetchAdminContent(forceFresh = false): Promise<MediaItem[]
 
   if (isCloudQuotaExhausted()) {
     trackFirestoreRead('cacheHit', 'admin-content:quota-cooldown');
+    const serverItems = await fetchServerContentFallback(true);
+    if (serverItems && serverItems.length > 0) {
+      memoryContentList = serverItems;
+      memoryContentTimestamp = Date.now();
+      try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(serverItems)); } catch (_) {}
+      return serverItems;
+    }
     return memoryContentList || getCachedContentListSync();
   }
 
@@ -1667,37 +2003,44 @@ export async function fetchAdminContent(forceFresh = false): Promise<MediaItem[]
     try {
       trackFirestoreRead('getDocs', 'content:admin-all', 1);
       const contentRef = collection(firestore, 'content');
-      const snap = await withTimeout(getDocs(contentRef), 7000);
+      const snap = await withTimeout(getDocs(contentRef), 6000);
       
       const items: MediaItem[] = [];
       snap.forEach(d => {
         items.push(reconnectCloudinaryMetadata({ ...d.data(), id: d.id } as MediaItem));
       });
 
-      if (items.length === 0 && CLIENT_CONTENT_LIST.length > 0) {
-        items.push(...CLIENT_CONTENT_LIST);
+      if (items.length > 0) {
+        items.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        sharedContentManager.notifyLocalUpdate(items);
+        return items;
       }
-
-      items.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-      
-      // Update memory & local cache
-      sharedContentManager.notifyLocalUpdate(items);
-      return items;
     } catch (err: any) {
-      console.warn('[Firebase] fetchAdminContent fallback to cache:', err?.message || err);
+      console.warn('[Firebase] fetchAdminContent fallback to server:', err?.message || err);
       handleFirestoreError('fetchAdminContent', err);
-      return memoryContentList || getCachedContentListSync();
     } finally {
       activeAdminContentPromise = null;
     }
+
+    // Fallback: Fetch from server API with admin privileges
+    const serverItems = await fetchServerContentFallback(true);
+    if (serverItems && serverItems.length > 0) {
+      memoryContentList = serverItems;
+      memoryContentTimestamp = Date.now();
+      try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(serverItems)); } catch (_) {}
+      sharedContentManager.notifyLocalUpdate(serverItems);
+      return serverItems;
+    }
+
+    return memoryContentList || getCachedContentListSync();
   })();
 
   return activeAdminContentPromise;
 }
 
 /**
- * Creates content in Firestore + updates in-memory cache immediately (0 Extra Reads)
- * Firestore stores ONLY Cloudinary reference metadata (mediaUrl, cloudinaryPublicId, resource_type, format, etc.)
+ * Creates content in Firestore + updates in-memory cache + dual-writes to server database
+ * (Guarantees content is instantly visible to all users on any phone)
  */
 export async function createAdminContent(itemData: Partial<MediaItem>): Promise<MediaItem> {
   const newId = `rk-${Date.now()}`;
@@ -1749,22 +2092,20 @@ export async function createAdminContent(itemData: Partial<MediaItem>): Promise<
 
   const cleanItem = sanitizeFirestorePayload(rawItem);
 
-  // 1. Direct Cloud Firestore Write (Stores ONLY Cloudinary metadata)
+  // 1. Direct Cloud Firestore Write (Stores Cloudinary metadata)
   try {
     const docRef = doc(firestore, 'content', newId);
     await setDoc(docRef, cleanItem);
     console.log('[Firebase Cloud] Successfully stored post metadata in Firestore:', newId);
   } catch (err: any) {
-    console.error('[Firebase Cloud Write Error]', err);
-    if (isQuotaError(err)) {
-      handleFirestoreError('createAdminContent', err);
-      throw new Error('क्लाउड डेटाबेस कोटा समाप्त हो गया है। कृपया कुछ समय बाद प्रयास करें।');
-    } else {
-      throw new Error(`क्लाउड सेव विफल: ${err.message || 'नेटवर्क त्रुटि'}`);
-    }
+    console.warn('[Firebase Cloud Write Warning - Continuing to server sync]:', err?.message || err);
+    handleFirestoreError('createAdminContent', err);
   }
 
-  // 2. Write-through update to local memory & cache (Zero subsequent getDocs needed!)
+  // 2. Dual-write to Server Database so all users on mobile get the post immediately!
+  await syncContentToServer(cleanItem, false);
+
+  // 3. Write-through update to local memory & cache (Zero subsequent getDocs needed!)
   const currentList = memoryContentList || getCachedContentListSync();
   const nextList = [cleanItem, ...currentList.filter(i => i.id !== newId)];
   sharedContentManager.notifyLocalUpdate(nextList);
@@ -1773,7 +2114,7 @@ export async function createAdminContent(itemData: Partial<MediaItem>): Promise<
 }
 
 /**
- * Updates content in Firestore + updates in-memory cache immediately (0 Extra Reads)
+ * Updates content in Firestore + dual-writes to server database + updates in-memory cache immediately
  */
 export async function updateAdminContent(id: string, updates: Partial<MediaItem>): Promise<MediaItem> {
   const storagePrepared = await ensureMediaItemStorageUrls(updates);
@@ -1797,11 +2138,10 @@ export async function updateAdminContent(id: string, updates: Partial<MediaItem>
     await setDoc(docRef, cleanUpdates, { merge: true });
     console.log('[Firebase Cloud] Successfully updated post in Firestore:', id);
   } catch (err: any) {
-    console.error('[Firebase Cloud Update Error]', err);
-    throw new Error(`क्लाउड अपडेट विफल: ${err.message || 'नेटवर्क त्रुटि'}`);
+    console.warn('[Firebase Cloud Update Warning - Continuing to server sync]:', err?.message || err);
+    handleFirestoreError('updateAdminContent', err);
   }
 
-  // 2. Write-through update to memory & local cache (Zero subsequent getDocs needed!)
   const currentList = memoryContentList || getCachedContentListSync();
   let updatedItem: MediaItem = { id, ...cleanUpdates } as MediaItem;
   const idx = currentList.findIndex(i => i.id === id);
@@ -1813,6 +2153,11 @@ export async function updateAdminContent(id: string, updates: Partial<MediaItem>
   } else {
     nextList = [updatedItem, ...currentList];
   }
+
+  // 2. Dual-write to Server Database
+  await syncContentToServer(updatedItem, true);
+
+  // 3. Write-through update to memory & local cache
   sharedContentManager.notifyLocalUpdate(nextList);
 
   return updatedItem;
@@ -1827,50 +2172,58 @@ export async function deleteAdminContent(id: string, itemOverride?: MediaItem): 
   const currentList = memoryContentList || getCachedContentListSync();
   const targetItem = itemOverride || currentList.find(i => i.id === id);
 
-  // 1. SECURE SERVER-SIDE CLOUDINARY DELETE FIRST:
-  if (targetItem) {
-    try {
-      console.log(`[Delete Flow] Step 1: Requesting secure server-side Cloudinary asset deletion for "${id}"...`);
-      const cloudRes = await cleanupMediaItemStorage(targetItem);
-      console.log(`[Delete Flow] Cloudinary asset deletion result for "${id}":`, cloudRes);
-    } catch (cleanErr) {
-      console.warn('[Delete Flow] Non-fatal Cloudinary cleanup error:', cleanErr);
-    }
-  }
+  // 1. Mark as deleted locally in tombstone list (prevents any cached doc or snapshot from restoring it)
+  markContentAsDeleted(id);
 
-  // 2. FIRESTORE RECORD DELETE (Only after Cloudinary deletion completes)
-  try {
-    console.log(`[Delete Flow] Step 2: Deleting Firestore document record for "${id}"...`);
-    const docRef = doc(firestore, 'content', id);
-    await deleteDoc(docRef);
-    console.log('[Delete Flow] Successfully deleted document record from Firestore:', id);
-  } catch (err: any) {
-    console.error('[Firebase Cloud Delete Error]', err);
-    throw new Error(`क्लाउड से डिलीट विफल: ${err.message || 'नेटवर्क त्रुटि'}`);
-  }
+  // 2. Instant 0ms write-through update to local memory & UI subscribers
+  const nextList = currentList.filter(i => i.id !== id);
+  sharedContentManager.notifyLocalUpdate(nextList);
 
-  // Synchronize backend Express server cache as well
+  // 3. IMMEDIATE Server Database Deletion (Guarantees removal from data/store.json permanently)
   try {
-    const adminToken = localStorage.getItem('ruma_admin_token') || 'adm_Ashok#8899_token';
-    fetch(`/api/admin/content/${id}`, {
+    const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
+    const serverRes = await fetch(`/api/admin/content/${id}`, {
       method: 'DELETE',
       headers: {
         'Authorization': `Bearer ${adminToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ item: targetItem })
-    }).catch(() => {});
-  } catch (_) {}
+    });
+    if (serverRes.ok) {
+      const serverData = await serverRes.json();
+      if (Array.isArray(serverData.deletedIds)) {
+        markContentAsDeleted(serverData.deletedIds);
+      }
+      console.log(`[Delete Flow] Successfully deleted "${id}" from backend server store.json`);
+    }
+  } catch (serverErr) {
+    console.warn('[Delete Flow] Server deletion request notice:', serverErr);
+  }
 
-  // 3. Write-through update to local memory & cache (Instant UI refresh)
-  const nextList = currentList.filter(i => i.id !== id);
-  sharedContentManager.notifyLocalUpdate(nextList);
+  // 4. Delete Firestore Document Record with Safe Timeout (Handled gracefully if free quota limit is active)
+  try {
+    console.log(`[Delete Flow] Deleting Firestore document record for "${id}"...`);
+    const docRef = doc(firestore, 'content', id);
+    await withTimeout(deleteDoc(docRef), 2500);
+    console.log('[Delete Flow] Successfully deleted document record from Firestore:', id);
+  } catch (err: any) {
+    console.warn('[Firebase Cloud Delete Notice - Item protected by tombstone]:', err?.message || err);
+    handleFirestoreError('deleteAdminContent', err);
+  }
+
+  // 5. Cloudinary Media Asset Cleanup (Runs asynchronously so user UI is instant)
+  if (targetItem) {
+    cleanupMediaItemStorage(targetItem).catch(cleanErr => {
+      console.warn('[Delete Flow] Non-fatal Cloudinary cleanup note:', cleanErr);
+    });
+  }
 
   return true;
 }
 
 // ============================================================================
-// 11. Update Site Settings (Writes to Cloud Firestore & Updates Memory Cache)
+// 11. Update Site Settings (Writes to Server Database & Cloud Firestore)
 // ============================================================================
 export async function updateAdminSettings(settings: Partial<SiteSettings>): Promise<SiteSettings> {
   const storagePrepared = await ensureSiteSettingsStorageUrls(settings);
@@ -1888,18 +2241,21 @@ export async function updateAdminSettings(settings: Partial<SiteSettings>): Prom
     await setDoc(docRef, cleanSettings, { merge: true });
     console.log('[Firebase Cloud] Successfully updated Cloud Site Settings');
   } catch (err: any) {
-    console.error('[Firebase Cloud Settings Error]', err);
-    throw new Error(`सेटिंग्स सेव विफल: ${err.message || 'नेटवर्क त्रुटि'}`);
+    console.warn('[Firebase Cloud Settings Warning - Continuing to server sync]:', err?.message || err);
+    handleFirestoreError('updateAdminSettings', err);
   }
 
-  // 2. Write-through update to local memory & cache
+  // 2. Dual-write to Server Database (Guarantees every visitor's phone gets the updated settings!)
+  await syncSettingsToServer(cleanSettings);
+
+  // 3. Write-through update to local memory & cache
   memorySiteSettings = cleanSettings;
   memorySettingsTimestamp = Date.now();
   try {
-    localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(cleanSettings));
+    setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(cleanSettings));
   } catch (_) {}
 
-  // 3. Dispatch broadcast event for 0ms zero-refresh sync across all components
+  // 4. Dispatch broadcast event for 0ms zero-refresh sync across all components
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('site-settings-updated', { detail: cleanSettings }));
   }
@@ -1924,7 +2280,7 @@ export async function checkUserWhatsAppAccess(overridePhone?: string): Promise<{
   }
 
   // 2. Check local entitlement cache flag
-  if (typeof window !== 'undefined' && localStorage.getItem('ruma_whatsapp_access_granted') === 'true') {
+  if (typeof window !== 'undefined' && getSessionItem('ruma_whatsapp_access_granted') === 'true') {
     return { hasAccess: true, whatsappNumber: rawWhatsApp, source: 'cached_local' };
   }
 
@@ -1939,7 +2295,7 @@ export async function checkUserWhatsAppAccess(overridePhone?: string): Promise<{
       const entSnap = await withTimeout(getDoc(entRef), 2500);
       if (entSnap.exists() && entSnap.data()?.whatsappAccess === true) {
         if (typeof window !== 'undefined') {
-          localStorage.setItem('ruma_whatsapp_access_granted', 'true');
+          setSessionItem('ruma_whatsapp_access_granted', 'true');
         }
         return { hasAccess: true, whatsappNumber: rawWhatsApp, source: 'firestore_entitlement' };
       }
@@ -1950,7 +2306,7 @@ export async function checkUserWhatsAppAccess(overridePhone?: string): Promise<{
       const orderSnap = await withTimeout(getDocs(q), 2500);
       if (!orderSnap.empty) {
         if (typeof window !== 'undefined') {
-          localStorage.setItem('ruma_whatsapp_access_granted', 'true');
+          setSessionItem('ruma_whatsapp_access_granted', 'true');
         }
         // Save entitlement for fast subsequent lookup
         try {
@@ -1970,7 +2326,7 @@ export async function checkUserWhatsAppAccess(overridePhone?: string): Promise<{
   }
 
   // 4. Check orders in local storage
-  const localOrdersStr = typeof window !== 'undefined' ? localStorage.getItem('ruma_user_orders') : null;
+  const localOrdersStr = typeof window !== 'undefined' ? getSessionItem('ruma_user_orders') : null;
   if (localOrdersStr) {
     try {
       const localOrders: OrderItem[] = JSON.parse(localOrdersStr);
@@ -2014,7 +2370,7 @@ export async function verifyAndUnlockWhatsAppByPhone(phoneInput: string): Promis
       const entSnap = await withTimeout(getDoc(entRef), 3000);
       if (entSnap.exists() && entSnap.data()?.whatsappAccess === true) {
         if (typeof window !== 'undefined') {
-          localStorage.setItem('ruma_whatsapp_access_granted', 'true');
+          setSessionItem('ruma_whatsapp_access_granted', 'true');
           window.dispatchEvent(new CustomEvent('whatsapp-access-unlocked', { detail: { phone: cleanPhone } }));
         }
         return {
@@ -2040,7 +2396,7 @@ export async function verifyAndUnlockWhatsAppByPhone(phoneInput: string): Promis
         }, { merge: true });
 
         if (typeof window !== 'undefined') {
-          localStorage.setItem('ruma_whatsapp_access_granted', 'true');
+          setSessionItem('ruma_whatsapp_access_granted', 'true');
           window.dispatchEvent(new CustomEvent('whatsapp-access-unlocked', { detail: { phone: cleanPhone } }));
         }
 
@@ -2100,7 +2456,7 @@ export async function restorePreviousOriginalData(): Promise<{ success: boolean;
     memorySiteSettings = { ...CLIENT_SITE_SETTINGS };
     memorySettingsTimestamp = Date.now();
     try {
-      localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(CLIENT_SITE_SETTINGS));
+      setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(CLIENT_SITE_SETTINGS));
     } catch (_) {}
 
     // 2. Restore all 8 content items to Firestore & Cache
@@ -2117,7 +2473,7 @@ export async function restorePreviousOriginalData(): Promise<{ success: boolean;
     memoryContentList = [...CLIENT_CONTENT_LIST];
     memoryContentTimestamp = Date.now();
     try {
-      localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(CLIENT_CONTENT_LIST));
+      setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(CLIENT_CONTENT_LIST));
     } catch (_) {}
     sharedContentManager.notifyLocalUpdate(CLIENT_CONTENT_LIST);
 

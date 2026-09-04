@@ -446,8 +446,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     setLoading(true);
     try {
       const res = await purgeDemoContent();
-      const demoIds = ['rk-001', 'rk-002', 'rk-003', 'rk-004', 'rk-005', 'rk-006', 'rk-007'];
-      const nextList = contentList.filter(c => !demoIds.includes(c.id));
+      const demoIds = ['rk-001', 'rk-002', 'rk-003', 'rk-004', 'rk-005', 'rk-006', 'rk-007', 'rk-008'];
+      const nextList = contentList.filter(c => !demoIds.includes(c.id) && c.badge !== 'Starter Demo' && !(Array.isArray(c.tags) && c.tags.includes('Starter Demo')));
       setContentList(nextList);
       if (onContentUpdated) onContentUpdated(nextList);
       showToast(`✨ ${res.message}`);
@@ -889,7 +889,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               </span>
             </h1>
             <p className="text-xs text-purple-900/70 font-medium">
-              UPI Payee: <strong className="text-pink-700">{siteSettings?.upiId || 'ashokjee62022.wallet@phonepe'}</strong>
+              UPI Payee: <strong className="text-pink-700">{siteSettings?.upiId || 'rima11q@ptyes'}</strong>
             </p>
           </div>
         </div>

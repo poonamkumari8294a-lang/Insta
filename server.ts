@@ -104,6 +104,11 @@ async function startServer() {
   // PUBLIC API ROUTES
   // ----------------------------------------------------
 
+  // Health check endpoint
+  app.get('/api/health', (req: Request, res: Response) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString(), uptime: process.uptime() });
+  });
+
   // 1. Site Settings & Creator Profile
   app.get('/api/site/settings', (req: Request, res: Response) => {
     try {
@@ -118,7 +123,7 @@ async function startServer() {
   // 2. Public Content List (Hides sensitive mediaUrl for premium items unless token passed)
   app.get('/api/content', (req: Request, res: Response) => {
     try {
-      res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       const allContent = db.getAllContent(false);
       const userTokens = req.query.tokens ? (req.query.tokens as string).split(',') : [];
 
@@ -151,6 +156,16 @@ async function startServer() {
       });
 
       res.json(sanitized);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Public/Admin Deleted IDs list (Tombstone sync to prevent resurrected items)
+  app.get('/api/content/deleted-ids', (req: Request, res: Response) => {
+    try {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.json({ deletedIds: db.getDeletedIds() });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -516,11 +531,28 @@ async function startServer() {
         localDeleted: localSuccess,
         cloudinaryDeleted: allCloudinarySuccess,
         cloudinaryResults,
+        deletedIds: db.getDeletedIds(),
         message: 'Content and linked Cloudinary media assets processed for deletion.'
       });
     } catch (err: any) {
       console.error('[Admin Delete API Error]', err);
       res.status(500).json({ error: err.message || 'Failed to delete content' });
+    }
+  });
+
+  // Admin Purge Demo Content endpoint
+  app.post('/api/admin/content/purge-demo', requireAdmin, (req: Request, res: Response) => {
+    try {
+      const result = db.purgeDemoContent();
+      res.json({
+        success: true,
+        deletedCount: result.deletedCount,
+        purgedIds: result.purgedIds,
+        deletedIds: db.getDeletedIds(),
+        message: `Purged ${result.deletedCount} demo items from server database.`
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to purge demo content' });
     }
   });
 

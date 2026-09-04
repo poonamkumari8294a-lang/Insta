@@ -9,7 +9,7 @@
     "instagramUrl": "https://instagram.com/ruma__cutegirl",
     "instagramHandle": "@ruma__cuteg...",
     "badgeText": "VIP Creator",
-    "upiId": "6202292319pnb@ybl",
+    "upiId": "rima11q@ptyes",
     "postsCount": 37,
     "followersCount": 3358,
     "viewsCount": "346.0K",
@@ -17,7 +17,10 @@
     "announcementEnabled": true,
     "supportEmail": "contact.rumakumari@gmail.com",
     "supportTelegram": "https://t.me/rumakumari_vip",
+    "supportWhatsApp": "+63 9465507887",
     "paymentVerificationMode": "manual_approval",
+    "pushNotificationsEnabled": true,
+    "notifyOnNewPost": true,
     "homepageConfig": {
       "hero": {
         "enabled": true,
@@ -1060,29 +1063,6 @@
       "createdAt": "2026-09-02T06:56:19.000Z"
     },
     {
-      "id": "rk-001",
-      "title": "Blue Gym Set & Back Pose (Exclusive HD Set)",
-      "description": "Full resolution unfiltered photo collection from my favorite gym session. High quality studio camera shots.",
-      "type": "photo",
-      "access": "premium",
-      "price": 49,
-      "thumbnailUrl": "https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=800&auto=format&fit=crop&q=80",
-      "mediaUrl": "https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=1600&auto=format&fit=crop&q=95",
-      "tags": [
-        "Fitness",
-        "HD Photo",
-        "Exclusive",
-        "Gym",
-        "Starter Demo"
-      ],
-      "views": 3149,
-      "likes": 428,
-      "published": true,
-      "featured": true,
-      "createdAt": "2026-08-16T14:20:00.000Z",
-      "badge": "Starter Demo"
-    },
-    {
       "id": "rk-002",
       "title": "Green Backless Dress Reel (Uncut 1080p Video)",
       "description": "Full uncut 2-minute dance and mirror reel in the emerald green slit dress with original audio.",
@@ -1310,5 +1290,8 @@
       "expiresAt": "2026-09-19T08:38:57.123Z",
       "createdAt": "2026-08-20T08:38:57.123Z"
     }
+  ],
+  "deletedIds": [
+    "rk-001"
   ]
 }

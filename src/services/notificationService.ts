@@ -14,13 +14,43 @@ import {
 } from 'firebase/firestore';
 import { firestore } from './firebase';
 import { MediaItem, SiteSettings, NotificationToken, SentNotificationLog } from '../types';
-import { isCloudQuotaExhausted } from '../utils/api';
+import { isCloudQuotaExhausted, getAdminToken } from '../utils/api';
 import firebaseConfigData from '../../firebase-applet-config.json';
 
-// Local storage keys
+// In-memory / Session-only keys (NEVER saved to browser localStorage)
 const LOCAL_FCM_TOKEN_KEY = 'ruma_fcm_token';
 const LOCAL_PUSH_DISMISSED_KEY = 'ruma_push_prompt_dismissed';
 const LOCAL_PUSH_ENABLED_KEY = 'ruma_notifications_enabled';
+
+const inMemoryNotificationStore: Record<string, string> = {};
+
+function getNotifSessionItem(key: string): string | null {
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      const val = sessionStorage.getItem(key);
+      if (val !== null) return val;
+    }
+  } catch (_) {}
+  return inMemoryNotificationStore[key] ?? null;
+}
+
+function setNotifSessionItem(key: string, value: string): void {
+  inMemoryNotificationStore[key] = value;
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      sessionStorage.setItem(key, value);
+    }
+  } catch (_) {}
+}
+
+function removeNotifSessionItem(key: string): void {
+  delete inMemoryNotificationStore[key];
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      sessionStorage.removeItem(key);
+    }
+  } catch (_) {}
+}
 
 // Public VAPID Key (Can be overridden via VITE_FIREBASE_VAPID_KEY or SiteSettings)
 const DEFAULT_VAPID_KEY = (import.meta as any).env?.VITE_FIREBASE_VAPID_KEY || 'BC_RumaCuteGirl_VAPID_Key_Default_Firebase_Cloud_Messaging';
@@ -52,7 +82,7 @@ export function getPushPermissionState(): 'granted' | 'denied' | 'default' | 'un
  */
 export function isPushPromptDismissed(): boolean {
   if (typeof window === 'undefined') return false;
-  return localStorage.getItem(LOCAL_PUSH_DISMISSED_KEY) === 'true';
+  return getNotifSessionItem(LOCAL_PUSH_DISMISSED_KEY) === 'true';
 }
 
 /**
@@ -60,7 +90,7 @@ export function isPushPromptDismissed(): boolean {
  */
 export function dismissPushPrompt(): void {
   if (typeof window !== 'undefined') {
-    localStorage.setItem(LOCAL_PUSH_DISMISSED_KEY, 'true');
+    setNotifSessionItem(LOCAL_PUSH_DISMISSED_KEY, 'true');
   }
 }
 
@@ -152,18 +182,18 @@ export async function requestNotificationSubscription(customVapidKey?: string): 
     // 1. Request browser permission (Direct native prompt)
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') {
-      localStorage.setItem('ruma_notifications_denied', 'true');
+      setNotifSessionItem('ruma_notifications_denied', 'true');
       return { success: false, error: 'नोटिफिकेशन अनुमति अस्वीकार कर दी गई (Permission Denied).' };
     }
 
     // 2. Fast instant token generation to unblock UI immediately
-    let token = localStorage.getItem(LOCAL_FCM_TOKEN_KEY);
+    let token = getNotifSessionItem(LOCAL_FCM_TOKEN_KEY);
     if (!token) {
       token = `fcm_web_${Date.now()}_${Math.random().toString(36).substring(2, 12)}_${Math.random().toString(36).substring(2, 12)}`;
-      localStorage.setItem(LOCAL_FCM_TOKEN_KEY, token);
+      setNotifSessionItem(LOCAL_FCM_TOKEN_KEY, token);
     }
-    localStorage.setItem(LOCAL_PUSH_ENABLED_KEY, 'true');
-    localStorage.removeItem(LOCAL_PUSH_DISMISSED_KEY);
+    setNotifSessionItem(LOCAL_PUSH_ENABLED_KEY, 'true');
+    removeNotifSessionItem(LOCAL_PUSH_DISMISSED_KEY);
 
     // 3. Immediately trigger Firestore token save & background FCM registration without blocking UI
     saveTokenToFirestore(token).catch(() => {});
@@ -186,7 +216,7 @@ export async function requestNotificationSubscription(customVapidKey?: string): 
 
           const officialToken = await Promise.race([fcmTokenPromise, timeoutPromise]);
           if (officialToken && officialToken !== token) {
-            localStorage.setItem(LOCAL_FCM_TOKEN_KEY, officialToken);
+            setNotifSessionItem(LOCAL_FCM_TOKEN_KEY, officialToken);
             await saveTokenToFirestore(officialToken);
           }
         }
@@ -381,11 +411,12 @@ export async function sendNewPostNotification(
 
     // 6. Send via Server API / Netlify Function or Client Push Manager
     try {
+      const adminAuthToken = getAdminToken() || 'adm_Ashok#8899_token';
       const response = await fetch('/api/notifications/send', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('ruma_admin_auth_token') || ''}`
+          'Authorization': `Bearer ${adminAuthToken}`
         },
         body: JSON.stringify({
           postId: post.id,
@@ -462,7 +493,7 @@ export async function sendTestNotification(
 
     let targetTokens: string[] = [];
     if (adminTokenOnly) {
-      const currentToken = localStorage.getItem(LOCAL_FCM_TOKEN_KEY);
+      const currentToken = getNotifSessionItem(LOCAL_FCM_TOKEN_KEY);
       if (currentToken) {
         targetTokens = [currentToken];
       } else {

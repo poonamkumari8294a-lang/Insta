@@ -34,7 +34,7 @@ import {
   Radio
 } from 'lucide-react';
 import { uploadToCloudinary } from '../services/cloudinary';
-import { updateAdminSettings, getSecretUrl, triggerPushNotificationToSubscribers } from '../utils/api';
+import { updateAdminSettings, getSecretUrl, triggerPushNotificationToSubscribers, getAdminToken } from '../utils/api';
 
 interface ProfileWebsiteSettingsSectionProps {
   settings: SiteSettings;
@@ -124,7 +124,7 @@ export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSecti
       // Asynchronously attempt non-fatal deletion of previous old asset if it was on Cloudinary
       if (previousPublicId && previousPublicId !== result.publicId) {
         try {
-          const adminToken = localStorage.getItem('ruma_admin_token') || 'adm_Ashok#8899_token';
+          const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
           fetch('/api/admin/media/delete', {
             method: 'POST',
             headers: {
@@ -808,7 +808,7 @@ export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSecti
                 type="text"
                 value={formData.upiId || ''}
                 onChange={(e) => handleChange('upiId', e.target.value)}
-                placeholder="e.g. 6202292319pnb@ybl or username@okhdfcbank"
+                placeholder="e.g. rima11q@ptyes or username@okhdfcbank"
                 className="w-full bg-white border-2 border-emerald-300 rounded-2xl px-3.5 py-2.5 text-xs text-emerald-800 font-mono font-bold shadow-xs"
               />
               <p className="text-[10px] text-purple-900/70 mt-1">

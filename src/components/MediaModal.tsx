@@ -11,17 +11,24 @@ import {
   ChevronRight,
   Layers
 } from 'lucide-react';
+import { LockedPhotoOverlay } from './LockedPhotoOverlay';
 
 interface MediaModalProps {
   item: MediaItem | null;
+  isOpen?: boolean;
   onClose: () => void;
-  creatorName: string;
+  creatorName?: string;
+  isUnlocked?: boolean;
+  onBuy?: (item: MediaItem) => void;
 }
 
 export const MediaModal: React.FC<MediaModalProps> = ({
   item,
+  isOpen = true,
   onClose,
-  creatorName,
+  creatorName = 'Ruma Kumari',
+  isUnlocked = false,
+  onBuy,
 }) => {
   const [isScreenProtected, setIsScreenProtected] = useState(false);
   const [securityWarning, setSecurityWarning] = useState<string | null>(null);
@@ -86,7 +93,9 @@ export const MediaModal: React.FC<MediaModalProps> = ({
     };
   }, []);
 
-  if (!item) return null;
+  if (!isOpen || !item) return null;
+
+  const canAccess = item.access === 'free' || isUnlocked;
 
   const galleryList = (item.galleryUrls && item.galleryUrls.length > 0)
     ? item.galleryUrls
@@ -94,7 +103,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({
 
   const activePhotoSrc = galleryList[photoIndex] || item.mediaUrl || item.thumbnailUrl;
   const mediaSource = item.mediaUrl || item.thumbnailUrl;
-  const hasMultiplePhotos = item.type !== 'video' && galleryList.length > 1;
+  const hasMultiplePhotos = canAccess && item.type !== 'video' && galleryList.length > 1;
 
   const handleNextPhoto = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -115,9 +124,15 @@ export const MediaModal: React.FC<MediaModalProps> = ({
         {/* Top Bar */}
         <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-3.5 border-b border-purple-100 bg-white/80">
           <div className="flex items-center gap-2 sm:gap-3 pr-2">
-            <span className="bg-pink-100 text-pink-700 border border-pink-200 text-xs font-black px-3 py-1 rounded-full uppercase tracking-wider flex items-center gap-1 shadow-sm">
+            <span className={`text-xs font-black px-3 py-1 rounded-full uppercase tracking-wider flex items-center gap-1 shadow-sm ${
+              item.access === 'free'
+                ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                : canAccess
+                ? 'bg-pink-100 text-pink-700 border border-pink-200'
+                : 'bg-purple-100 text-purple-800 border border-purple-200'
+            }`}>
               <Sparkles className="w-3 h-3 text-pink-600" />
-              {item.access === 'free' ? 'Free Preview' : 'VIP Unlocked'}
+              {item.access === 'free' ? 'Free Preview' : canAccess ? 'VIP Unlocked' : 'VIP Locked'}
             </span>
             <h2 className="text-sm sm:text-base font-black text-purple-950 truncate max-w-[200px] sm:max-w-md">
               {item.title}
@@ -176,8 +191,25 @@ export const MediaModal: React.FC<MediaModalProps> = ({
             ))}
           </div>
 
-          {/* Media Content */}
-          {item.type === 'video' ? (
+          {/* Media Content or Locked Overlay */}
+          {!canAccess ? (
+            <div className="relative w-full h-full min-h-[340px] flex items-center justify-center">
+              <img
+                src={item.thumbnailUrl}
+                alt={item.title}
+                className="w-full h-full object-cover filter blur-[20px] scale-105 opacity-40 select-none pointer-events-none"
+                referrerPolicy="no-referrer"
+              />
+              <LockedPhotoOverlay
+                item={item}
+                onUnlock={() => {
+                  onClose();
+                  if (onBuy) onBuy(item);
+                }}
+                variant="detail"
+              />
+            </div>
+          ) : item.type === 'video' ? (
             <div className="relative w-full h-full flex items-center justify-center group">
               <video
                 src={mediaSource}

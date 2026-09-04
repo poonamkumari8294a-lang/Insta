@@ -15,19 +15,32 @@ export interface NetworkSpeedStatus {
 
 const LITE_MODE_STORAGE_KEY = 'ruma_data_saver_lite_mode';
 
-// Helper to check if user manually forced Lite Mode
+let inMemoryLiteMode: boolean | null = null;
+
+// Helper to check if user manually forced Lite Mode (In-memory & session only, no localStorage)
 export function getStoredLiteModePreference(): boolean | null {
+  if (inMemoryLiteMode !== null) return inMemoryLiteMode;
   try {
-    const val = localStorage.getItem(LITE_MODE_STORAGE_KEY);
-    if (val !== null) return val === 'true';
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      const val = sessionStorage.getItem(LITE_MODE_STORAGE_KEY);
+      if (val !== null) {
+        inMemoryLiteMode = val === 'true';
+        return inMemoryLiteMode;
+      }
+    }
   } catch (_) {}
   return null;
 }
 
 export function setStoredLiteModePreference(enabled: boolean) {
+  inMemoryLiteMode = enabled;
   try {
-    localStorage.setItem(LITE_MODE_STORAGE_KEY, enabled ? 'true' : 'false');
-    window.dispatchEvent(new Event('network-lite-mode-changed'));
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      sessionStorage.setItem(LITE_MODE_STORAGE_KEY, enabled ? 'true' : 'false');
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('network-lite-mode-changed'));
+    }
   } catch (_) {}
 }
 

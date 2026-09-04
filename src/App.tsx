@@ -4,6 +4,7 @@ import {
   fetchSiteSettings,
   fetchContentList,
   subscribeToContentList,
+  subscribeToSiteSettings,
   getCachedSiteSettingsSync,
   getCachedContentListSync,
   getStoredTokens,
@@ -149,6 +150,13 @@ export default function App() {
     // 1. Initial settings fetch with caching
     loadData(false);
 
+    // 1.1 Subscribe to real-time site settings changes
+    const unsubscribeSettings = subscribeToSiteSettings((newSettings) => {
+      if (newSettings) {
+        setSettings(newSettings);
+      }
+    });
+
     // 2. Real-time content synchronization via Singleton Shared Listener
     const unsubscribeContent = subscribeToContentList(
       (items) => {
@@ -188,6 +196,18 @@ export default function App() {
     window.addEventListener('visibilitychange', handleVisibilityOrFocus);
     window.addEventListener('focus', handleVisibilityOrFocus);
 
+    // 4.1 Periodic background sync every 25 seconds for mobile devices
+    const periodicSync = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchContentList(true).then((freshItems) => {
+          if (freshItems && freshItems.length > 0) setContent(freshItems);
+        }).catch(() => {});
+        fetchSiteSettings(true).then((freshSettings) => {
+          if (freshSettings) setSettings(freshSettings);
+        }).catch(() => {});
+      }
+    }, 25000);
+
     // 5. Listen for hash & URL changes
     const handleUrlChange = () => {
       const { route, mediaId } = getRouteFromUrl();
@@ -199,7 +219,9 @@ export default function App() {
     window.addEventListener('popstate', handleUrlChange);
 
     return () => {
+      unsubscribeSettings();
       unsubscribeContent();
+      clearInterval(periodicSync);
       window.removeEventListener('visibilitychange', handleVisibilityOrFocus);
       window.removeEventListener('focus', handleVisibilityOrFocus);
       window.removeEventListener('hashchange', handleUrlChange);
@@ -447,6 +469,7 @@ export default function App() {
             item={activeMediaItem}
             isOpen={Boolean(activeMediaItem)}
             onClose={() => setActiveMediaItem(null)}
+            creatorName={settings?.creatorName || 'Ruma Kumari'}
             onBuy={handleBuyMedia}
             isUnlocked={unlockedIds.includes(activeMediaItem.id)}
           />

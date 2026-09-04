@@ -189,6 +189,7 @@ export async function uploadMediaToStorage(
 }
 
 import { MediaItem, SiteSettings } from '../types';
+import { getAdminToken } from '../utils/api';
 
 /**
  * Deletes a file or asset from storage via secure backend endpoint
@@ -196,7 +197,7 @@ import { MediaItem, SiteSettings } from '../types';
 export async function deleteStorageFile(urlOrPath: string): Promise<boolean> {
   if (!urlOrPath) return true;
   try {
-    const adminToken = localStorage.getItem('ruma_admin_token') || 'adm_Ashok#8899_token';
+    const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
     const res = await fetch('/api/admin/media/delete', {
       method: 'POST',
       headers: {
@@ -321,7 +322,7 @@ export async function ensureSiteSettingsStorageUrls(
 export async function cleanupMediaItemStorage(item: Partial<MediaItem>): Promise<{ success: boolean; results?: any[] }> {
   if (!item) return { success: true };
   try {
-    const adminToken = localStorage.getItem('ruma_admin_token') || 'adm_Ashok#8899_token';
+    const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
     console.log(`[Storage Cleanup] Requesting backend Cloudinary deletion for item "${item.id}"...`);
     
     // Collect all associated URLs
