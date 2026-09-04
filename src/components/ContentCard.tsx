@@ -95,28 +95,20 @@ const ContentCardComponent: React.FC<ContentCardProps> = ({
   return (
     <div
       id={`content-card-${item.id}`}
-      className="glass-card glass-card-hover rounded-2xl sm:rounded-3xl overflow-hidden flex flex-col group relative border border-white/80 transition-all duration-300 select-none protected-media-container"
+      className="glass-card glass-card-hover rounded-2xl sm:rounded-3xl overflow-hidden flex flex-col group relative border border-white/80 transition-all duration-300 select-none protected-media-container [content-visibility:auto] [contain-intrinsic-size:360px]"
     >
       {/* Media Wrapper (Natural Aspect Ratio - 100% Zero Cropping across 9:16, 4:5, 1:1, 16:9, 4:3) */}
       <div 
         onContextMenu={(e) => e.preventDefault()}
-        className="relative w-full overflow-hidden bg-purple-950/10 select-none flex items-center justify-center"
+        className="relative w-full overflow-hidden bg-purple-950/15 select-none flex items-center justify-center min-h-[220px]"
       >
-        {/* Subtle Ambient Blurred Fill behind the photo (prevents harsh empty edges on extreme wide/tall shots) */}
-        <img
-          src={getOptimizedImageUrl(item.thumbnailUrl, 160, 30)}
-          alt=""
-          aria-hidden="true"
-          loading="lazy"
-          decoding="async"
-          className="absolute inset-0 w-full h-full object-cover filter blur-2xl scale-125 opacity-25 select-none pointer-events-none"
-          referrerPolicy="no-referrer"
-        />
+        {/* Ambient Gradient Fill behind photo */}
+        <div className="absolute inset-0 bg-gradient-to-b from-purple-950/30 via-pink-950/15 to-purple-950/40 pointer-events-none" />
 
         {/* Media Thumbnail Foreground (Natural Ratio, Height Auto, Width 100%, Never Cropped, Never Distorted) */}
         <img
-          src={canAccess ? getOptimizedImageUrl(item.thumbnailUrl, 640, 80) : getOptimizedImageUrl(item.thumbnailUrl, 480, 60)}
-          srcSet={canAccess ? (getResponsiveSrcSet(item.thumbnailUrl) || undefined) : undefined}
+          src={canAccess ? getOptimizedImageUrl(item.thumbnailUrl, 540, 75) : getOptimizedImageUrl(item.thumbnailUrl, 400, 60)}
+          srcSet={getResponsiveSrcSet(item.thumbnailUrl) || undefined}
           sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
           alt={item.title}
           loading={priority ? 'eager' : 'lazy'}
@@ -124,9 +116,9 @@ const ContentCardComponent: React.FC<ContentCardProps> = ({
           {...(priority ? { fetchPriority: 'high' as const } : {})}
           onContextMenu={(e) => e.preventDefault()}
           onDragStart={(e) => e.preventDefault()}
-          className={`relative z-[1] block w-full h-auto max-h-[85vh] object-contain transition-all duration-500 group-hover:scale-105 pointer-events-none ${
+          className={`relative z-[1] block w-full h-auto max-h-[85vh] object-contain transition-transform duration-300 group-hover:scale-105 pointer-events-none ${
             !canAccess
-              ? 'filter blur-[7px] brightness-[0.92] contrast-[1.08] saturate-[1.2] scale-105 opacity-90'
+              ? 'filter blur-[7px] brightness-[0.92] contrast-[1.08] saturate-[1.2] opacity-90'
               : 'opacity-100'
           }`}
           referrerPolicy="no-referrer"

@@ -634,61 +634,81 @@ export async function fetchSiteSettings(forceFresh = false): Promise<SiteSetting
   }
 
   activeSettingsPromise = (async () => {
-    try {
-      trackFirestoreRead('getDoc', 'settings/site_config', 1);
-      const settingsRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
-      const snap = await withTimeout(getDoc(settingsRef), 5000);
-      
-      if (snap.exists()) {
-        const data = snap.data() as Partial<SiteSettings>;
-        const merged: SiteSettings = {
-          ...CLIENT_SITE_SETTINGS,
-          ...data,
-          profilePicUrl: data.profilePicUrl !== undefined ? data.profilePicUrl : CLIENT_SITE_SETTINGS.profilePicUrl,
-          bannerUrl: data.bannerUrl !== undefined ? data.bannerUrl : CLIENT_SITE_SETTINGS.bannerUrl,
-          creatorName: data.creatorName || CLIENT_SITE_SETTINGS.creatorName,
-          upiId: data.upiId || CLIENT_SITE_SETTINGS.upiId,
-          tagline: data.tagline !== undefined ? data.tagline : CLIENT_SITE_SETTINGS.tagline,
-          bio: data.bio !== undefined ? data.bio : CLIENT_SITE_SETTINGS.bio,
-          instagramUrl: (data.instagramUrl && data.instagramUrl.includes('ruma__cutegirl')) ? 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3' : (data.instagramUrl || CLIENT_SITE_SETTINGS.instagramUrl),
-          supportInstagram: data.supportInstagram || 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3',
-          instagramHandle: data.instagramHandle && data.instagramHandle !== '@ruma__cuteg...' ? data.instagramHandle : '@ruma__cutegirl'
-        };
-        memorySiteSettings = merged;
-        memorySettingsTimestamp = Date.now();
-        try {
-          setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(merged));
-        } catch (_) {}
-        // Dual-sync to server database as well
-        syncSettingsToServer(merged).catch(() => {});
-        return merged;
-      }
-    } catch (err: any) {
-      console.warn('[Firebase] fetchSiteSettings fallback to server:', err?.message || err);
-      handleFirestoreError('fetchSiteSettings', err);
-    } finally {
-      activeSettingsPromise = null;
-    }
+    // 1. Kick off instant local server API fetch (~2ms)
+    const serverPromise = fetchServerSettingsFallback().catch(() => null);
 
-    // Server API Fallback
-    const serverFallback = await fetchServerSettingsFallback();
-    if (serverFallback) {
-      memorySiteSettings = serverFallback;
-      memorySettingsTimestamp = Date.now();
+    // 2. Also query Firestore with a tight 1200ms timeout
+    const firestorePromise = (async () => {
       try {
-        setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(serverFallback));
-      } catch (_) {}
-      return serverFallback;
+        trackFirestoreRead('getDoc', 'settings/site_config', 1);
+        const settingsRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
+        const snap = await withTimeout(getDoc(settingsRef), 1200);
+        
+        if (snap && snap.exists()) {
+          const data = snap.data() as Partial<SiteSettings>;
+          const merged: SiteSettings = {
+            ...CLIENT_SITE_SETTINGS,
+            ...data,
+            profilePicUrl: data.profilePicUrl !== undefined ? data.profilePicUrl : CLIENT_SITE_SETTINGS.profilePicUrl,
+            bannerUrl: data.bannerUrl !== undefined ? data.bannerUrl : CLIENT_SITE_SETTINGS.bannerUrl,
+            creatorName: data.creatorName || CLIENT_SITE_SETTINGS.creatorName,
+            upiId: data.upiId || CLIENT_SITE_SETTINGS.upiId,
+            tagline: data.tagline !== undefined ? data.tagline : CLIENT_SITE_SETTINGS.tagline,
+            bio: data.bio !== undefined ? data.bio : CLIENT_SITE_SETTINGS.bio,
+            instagramUrl: (data.instagramUrl && data.instagramUrl.includes('ruma__cutegirl')) ? 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3' : (data.instagramUrl || CLIENT_SITE_SETTINGS.instagramUrl),
+            supportInstagram: data.supportInstagram || 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3',
+            instagramHandle: data.instagramHandle && data.instagramHandle !== '@ruma__cuteg...' ? data.instagramHandle : '@ruma__cutegirl'
+          };
+          return merged;
+        }
+      } catch (err: any) {
+        handleFirestoreError('fetchSiteSettings', err);
+      }
+      return null;
+    })();
+
+    try {
+      // Prioritize instant server API response
+      const serverResult = await serverPromise;
+      if (serverResult) {
+        memorySiteSettings = serverResult;
+        memorySettingsTimestamp = Date.now();
+        try { setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(serverResult)); } catch (_) {}
+
+        // Allow firestore to finish in background and update cache if newer
+        firestorePromise.then(fsResult => {
+          if (fsResult) {
+            memorySiteSettings = fsResult;
+            memorySettingsTimestamp = Date.now();
+            try { setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(fsResult)); } catch (_) {}
+            syncSettingsToServer(fsResult).catch(() => {});
+          }
+        }).catch(() => {});
+
+        return serverResult;
+      }
+    } catch (_) {}
+
+    // If server failed, await firestore result
+    const fsResult = await firestorePromise;
+    if (fsResult) {
+      memorySiteSettings = fsResult;
+      memorySettingsTimestamp = Date.now();
+      try { setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(fsResult)); } catch (_) {}
+      syncSettingsToServer(fsResult).catch(() => {});
+      return fsResult;
     }
 
     return memorySiteSettings || getCachedSiteSettingsSync();
-  })();
+  })().finally(() => {
+    activeSettingsPromise = null;
+  });
 
   return activeSettingsPromise;
 }
 
 // ============================================================================
-// 2. Fetch User Content List (Optimized Query + Server API Fallback)
+// 2. Fetch User Content List (Optimized Fast-First + Server API Parallelism)
 // ============================================================================
 export async function fetchContentList(forceFresh = false): Promise<MediaItem[]> {
   const now = Date.now();
@@ -716,67 +736,84 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
   }
 
   activeContentPromise = (async () => {
-    try {
-      const contentRef = collection(firestore, 'content');
-      let snap;
+    // 1. Concurrently fetch instant local server endpoint (~4ms, has all 37 Cloudinary items)
+    const serverPromise = fetchServerContentFallback(false).catch(() => null);
+
+    // 2. Also query Firestore with a tight 1200ms timeout
+    const firestorePromise = (async () => {
       try {
-        const q = query(
-          contentRef,
-          where('published', '==', true),
-          orderBy('createdAt', 'desc'),
-          firestoreLimit(30)
-        );
-        trackFirestoreRead('getDocs', 'content:published-feed', 1);
-        snap = await withTimeout(getDocs(q), 6000);
-      } catch (_queryErr) {
-        const qSimple = query(contentRef, where('published', '==', true), firestoreLimit(30));
-        trackFirestoreRead('getDocs', 'content:published-fallback', 1);
-        snap = await withTimeout(getDocs(qSimple), 6000);
-      }
+        const contentRef = collection(firestore, 'content');
+        let snap;
+        try {
+          const q = query(
+            contentRef,
+            where('published', '==', true),
+            orderBy('createdAt', 'desc'),
+            firestoreLimit(30)
+          );
+          trackFirestoreRead('getDocs', 'content:published-feed', 1);
+          snap = await withTimeout(getDocs(q), 1200);
+        } catch (_queryErr) {
+          const qSimple = query(contentRef, where('published', '==', true), firestoreLimit(30));
+          trackFirestoreRead('getDocs', 'content:published-fallback', 1);
+          snap = await withTimeout(getDocs(qSimple), 1000);
+        }
 
-      const items: MediaItem[] = [];
-      snap.forEach(docSnap => {
-        const item = reconnectCloudinaryMetadata({ ...docSnap.data(), id: docSnap.id } as MediaItem);
-        items.push(item);
-      });
-
-      if (items.length > 0) {
-        items.sort((a, b) => {
-          const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-          const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-          return timeB - timeA;
+        const items: MediaItem[] = [];
+        snap.forEach(docSnap => {
+          const item = reconnectCloudinaryMetadata({ ...docSnap.data(), id: docSnap.id } as MediaItem);
+          items.push(item);
         });
 
-        memoryContentList = items;
-        memoryContentTimestamp = Date.now();
-
-        try {
-          setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(items));
-        } catch (_) {}
-
-        return applyUserAccessTokens(items);
+        if (items.length > 0) {
+          items.sort((a, b) => {
+            const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            return timeB - timeA;
+          });
+          return items;
+        }
+      } catch (err: any) {
+        handleFirestoreError('fetchContentList', err);
       }
-    } catch (err: any) {
-      console.warn('[Firebase] fetchContentList fallback to server API:', err?.message || err);
-      handleFirestoreError('fetchContentList', err);
-    } finally {
-      activeContentPromise = null;
-    }
+      return null;
+    })();
 
-    // Resilient fallback to backend server API (has all 37 Cloudinary media items!)
-    const serverFallback = await fetchServerContentFallback(false);
-    if (serverFallback && serverFallback.length > 0) {
-      memoryContentList = serverFallback;
+    try {
+      // Prioritize instant server API response (returns in ~4ms!)
+      const serverResult = await serverPromise;
+      if (serverResult && serverResult.length > 0) {
+        memoryContentList = serverResult;
+        memoryContentTimestamp = Date.now();
+        try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(serverResult)); } catch (_) {}
+
+        // Let Firestore finish in background without blocking UI
+        firestorePromise.then(fsItems => {
+          if (fsItems && fsItems.length > 0) {
+            memoryContentList = fsItems;
+            memoryContentTimestamp = Date.now();
+            try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(fsItems)); } catch (_) {}
+          }
+        }).catch(() => {});
+
+        return applyUserAccessTokens(serverResult);
+      }
+    } catch (_) {}
+
+    // If server fallback was empty, await firestore result
+    const fsItems = await firestorePromise;
+    if (fsItems && fsItems.length > 0) {
+      memoryContentList = fsItems;
       memoryContentTimestamp = Date.now();
-      try {
-        setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(serverFallback));
-      } catch (_) {}
-      return applyUserAccessTokens(serverFallback);
+      try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(fsItems)); } catch (_) {}
+      return applyUserAccessTokens(fsItems);
     }
 
     const fallbackList = memoryContentList || getCachedContentListSync();
     return applyUserAccessTokens(fallbackList);
-  })();
+  })().finally(() => {
+    activeContentPromise = null;
+  });
 
   return activeContentPromise;
 }

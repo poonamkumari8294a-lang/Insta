@@ -46,7 +46,13 @@ export function getOptimizedImageUrl(
 
   // 2. Cloudinary Dynamic CDN (c_limit preserves aspect ratio without cropping)
   if (url.includes('res.cloudinary.com')) {
-    return url.replace('/upload/', `/upload/w_${targetWidth},q_${targetQuality},f_auto,c_limit/`);
+    if (url.includes(`/upload/w_${targetWidth}`)) {
+      return url;
+    }
+    if (url.includes('/upload/')) {
+      return url.replace(/\/upload\/(?:[a-z]{1,2}_[^/]+\/)?/, `/upload/w_${targetWidth},q_${targetQuality},f_auto,c_limit/`);
+    }
+    return url;
   }
 
   // 3. Imgix / Fastly CDNs
@@ -79,7 +85,7 @@ export function getResponsiveSrcSet(url: string | undefined | null): string {
     return '';
   }
 
-  if (url.includes('images.unsplash.com')) {
+  if (url.includes('images.unsplash.com') || url.includes('res.cloudinary.com')) {
     const w320 = getOptimizedImageUrl(url, 320, 70);
     const w480 = getOptimizedImageUrl(url, 480, 75);
     const w640 = getOptimizedImageUrl(url, 640, 75);

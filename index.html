@@ -87,17 +87,24 @@
         }
 
         if (typeof MutationObserver !== 'undefined') {
+          var observerTimer = null;
           var observer = new MutationObserver(function() {
-            stripNetlifyOverlays();
+            if (observerTimer) return;
+            observerTimer = setTimeout(function() {
+              observerTimer = null;
+              stripNetlifyOverlays();
+            }, 600);
           });
           observer.observe(document.documentElement, { childList: true, subtree: true });
+          setTimeout(function() {
+            try { observer.disconnect(); } catch (e) {}
+          }, 4000);
         }
 
         document.addEventListener('DOMContentLoaded', stripNetlifyOverlays);
         window.addEventListener('load', stripNetlifyOverlays);
-        setTimeout(stripNetlifyOverlays, 500);
-        setTimeout(stripNetlifyOverlays, 1500);
-        setTimeout(stripNetlifyOverlays, 3000);
+        setTimeout(stripNetlifyOverlays, 800);
+        setTimeout(stripNetlifyOverlays, 2500);
       })();
     </script>
   </head>

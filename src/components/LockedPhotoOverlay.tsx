@@ -90,10 +90,10 @@ export const LockedPhotoOverlay: React.FC<LockedPhotoOverlayProps> = ({
         {/* Pulsing Seductive Neon Lock Ring */}
         <div className="relative mb-2.5">
           {/* Ambient intense hot glow */}
-          <div className="absolute -inset-3 rounded-full bg-gradient-to-tr from-rose-600 via-pink-600 to-amber-400 opacity-85 blur-lg animate-pulse" />
+          <div className="absolute -inset-2 rounded-full bg-gradient-to-tr from-rose-600 via-pink-600 to-amber-400 opacity-80 blur-md group-hover:animate-pulse" />
           
-          <div className="relative w-13 h-13 sm:w-15 sm:h-15 rounded-full bg-black/80 border-2 border-pink-400 backdrop-blur-xl flex items-center justify-center shadow-2xl shadow-pink-500/80 group-hover:scale-110 transition-transform">
-            <Lock className="w-6 h-6 sm:w-7 sm:h-7 text-pink-300 animate-bounce" style={{ animationDuration: '2.5s' }} />
+          <div className="relative w-13 h-13 sm:w-15 sm:h-15 rounded-full bg-black/85 border-2 border-pink-400 backdrop-blur-md flex items-center justify-center shadow-xl shadow-pink-500/50 group-hover:scale-105 transition-transform duration-200">
+            <Lock className="w-6 h-6 sm:w-7 sm:h-7 text-pink-300 group-hover:animate-bounce" />
           </div>
 
           {/* Sparkle badge */}
@@ -117,7 +117,7 @@ export const LockedPhotoOverlay: React.FC<LockedPhotoOverlayProps> = ({
             ₹{originalPrice}
           </span>
           <span className="text-base sm:text-lg font-black text-yellow-300 font-display flex items-center gap-1">
-            <Zap className="w-3.5 h-3.5 text-yellow-300 fill-yellow-400 animate-pulse" />
+            <Zap className="w-3.5 h-3.5 text-yellow-300 fill-yellow-400" />
             {formatINR(item.price)}
           </span>
           <span className="text-[9px] font-black uppercase bg-gradient-to-r from-rose-600 to-pink-600 text-white px-1.5 py-0.5 rounded shadow-xs">

@@ -179,15 +179,18 @@ export default function App() {
       console.warn('Background content revalidation:', err);
     });
 
-    // 4. Automatic resync when tab or device becomes active / visible
+    // 4. Gentle resync when tab or device becomes active / visible (throttled to once per minute)
+    let lastSyncTime = Date.now();
     const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible') {
-        fetchContentList(true).then((freshItems) => {
+      const now = Date.now();
+      if (document.visibilityState === 'visible' && now - lastSyncTime > 60000) {
+        lastSyncTime = now;
+        fetchContentList(false).then((freshItems) => {
           if (freshItems && freshItems.length > 0) {
             setContent(freshItems);
           }
         }).catch(() => {});
-        fetchSiteSettings(true).then((freshSettings) => {
+        fetchSiteSettings(false).then((freshSettings) => {
           if (freshSettings) setSettings(freshSettings);
         }).catch(() => {});
       }
@@ -196,17 +199,17 @@ export default function App() {
     window.addEventListener('visibilitychange', handleVisibilityOrFocus);
     window.addEventListener('focus', handleVisibilityOrFocus);
 
-    // 4.1 Periodic background sync every 25 seconds for mobile devices
+    // 4.1 Gentle background sync every 2 minutes for mobile devices
     const periodicSync = setInterval(() => {
       if (document.visibilityState === 'visible') {
-        fetchContentList(true).then((freshItems) => {
+        fetchContentList(false).then((freshItems) => {
           if (freshItems && freshItems.length > 0) setContent(freshItems);
         }).catch(() => {});
-        fetchSiteSettings(true).then((freshSettings) => {
+        fetchSiteSettings(false).then((freshSettings) => {
           if (freshSettings) setSettings(freshSettings);
         }).catch(() => {});
       }
-    }, 25000);
+    }, 120000);
 
     // 5. Listen for hash & URL changes
     const handleUrlChange = () => {
