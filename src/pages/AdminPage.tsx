@@ -650,7 +650,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     try {
       await deleteAdminOrder(deletingOrder.orderId);
       setOrdersList(prev => prev.filter(o => o.orderId !== deletingOrder.orderId));
-      showToast('✅ आर्डर डेटाबेस से सफलतापूर्वक डिलीट कर दिया गया');
+      showToast('🗑️ आर्डर और पेमेंट स्क्रीनशॉट Cloudinary व Firebase दोनों से हमेशा के लिए डिलीट हो गए!');
       setDeletingOrder(null);
     } catch (err: any) {
       showToast(err.message || 'आर्डर डिलीट करने में विफल', 'error');
@@ -3020,7 +3020,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
             </div>
 
             <p className="text-xs text-purple-900/80 leading-relaxed font-medium">
-              क्या आप वाकई इस आर्डर रिकॉर्ड को डेटाबेस से डिलीट करना चाहते हैं?
+              क्या आप वाकई इस आर्डर को डिलीट करना चाहते हैं? यह <b>Cloudinary</b> (पेमेंट स्क्रीनशॉट) और <b>Firebase Firestore</b> (डेटाबेस) दोनों से हमेशा के लिए हटा दिया जाएगा।
             </p>
 
             <div className="flex items-center justify-end gap-2.5 pt-2">

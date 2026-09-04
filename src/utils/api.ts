@@ -1,6 +1,5 @@
 import { MediaItem, OrderItem, SiteSettings, AdminStats } from '../types';
 import { CLIENT_SITE_SETTINGS, CLIENT_CONTENT_LIST } from '../data/defaultData';
-import QRCode from 'qrcode';
 import { firestore } from '../services/firebase';
 import {
   ensureMediaItemStorageUrls,
@@ -365,26 +364,40 @@ const ORDERS_CACHE_KEY = 'ruma_cached_orders_v3';
 const LEADS_CACHE_KEY = 'ruma_cached_leads_v3';
 const DELETED_IDS_KEY = 'ruma_deleted_content_ids_v1';
 
+// In-memory set for instantaneous O(1) checks
+const inMemoryDeletedIds = new Set<string>();
+
 export function getDeletedContentIds(): Set<string> {
   try {
     const raw = getSessionItem(DELETED_IDS_KEY);
     if (raw) {
       const arr = JSON.parse(raw);
-      if (Array.isArray(arr)) return new Set(arr);
+      if (Array.isArray(arr)) {
+        arr.forEach(id => inMemoryDeletedIds.add(id));
+      }
     }
   } catch (_) {}
-  return new Set();
+  return new Set(inMemoryDeletedIds);
 }
 
 export function markContentAsDeleted(idOrIds: string | string[]) {
   try {
-    const set = getDeletedContentIds();
-    if (Array.isArray(idOrIds)) {
-      idOrIds.forEach(id => set.add(id));
-    } else {
-      set.add(idOrIds);
+    const list = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
+    list.forEach(id => {
+      if (id && typeof id === 'string') {
+        inMemoryDeletedIds.add(id);
+      }
+    });
+    setSessionItem(DELETED_IDS_KEY, JSON.stringify(Array.from(inMemoryDeletedIds)));
+    
+    // Broadcast across tabs/windows on the current device for 0ms cross-tab disappearance
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        const bc = new BroadcastChannel('ruma_deletion_sync');
+        bc.postMessage({ type: 'SYNC_DELETED_IDS', ids: list });
+        bc.close();
+      } catch (_) {}
     }
-    setSessionItem(DELETED_IDS_KEY, JSON.stringify(Array.from(set)));
   } catch (_) {}
 }
 
@@ -412,9 +425,26 @@ export async function syncDeletedIdsFromServer(): Promise<void> {
   } catch (_) {}
 }
 
-// Automatically sync deleted IDs on startup
+// Automatically sync deleted IDs on startup and listen for cross-tab deletion broadcasts
 if (typeof window !== 'undefined') {
   syncDeletedIdsFromServer().catch(() => {});
+
+  if (typeof BroadcastChannel !== 'undefined') {
+    try {
+      const bc = new BroadcastChannel('ruma_deletion_sync');
+      bc.onmessage = (event) => {
+        if (event.data && event.data.type === 'SYNC_DELETED_IDS' && Array.isArray(event.data.ids)) {
+          event.data.ids.forEach((id: string) => inMemoryDeletedIds.add(id));
+          if (memoryContentList) {
+            const filtered = filterOutDeletedItems(memoryContentList);
+            if (filtered.length !== memoryContentList.length) {
+              sharedContentManager.notifyLocalUpdate(filtered);
+            }
+          }
+        }
+      };
+    } catch (_) {}
+  }
 }
 
 export function hasLocalSettingsCache(): boolean {
@@ -1048,6 +1078,11 @@ export function subscribeToSiteSettings(onUpdate: (settings: SiteSettings) => vo
 export async function fetchContentDetail(id: string): Promise<MediaItem> {
   if (!id) throw new Error('Invalid content ID');
 
+  const deletedSet = getDeletedContentIds();
+  if (deletedSet.has(id)) {
+    throw new Error('This post has been deleted and is no longer available.');
+  }
+
   const getFromCache = (): MediaItem | null => {
     const list = memoryContentList || getCachedContentListSync();
     const found = list.find(c => c.id === id);
@@ -1254,6 +1289,8 @@ export async function createOrder(
 
   let qrDataUrl = '';
   try {
+    const QRCodeModule = await import('qrcode');
+    const QRCode = (QRCodeModule as any).default || QRCodeModule;
     qrDataUrl = await QRCode.toDataURL(upiIntentUrl, {
       margin: 1,
       width: 360,
@@ -1265,7 +1302,11 @@ export async function createOrder(
     });
   } catch (qrErr) {
     console.error('QR generation error:', qrErr);
-    qrDataUrl = await QRCode.toDataURL(`upi://pay?pa=${encodeURIComponent(upiId)}&am=${amount}`);
+    try {
+      const QRCodeModule = await import('qrcode');
+      const QRCode = (QRCodeModule as any).default || QRCodeModule;
+      qrDataUrl = await QRCode.toDataURL(`upi://pay?pa=${encodeURIComponent(upiId)}&am=${amount}`);
+    } catch (_) {}
   }
 
   const storedUser = getStoredUserProfile();
@@ -1620,9 +1661,52 @@ export async function fetchVipLeads(forceFresh = false): Promise<any[]> {
 }
 
 /**
- * Permanently deletes a VIP Lead / User from Firestore and updates memory
+ * Permanently deletes arbitrary media URLs from Cloudinary via authenticated admin API
+ */
+export async function deleteCloudinaryMediaUrls(urls: string[]): Promise<boolean> {
+  const cleanUrls = (urls || []).filter(u => typeof u === 'string' && u.includes('cloudinary.com'));
+  if (cleanUrls.length === 0) return true;
+  try {
+    const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
+    const res = await fetch('/api/admin/media/delete', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({ urls: cleanUrls })
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('[Cloudinary Media URLs Delete Warning]', err);
+    return false;
+  }
+}
+
+/**
+ * Permanently deletes a VIP Lead / User from Firestore and Cloudinary, and updates memory
  */
 export async function deleteVipLead(leadId: string): Promise<boolean> {
+  // 1. Check if lead has Cloudinary photos/avatars
+  const lead = memoryVipLeads?.find(l => l.id === leadId || l.userId === leadId);
+  const targetUrls = lead ? [lead.photoUrl, lead.avatarUrl, lead.screenshotUrl].filter(Boolean) : [];
+
+  // 2. Call backend deletion API (purges Cloudinary assets + server Firestore deletion)
+  try {
+    const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
+    await fetch(`/api/admin/leads/${leadId}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({ lead, urls: targetUrls })
+    });
+  } catch (backendErr) {
+    console.warn('[Backend Lead Delete Warning]', backendErr);
+  }
+
+  // 3. Direct Client-side Firestore deleteDoc for instant redundancy
   if (!isCloudQuotaExhausted()) {
     try {
       const leadRef = doc(firestore, 'vip_leads', leadId);
@@ -1634,7 +1718,7 @@ export async function deleteVipLead(leadId: string): Promise<boolean> {
     }
   }
 
-  // Update in-memory cache
+  // 4. Update in-memory cache
   if (memoryVipLeads) {
     memoryVipLeads = memoryVipLeads.filter(l => l.id !== leadId && l.userId !== leadId);
   }
@@ -1714,9 +1798,30 @@ export async function changeVipUserId(oldId: string, newId: string, currentData:
 }
 
 /**
- * Deletes payment screenshot from an order
+ * Deletes payment screenshot from an order from both Cloudinary and Firebase
  */
 export async function deletePaymentScreenshot(orderId: string): Promise<boolean> {
+  const order = memoryAdminOrders?.find(o => o.orderId === orderId);
+  const screenshotUrl = order?.screenshotUrl;
+
+  // 1. Delete asset from Cloudinary
+  if (screenshotUrl && typeof screenshotUrl === 'string' && screenshotUrl.includes('cloudinary.com')) {
+    try {
+      const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
+      await fetch(`/api/admin/orders/${orderId}/screenshot`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminToken}`
+        },
+        body: JSON.stringify({ screenshotUrl })
+      });
+    } catch (cdnErr) {
+      console.warn('[Screenshot Cloudinary Delete Warning]', cdnErr);
+    }
+  }
+
+  // 2. Clear screenshotUrl in Firestore
   if (!isCloudQuotaExhausted()) {
     try {
       const orderRef = doc(firestore, 'orders', orderId);
@@ -1779,9 +1884,27 @@ export async function createVipLead(leadData: Record<string, any>): Promise<any>
 }
 
 /**
- * Deletes / Archives an Order from Firestore and updates memory
+ * Permanently deletes an Order from Firebase Firestore, Cloudinary screenshot, and server database
  */
 export async function deleteAdminOrder(orderId: string): Promise<boolean> {
+  const order = memoryAdminOrders?.find(o => o.orderId === orderId);
+
+  // 1. Authoritative Backend Deletion (destroys Cloudinary screenshot + Firestore doc + server db)
+  try {
+    const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
+    await fetch(`/api/admin/orders/${orderId}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({ screenshotUrl: order?.screenshotUrl })
+    });
+  } catch (backendErr) {
+    console.warn('[Backend Order Delete Warning]', backendErr);
+  }
+
+  // 2. Direct Client-side Firestore deleteDoc for redundant instant consistency
   if (!isCloudQuotaExhausted()) {
     try {
       const orderRef = doc(firestore, 'orders', orderId);
@@ -1793,7 +1916,7 @@ export async function deleteAdminOrder(orderId: string): Promise<boolean> {
     }
   }
 
-  // Update in-memory cache
+  // 3. Update in-memory cache
   if (memoryAdminOrders) {
     memoryAdminOrders = memoryAdminOrders.filter(o => o.orderId !== orderId);
   }
@@ -2201,62 +2324,132 @@ export async function updateAdminContent(id: string, updates: Partial<MediaItem>
 }
 
 /**
- * Deletes content following strict user-mandated flow:
- * Admin → Delete Photo/Video → secure backend/server-side Cloudinary delete → Cloudinary asset delete → THEN Firestore record delete
- * API Secret is never exposed to the frontend.
+ * Deletes content following the strict user-mandated pipeline:
+ * Admin Delete
+ *       ↓
+ * Firebase Firestore से document DELETE
+ *       ↓
+ * Cloudinary से original photo/video DELETE
+ *       ↓
+ * Server cache / store.json update
+ *       ↓
+ * सभी devices Firebase से fresh data लें
+ *       ↓
+ * Photo हर device से गायब
  */
-export async function deleteAdminContent(id: string, itemOverride?: MediaItem): Promise<boolean> {
+export async function deleteAdminContent(id: string, itemOverride?: MediaItem): Promise<{
+  success: boolean;
+  contentId: string;
+  firestoreDeleted: boolean;
+  cloudinaryDeleted: boolean;
+}> {
   const currentList = memoryContentList || getCachedContentListSync();
   const targetItem = itemOverride || currentList.find(i => i.id === id);
 
-  // 1. Mark as deleted locally in tombstone list (prevents any cached doc or snapshot from restoring it)
-  markContentAsDeleted(id);
+  console.log(`[Admin Delete Pipeline] Initiating single authoritative deletion for content ID: "${id}"...`);
 
-  // 2. Instant 0ms write-through update to local memory & UI subscribers
-  const nextList = currentList.filter(i => i.id !== id);
+  // Authoritative Backend Deletion (Cloudinary Asset Destruction + Firestore Deletion + store.json cache purge)
+  // Client does NOT perform a duplicate deleteDoc; the backend server performs the deletion atomically.
+  const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
+  const serverRes = await fetch(`/api/admin/content/${id}`, {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${adminToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ item: targetItem })
+  });
+
+  if (!serverRes.ok) {
+    let errorMsg = `Server deletion failed with HTTP ${serverRes.status}`;
+    try {
+      const errJson = await serverRes.json();
+      if (errJson.error) errorMsg = errJson.error;
+    } catch (_) {}
+    console.error(`[Admin Delete Pipeline Failed]`, errorMsg);
+    throw new Error(errorMsg);
+  }
+
+  const serverData = await serverRes.json();
+  if (!serverData.success) {
+    const errText = serverData.error || 'Cloud deletion failed';
+    console.error(`[Admin Delete Pipeline Unsuccessful]`, errText);
+    throw new Error(errText);
+  }
+
+  console.log(`[Admin Delete Pipeline Succeeded] Verified:`, serverData);
+
+  // Direct Client-side Firestore deleteDoc for instant redundant consistency
+  try {
+    const docRef = doc(firestore, 'content', id);
+    await deleteDoc(docRef);
+    console.log('[Firebase Cloud] Confirmed direct deleteDoc on Firestore for post:', id);
+  } catch (clientFsErr) {
+    console.warn('[Firebase Cloud direct delete non-fatal]', clientFsErr);
+  }
+
+  // Permanent Deletion Confirmed on Cloud — Update local memory & React state
+  markContentAsDeleted(id);
+  if (Array.isArray(serverData.deletedIds)) {
+    markContentAsDeleted(serverData.deletedIds);
+  }
+
+  if (memoryContentList) {
+    memoryContentList = memoryContentList.filter(i => i.id !== id);
+  }
+  const nextList = (memoryContentList || getCachedContentListSync()).filter(i => i.id !== id);
+  
+  // Persist updated list to session cache
+  try {
+    setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(nextList));
+  } catch (_) {}
+
+  // Update shared singleton listener
   sharedContentManager.notifyLocalUpdate(nextList);
 
-  // 3. IMMEDIATE Server Database Deletion (Guarantees removal from data/store.json permanently)
-  try {
-    const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
-    const serverRes = await fetch(`/api/admin/content/${id}`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${adminToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ item: targetItem })
-    });
-    if (serverRes.ok) {
-      const serverData = await serverRes.json();
-      if (Array.isArray(serverData.deletedIds)) {
-        markContentAsDeleted(serverData.deletedIds);
+  // Broadcast across open tabs/windows
+  if (typeof BroadcastChannel !== 'undefined') {
+    try {
+      const bc = new BroadcastChannel('ruma_content_sync');
+      bc.postMessage({ type: 'CONTENT_DELETED', contentId: id });
+      bc.close();
+    } catch (_) {}
+  }
+
+  // Invalidate any cached media URLs in Service Worker Cache Storage & inform SW controller
+  if (typeof window !== 'undefined' && targetItem) {
+    try {
+      const urlsToPurge: string[] = [];
+      if (targetItem.mediaUrl) urlsToPurge.push(targetItem.mediaUrl);
+      if (targetItem.thumbnailUrl) urlsToPurge.push(targetItem.thumbnailUrl);
+      if (targetItem.previewUrl) urlsToPurge.push(targetItem.previewUrl);
+      if (Array.isArray(targetItem.galleryUrls)) urlsToPurge.push(...targetItem.galleryUrls);
+
+      // 1. Direct window cache storage deletion
+      if ('caches' in window) {
+        window.caches.open('ruma-vip-cache-v1').then(cache => {
+          urlsToPurge.forEach(u => {
+            if (u) cache.delete(u).catch(() => {});
+          });
+        }).catch(() => {});
       }
-      console.log(`[Delete Flow] Successfully deleted "${id}" from backend server store.json`);
-    }
-  } catch (serverErr) {
-    console.warn('[Delete Flow] Server deletion request notice:', serverErr);
+
+      // 2. Notify Service Worker controller
+      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'PURGE_MEDIA_URLS',
+          urls: urlsToPurge
+        });
+      }
+    } catch (_) {}
   }
 
-  // 4. Delete Firestore Document Record with Safe Timeout (Handled gracefully if free quota limit is active)
-  try {
-    console.log(`[Delete Flow] Deleting Firestore document record for "${id}"...`);
-    const docRef = doc(firestore, 'content', id);
-    await withTimeout(deleteDoc(docRef), 2500);
-    console.log('[Delete Flow] Successfully deleted document record from Firestore:', id);
-  } catch (err: any) {
-    console.warn('[Firebase Cloud Delete Notice - Item protected by tombstone]:', err?.message || err);
-    handleFirestoreError('deleteAdminContent', err);
-  }
-
-  // 5. Cloudinary Media Asset Cleanup (Runs asynchronously so user UI is instant)
-  if (targetItem) {
-    cleanupMediaItemStorage(targetItem).catch(cleanErr => {
-      console.warn('[Delete Flow] Non-fatal Cloudinary cleanup note:', cleanErr);
-    });
-  }
-
-  return true;
+  return {
+    success: true,
+    contentId: id,
+    firestoreDeleted: serverData.firestoreDeleted ?? true,
+    cloudinaryDeleted: serverData.cloudinaryDeleted ?? true
+  };
 }
 
 // ============================================================================

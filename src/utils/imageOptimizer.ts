@@ -20,8 +20,8 @@ export function getOptimizedImageUrl(
   if (!url) return '';
 
   const adaptive = getAdaptiveImageParams(width || 480, quality || 75);
-  const targetWidth = width ?? adaptive.width;
-  const targetQuality = quality ?? adaptive.quality;
+  const targetWidth = adaptive.width;
+  const targetQuality = adaptive.quality;
 
   // Base64 Data URLs and local blobs cannot be CDN-transformed
   if (url.startsWith('data:') || url.startsWith('blob:')) {
@@ -48,6 +48,12 @@ export function getOptimizedImageUrl(
   if (url.includes('res.cloudinary.com')) {
     if (url.includes(`/upload/w_${targetWidth}`)) {
       return url;
+    }
+    if (url.includes('/video/upload/')) {
+      // For video poster/thumbnail previews, generate a lightweight JPG thumbnail at offset 0s
+      return url
+        .replace(/\/video\/upload\/(?:[a-z]{1,2}_[^/]+\/)?/, `/video/upload/w_${targetWidth},q_${targetQuality},f_auto,so_0,c_limit/`)
+        .replace(/\.(mp4|webm|mov|m4v)(\?.*)?$/i, '.jpg$2');
     }
     if (url.includes('/upload/')) {
       return url.replace(/\/upload\/(?:[a-z]{1,2}_[^/]+\/)?/, `/upload/w_${targetWidth},q_${targetQuality},f_auto,c_limit/`);

@@ -11,8 +11,15 @@ import {
   deleteCloudinaryAsset,
   extractAllMediaItemAssets,
   extractCloudinaryAssetInfo,
-  DeletionResult
+  DeletionResult,
+  reconcileCloudinaryRetryQueue,
+  loadCloudinaryRetryQueue
 } from './server/cloudinary';
+import {
+  deleteServerFirestoreContentDoc,
+  deleteServerFirestoreDoc,
+  getServerFirestoreDoc
+} from './server/firebase';
 
 dotenv.config();
 
@@ -482,9 +489,23 @@ async function startServer() {
   });
 
   // Admin Update Content
-  app.put('/api/admin/content/:id', requireAdmin, (req: Request, res: Response) => {
+  app.put('/api/admin/content/:id', requireAdmin, async (req: Request, res: Response) => {
     try {
-      const updated = db.updateContent(req.params.id, req.body);
+      const contentId = req.params.id;
+      const existing = db.getContentById(contentId) || await getServerFirestoreDoc('content', contentId);
+
+      // If gallery photos or media were removed in the new edit, purge the removed assets from Cloudinary
+      if (existing && Array.isArray(existing.galleryUrls) && Array.isArray(req.body?.galleryUrls)) {
+        const removedUrls = existing.galleryUrls.filter((url: string) => !req.body.galleryUrls.includes(url));
+        if (removedUrls.length > 0) {
+          console.log(`[Admin Update Content] Purging ${removedUrls.length} removed gallery images from Cloudinary`);
+          deleteItemCloudinaryMedia({ galleryUrls: removedUrls }).catch(err =>
+            console.warn('[Cloudinary Gallery Purge Warning]', err)
+          );
+        }
+      }
+
+      const updated = db.updateContent(contentId, req.body);
       if (!updated) {
         return res.status(404).json({ error: 'Content not found' });
       }
@@ -494,29 +515,31 @@ async function startServer() {
     }
   });
 
-  // Admin Delete Content & Linked Cloudinary Media Assets
+  // Admin Delete Content & Linked Cloudinary Media Assets (Dual Cloudinary + Firebase Firestore Deletion)
   app.delete('/api/admin/content/:id', requireAdmin, async (req: Request, res: Response) => {
     try {
       const contentId = req.params.id;
       // Client may pass full item payload in query or body to ensure all Cloudinary URLs are known
       const passedItem = req.body?.item || req.body;
-      const dbItem = db.getContentById(contentId);
-      const targetItem = passedItem && (passedItem.mediaUrl || passedItem.thumbnailUrl || passedItem.cloudinaryPublicId || (Array.isArray(passedItem.galleryUrls) && passedItem.galleryUrls.length > 0)) ? passedItem : dbItem;
+      let dbItem = db.getContentById(contentId);
+      if (!dbItem) {
+        // Also fetch from Firestore in case it was stored directly
+        const fsDoc = await getServerFirestoreDoc('content', contentId);
+        if (fsDoc) dbItem = fsDoc;
+      }
+      const targetItem = { ...(dbItem || {}), ...(passedItem || {}), id: contentId };
 
       console.log(`[Admin Delete API] Received request to delete content: "${contentId}"`);
 
-      // 1. Delete from local JSON db if present
-      const localSuccess = db.deleteContent(contentId);
-
-      // 2. Perform Cloudinary deletion for all associated assets (photos, videos, thumbnails, galleries)
+      // 1. Cloudinary original photo/video asset destruction (destroy original assets from CDN first)
       let cloudinaryResults: DeletionResult[] = [];
       let allCloudinarySuccess = true;
 
-      if (targetItem) {
+      if (targetItem && (targetItem.mediaUrl || targetItem.thumbnailUrl || targetItem.previewUrl || targetItem.cloudinaryPublicId || (Array.isArray(targetItem.galleryUrls) && targetItem.galleryUrls.length > 0))) {
         const cloudDeleteRes = await deleteItemCloudinaryMedia(targetItem);
         cloudinaryResults = cloudDeleteRes.results;
         allCloudinarySuccess = cloudDeleteRes.allSuccessful;
-        console.log(`[Admin Delete API] Cloudinary deletion completed for "${contentId}":`, {
+        console.log(`[Admin Delete API] Cloudinary deletion result for "${contentId}":`, {
           assetsCount: cloudinaryResults.length,
           allCloudinarySuccess,
           details: cloudinaryResults
@@ -525,18 +548,148 @@ async function startServer() {
         console.log(`[Admin Delete API] No media payload found for "${contentId}", skipped Cloudinary asset scan.`);
       }
 
-      res.json({
+      // 2. Firebase Firestore document DELETE (Cloud Database Single Source of Truth with 3 automatic retries)
+      const firestoreResult = await deleteServerFirestoreContentDoc(contentId, 3);
+      if (!firestoreResult.success) {
+        console.error(`[Admin Delete API] Firestore deletion failed for "${contentId}":`, firestoreResult.error);
+        return res.status(502).json({
+          success: false,
+          contentId,
+          step: 'firestore',
+          cloudinaryAssetsPurged: allCloudinarySuccess,
+          error: `Firebase Firestore deletion failed: ${firestoreResult.error}`
+        });
+      }
+
+      // 3. Server cache / store.json update (Removes item, adds to deletedIds, writes to disk)
+      const localSuccess = db.deleteContent(contentId);
+
+      return res.json({
         success: true,
         contentId,
-        localDeleted: localSuccess,
+        firestoreDeleted: true,
         cloudinaryDeleted: allCloudinarySuccess,
         cloudinaryResults,
+        localDeleted: localSuccess,
         deletedIds: db.getDeletedIds(),
-        message: 'Content and linked Cloudinary media assets processed for deletion.'
+        message: allCloudinarySuccess
+          ? 'Permanently deleted from Firebase Firestore, Cloudinary, and Server Cache.'
+          : 'Document deleted from Firestore; pending Cloudinary assets queued for background purge.'
       });
     } catch (err: any) {
       console.error('[Admin Delete API Error]', err);
       res.status(500).json({ error: err.message || 'Failed to delete content' });
+    }
+  });
+
+  // Admin Delete Order (Purges attached Cloudinary payment screenshots and deletes from Firestore & server db)
+  app.delete('/api/admin/orders/:orderId', requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const orderId = req.params.orderId;
+      let order = db.getOrder(orderId);
+      if (!order) {
+        order = await getServerFirestoreDoc('orders', orderId);
+      }
+
+      // 1. Purge screenshot or any attached payment receipt from Cloudinary
+      const screenshotUrl = order?.screenshotUrl || req.body?.screenshotUrl;
+      let cloudinaryDeleted = false;
+      if (screenshotUrl && typeof screenshotUrl === 'string') {
+        const delRes = await deleteItemCloudinaryMedia({ mediaUrl: screenshotUrl });
+        cloudinaryDeleted = delRes.allSuccessful;
+        console.log(`[Admin Order Delete] Purged Cloudinary screenshot for order "${orderId}":`, delRes);
+      }
+
+      // 2. Delete document from Firestore
+      const fsRes = await deleteServerFirestoreDoc('orders', orderId, 3);
+
+      // 3. Delete from local server db
+      db.deleteOrder(orderId);
+
+      res.json({
+        success: true,
+        orderId,
+        firestoreDeleted: fsRes.success,
+        cloudinaryDeleted,
+        message: 'Order and associated Cloudinary screenshot permanently deleted from Firebase & Cloudinary.'
+      });
+    } catch (err: any) {
+      console.error('[Admin Order Delete Error]', err);
+      res.status(500).json({ error: err.message || 'Failed to delete order' });
+    }
+  });
+
+  // Admin Delete Screenshot from Order (Purges screenshot from Cloudinary and clears URL in db & Firestore)
+  app.delete('/api/admin/orders/:orderId/screenshot', requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const orderId = req.params.orderId;
+      let order = db.getOrder(orderId);
+      if (!order) {
+        order = await getServerFirestoreDoc('orders', orderId);
+      }
+      const screenshotUrl = order?.screenshotUrl || req.body?.screenshotUrl;
+      if (screenshotUrl && typeof screenshotUrl === 'string') {
+        await deleteItemCloudinaryMedia({ mediaUrl: screenshotUrl });
+      }
+      if (order) {
+        order.screenshotUrl = undefined;
+        db.saveData();
+      }
+      res.json({ success: true, message: 'Screenshot permanently deleted from Cloudinary.' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to delete screenshot' });
+    }
+  });
+
+  // Admin Delete VIP Lead / User (Purges attached Cloudinary assets and deletes from Firestore)
+  app.delete('/api/admin/leads/:leadId', requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const leadId = req.params.leadId;
+      const lead = (await getServerFirestoreDoc('vip_leads', leadId)) || req.body?.lead;
+      if (lead) {
+        const urls = [lead.photoUrl, lead.avatarUrl, lead.screenshotUrl].filter(Boolean);
+        if (urls.length > 0) {
+          await deleteItemCloudinaryMedia({ galleryUrls: urls });
+        }
+      }
+      const fsRes = await deleteServerFirestoreDoc('vip_leads', leadId, 3);
+      res.json({
+        success: true,
+        leadId,
+        firestoreDeleted: fsRes.success,
+        message: 'Lead permanently deleted from Firebase and Cloudinary.'
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to delete lead' });
+    }
+  });
+
+  // Admin Cloudinary Reconciliation Endpoint (Run on demand)
+  app.post('/api/admin/reconcile-cloudinary', requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const summary = await reconcileCloudinaryRetryQueue();
+      res.json({
+        success: true,
+        summary,
+        message: `Cloudinary reconciliation finished: ${summary.succeeded} assets purged, ${summary.remaining} remaining.`
+      });
+    } catch (err: any) {
+      console.error('[Admin Reconcile Cloudinary Error]', err);
+      res.status(500).json({ success: false, error: err.message || 'Reconciliation failed' });
+    }
+  });
+
+  // Admin Cloudinary Queue Inspection Endpoint
+  app.get('/api/admin/cloudinary-queue', requireAdmin, (req: Request, res: Response) => {
+    try {
+      const queue = loadCloudinaryRetryQueue();
+      res.json({
+        success: true,
+        count: queue.length,
+        queue
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
     }
   });
 
@@ -779,6 +932,12 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Creator Hub Server running on http://0.0.0.0:${PORT}`);
+    // Periodic background reconciliation for any transient Cloudinary retries (every 10 minutes)
+    setInterval(() => {
+      reconcileCloudinaryRetryQueue().catch(err => {
+        console.warn('[Cloudinary Background Reconciler Note]', err?.message || err);
+      });
+    }, 10 * 60 * 1000);
   });
 }
 

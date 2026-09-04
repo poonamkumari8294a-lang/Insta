@@ -18,12 +18,31 @@ export default defineConfig(() => {
       sourcemap: false,
       rollupOptions: {
         output: {
-          manualChunks: {
-            'vendor-react': ['react', 'react-dom'],
-            'vendor-firebase': ['firebase/app', 'firebase/firestore'],
-            'vendor-icons': ['lucide-react'],
-            'vendor-qr': ['qrcode'],
-            'vendor-utils': ['canvas-confetti', 'react-easy-crop'],
+          manualChunks(id) {
+            if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/') || id.includes('node_modules/scheduler/')) {
+              return 'vendor-react';
+            }
+            if (id.includes('node_modules/@firebase/messaging') || id.includes('node_modules/firebase/messaging')) {
+              return 'vendor-firebase-messaging';
+            }
+            if (id.includes('node_modules/@firebase/firestore') || id.includes('node_modules/firebase/firestore')) {
+              return 'vendor-firebase-firestore';
+            }
+            if (id.includes('node_modules/@firebase') || id.includes('node_modules/firebase')) {
+              return 'vendor-firebase-core';
+            }
+            if (id.includes('node_modules/lucide-react')) {
+              return 'vendor-icons';
+            }
+            if (id.includes('node_modules/qrcode')) {
+              return 'vendor-qr';
+            }
+            if (id.includes('node_modules/canvas-confetti')) {
+              return 'vendor-confetti';
+            }
+            if (id.includes('node_modules/react-easy-crop')) {
+              return 'vendor-crop';
+            }
           },
         },
       },

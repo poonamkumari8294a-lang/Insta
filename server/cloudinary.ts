@@ -1,7 +1,130 @@
 import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
 import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
 
 dotenv.config({ override: true });
+
+const RETRY_QUEUE_FILE = path.join(process.cwd(), 'data', 'cloudinary_retry_queue.json');
+
+export interface QueuedCloudinaryItem {
+  publicId: string;
+  resourceType: 'image' | 'video' | 'raw';
+  contentId?: string;
+  url?: string;
+  queuedAt: string;
+  attempts: number;
+  lastError?: string;
+}
+
+export function loadCloudinaryRetryQueue(): QueuedCloudinaryItem[] {
+  try {
+    if (!fs.existsSync(RETRY_QUEUE_FILE)) return [];
+    const raw = fs.readFileSync(RETRY_QUEUE_FILE, 'utf-8');
+    const data = JSON.parse(raw);
+    return Array.isArray(data) ? data : [];
+  } catch (err) {
+    console.warn('[Cloudinary Server] Error reading retry queue:', err);
+    return [];
+  }
+}
+
+export function saveCloudinaryRetryQueue(queue: QueuedCloudinaryItem[]): void {
+  try {
+    const dir = path.dirname(RETRY_QUEUE_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(RETRY_QUEUE_FILE, JSON.stringify(queue, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn('[Cloudinary Server] Error saving retry queue:', err);
+  }
+}
+
+export function enqueueFailedCloudinaryAsset(item: {
+  publicId: string;
+  resourceType: 'image' | 'video' | 'raw';
+  contentId?: string;
+  url?: string;
+  error?: string;
+}): void {
+  const queue = loadCloudinaryRetryQueue();
+  const existingIndex = queue.findIndex(
+    q => q.publicId === item.publicId && q.resourceType === item.resourceType
+  );
+
+  if (existingIndex >= 0) {
+    queue[existingIndex].attempts += 1;
+    queue[existingIndex].lastError = item.error || queue[existingIndex].lastError;
+  } else {
+    queue.push({
+      publicId: item.publicId,
+      resourceType: item.resourceType,
+      contentId: item.contentId,
+      url: item.url,
+      queuedAt: new Date().toISOString(),
+      attempts: 1,
+      lastError: item.error
+    });
+  }
+  saveCloudinaryRetryQueue(queue);
+  console.log(`[Cloudinary Server] Queued asset for reconciliation retry: "${item.publicId}" (${item.resourceType})`);
+}
+
+/**
+ * Reconciles and retries all pending Cloudinary deletions.
+ * Removes assets that successfully delete or are confirmed not found.
+ */
+export async function reconcileCloudinaryRetryQueue(): Promise<{
+  total: number;
+  succeeded: number;
+  remaining: number;
+  results: DeletionResult[];
+}> {
+  const queue = loadCloudinaryRetryQueue();
+  if (queue.length === 0) {
+    return { total: 0, succeeded: 0, remaining: 0, results: [] };
+  }
+
+  console.log(`[Cloudinary Reconciler] Starting retry run for ${queue.length} queued assets...`);
+  const updatedQueue: QueuedCloudinaryItem[] = [];
+  const results: DeletionResult[] = [];
+  let succeeded = 0;
+
+  for (const item of queue) {
+    try {
+      const res = await deleteCloudinaryAsset(item.publicId, item.resourceType);
+      results.push(res);
+      if (res.status === 'deleted' || res.status === 'not_found') {
+        succeeded += 1;
+        console.log(`[Cloudinary Reconciler] Successfully purged queued asset "${item.publicId}" (${item.resourceType})`);
+      } else {
+        // Keep in queue if still failing (up to max 10 attempts)
+        if (item.attempts < 10) {
+          updatedQueue.push({
+            ...item,
+            attempts: item.attempts + 1,
+            lastError: res.error || 'Retry attempt failed'
+          });
+        } else {
+          console.error(`[Cloudinary Reconciler] Dropping asset "${item.publicId}" after 10 failed attempts.`);
+        }
+      }
+    } catch (err: any) {
+      updatedQueue.push({
+        ...item,
+        attempts: item.attempts + 1,
+        lastError: err?.message || String(err)
+      });
+    }
+  }
+
+  saveCloudinaryRetryQueue(updatedQueue);
+  return {
+    total: queue.length,
+    succeeded,
+    remaining: updatedQueue.length,
+    results
+  };
+}
 
 function sanitizeEnv(val: string | undefined | null, defaultVal: string, isSecret = false): string {
   if (!val || typeof val !== 'string' || val.trim() === '') {
@@ -345,6 +468,7 @@ export async function deleteCloudinaryAsset(
  * Deletes all Cloudinary assets linked to a content item.
  */
 export async function deleteItemCloudinaryMedia(item: {
+  id?: string;
   mediaUrl?: string;
   thumbnailUrl?: string;
   previewUrl?: string;
@@ -362,6 +486,13 @@ export async function deleteItemCloudinaryMedia(item: {
     results.push({ ...res, url: asset.url });
     if (res.status === 'failed') {
       allSuccessful = false;
+      enqueueFailedCloudinaryAsset({
+        publicId: asset.publicId,
+        resourceType: asset.resourceType,
+        contentId: item.id,
+        url: asset.url,
+        error: res.error
+      });
     }
   }
 

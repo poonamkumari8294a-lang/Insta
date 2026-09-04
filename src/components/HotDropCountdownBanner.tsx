@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Flame, Sparkles, Clock, Crown, ArrowRight, Zap, Bell, Check } from 'lucide-react';
-import { requestNotificationSubscription } from '../services/notificationService';
 
 interface HotDropCountdownBannerProps {
   onOpenWheel?: () => void;
@@ -43,6 +42,7 @@ export const HotDropCountdownBanner: React.FC<HotDropCountdownBannerProps> = ({
   const handleNotifyMe = async () => {
     setSubscribing(true);
     try {
+      const { requestNotificationSubscription } = await import('../services/notificationService');
       const res = await requestNotificationSubscription();
       if (res.success || res.token) {
         setIsSubscribed(true);

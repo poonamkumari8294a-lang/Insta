@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { SiteSettings, StoryHighlight } from '../types';
-import { updateAdminSettings } from '../utils/api';
+import { updateAdminSettings, deleteCloudinaryMediaUrls } from '../utils/api';
 import { MediaUploadZone } from './MediaUploadZone';
 import {
   Sparkles,
@@ -127,8 +127,24 @@ export const StoryHighlightsManager: React.FC<StoryHighlightsManagerProps> = ({
     handleSaveAll(clone);
   };
 
-  // Delete highlight
+  // Delete highlight (purges all linked photos/videos from Cloudinary and saves updated settings to Firestore)
   const handleDeleteHighlight = (id: string, title: string) => {
+    const target = highlights.find(h => h.id === id);
+    if (target) {
+      const urlsToPurge: string[] = [];
+      if (target.coverImage) urlsToPurge.push(target.coverImage);
+      if (Array.isArray(target.items)) {
+        target.items.forEach(it => {
+          if (it.url) urlsToPurge.push(it.url);
+        });
+      }
+      if (urlsToPurge.length > 0) {
+        deleteCloudinaryMediaUrls(urlsToPurge).catch(err =>
+          console.warn('[Cloudinary Highlight Cleanup Warning]', err)
+        );
+      }
+    }
+
     const clone = highlights.filter(h => h.id !== id);
     setHighlights(clone);
     if (selectedHighlightId === id) {
@@ -250,6 +266,13 @@ export const StoryHighlightsManager: React.FC<StoryHighlightsManagerProps> = ({
     if (!activeHighlight) return;
     if (activeHighlight.items.length <= 1) {
       return;
+    }
+
+    const slideToDelete = activeHighlight.items[index];
+    if (slideToDelete?.url) {
+      deleteCloudinaryMediaUrls([slideToDelete.url]).catch(err =>
+        console.warn('[Cloudinary Slide Cleanup Warning]', err)
+      );
     }
 
     const currentItems = [...activeHighlight.items];

@@ -2,12 +2,8 @@ import React, { useMemo, useState, useEffect, Suspense, lazy } from 'react';
 import { SiteSettings, MediaItem } from '../types';
 import { StoryHighlights } from '../components/StoryHighlights';
 import { ContentCard } from '../components/ContentCard';
-import { PricingPacks } from '../components/PricingPacks';
 import { HotDropCountdownBanner } from '../components/HotDropCountdownBanner';
-import { DailyRewardWheelModal } from '../components/DailyRewardWheelModal';
 import { HotFlashSaleStickyBanner } from '../components/HotFlashSaleStickyBanner';
-import { TeaserPeekModal } from '../components/TeaserPeekModal';
-import { StopUserExitModal } from '../components/StopUserExitModal';
 import { getOptimizedImageUrl } from '../utils/imageOptimizer';
 import {
   BadgeCheck,
@@ -32,9 +28,13 @@ import {
   Users
 } from 'lucide-react';
 
-// Lazy load below-the-fold static sections
+// Lazy load below-the-fold static sections and on-demand modals
+const PricingPacks = lazy(() => import('../components/PricingPacks').then(m => ({ default: m.PricingPacks })));
 const HowItWorks = lazy(() => import('../components/HowItWorks').then(m => ({ default: m.HowItWorks })));
 const FAQSection = lazy(() => import('../components/FAQSection').then(m => ({ default: m.FAQSection })));
+const DailyRewardWheelModal = lazy(() => import('../components/DailyRewardWheelModal').then(m => ({ default: m.DailyRewardWheelModal })));
+const TeaserPeekModal = lazy(() => import('../components/TeaserPeekModal').then(m => ({ default: m.TeaserPeekModal })));
+const StopUserExitModal = lazy(() => import('../components/StopUserExitModal').then(m => ({ default: m.StopUserExitModal })));
 
 interface HomePageProps {
   settings: SiteSettings;
@@ -451,12 +451,14 @@ export const HomePage: React.FC<HomePageProps> = ({
         if (vipPacks.length === 0) return null;
         return (
           <div key="vipPacks" id="section-vipPacks" className="render-fast">
-            <PricingPacks
-              packs={vipPacks}
-              unlockedIds={unlockedIds}
-              onBuy={onBuyMedia}
-              onOpen={onOpenMedia}
-            />
+            <Suspense fallback={null}>
+              <PricingPacks
+                packs={vipPacks}
+                unlockedIds={unlockedIds}
+                onBuy={onBuyMedia}
+                onOpen={onOpenMedia}
+              />
+            </Suspense>
           </div>
         );
 
@@ -746,31 +748,43 @@ export const HomePage: React.FC<HomePageProps> = ({
         </span>
       </button>
 
-      {/* Daily Reward Wheel Modal */}
-      <DailyRewardWheelModal
-        isOpen={isWheelOpen}
-        onClose={() => setIsWheelOpen(false)}
-      />
+      {/* Daily Reward Wheel Modal (Loaded on Demand) */}
+      {isWheelOpen && (
+        <Suspense fallback={null}>
+          <DailyRewardWheelModal
+            isOpen={isWheelOpen}
+            onClose={() => setIsWheelOpen(false)}
+          />
+        </Suspense>
+      )}
 
-      {/* 1-Sec VIP Sneak Peek Preview Modal */}
-      <TeaserPeekModal
-        item={peekItem}
-        isOpen={isPeekModalOpen}
-        onClose={() => {
-          setIsPeekModalOpen(false);
-          setPeekItem(null);
-        }}
-        onUnlock={(item) => onBuyMedia(item)}
-      />
+      {/* 1-Sec VIP Sneak Peek Preview Modal (Loaded on Demand) */}
+      {isPeekModalOpen && (
+        <Suspense fallback={null}>
+          <TeaserPeekModal
+            item={peekItem}
+            isOpen={isPeekModalOpen}
+            onClose={() => {
+              setIsPeekModalOpen(false);
+              setPeekItem(null);
+            }}
+            onUnlock={(item) => onBuyMedia(item)}
+          />
+        </Suspense>
+      )}
 
-      {/* Special Exit-Intent Retention & Discount Modal */}
-      <StopUserExitModal
-        isOpen={isExitModalOpen}
-        onClose={() => setIsExitModalOpen(false)}
-        onUnlockItem={(item) => onBuyMedia(item)}
-        onOpenWheel={() => setIsWheelOpen(true)}
-        featuredItem={featuredContent[0] || content[0]}
-      />
+      {/* Special Exit-Intent Retention & Discount Modal (Loaded on Demand) */}
+      {isExitModalOpen && (
+        <Suspense fallback={null}>
+          <StopUserExitModal
+            isOpen={isExitModalOpen}
+            onClose={() => setIsExitModalOpen(false)}
+            onUnlockItem={(item) => onBuyMedia(item)}
+            onOpenWheel={() => setIsWheelOpen(true)}
+            featuredItem={featuredContent[0] || content[0]}
+          />
+        </Suspense>
+      )}
     </div>
   );
 };

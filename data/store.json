@@ -1,34 +1,27 @@
 {
   "settings": {
     "creatorName": "Ruma Kumari",
-    "username": "ruma_cutegirl_official",
+    "username": null,
     "bio": "Pretty mood always 💋 | Fitness, Lifestyle & Exclusive VIP Content",
     "tagline": "Unlock my private, uncut HD photos, backstage reels & VIP stories instantly.",
-    "profilePicUrl": "https://res.cloudinary.com/mnbjgtqu/image/upload/v1788341260/settings/xrfuncs6lmkwr1njlvhe.jpg",
-    "bannerUrl": "https://res.cloudinary.com/mnbjgtqu/image/upload/v1788341261/settings/jizzyecqdpy22p2b1f2f.jpg",
-    "instagramUrl": "https://instagram.com/ruma__cutegirl",
-    "instagramHandle": "@ruma__cuteg...",
+    "profilePicUrl": "https://res.cloudinary.com/mnbjgtqu/image/upload/v1788385961/website-media/izxcajoa6ne2frpzc4k3.jpg",
+    "bannerUrl": "https://res.cloudinary.com/mnbjgtqu/image/upload/v1788385963/website-media/fgert13s6x9yowurdapb.jpg",
+    "instagramUrl": "https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3",
+    "instagramHandle": "@ruma__cutegirl",
     "badgeText": "VIP Creator",
     "upiId": "rima11q@ptyes",
-    "postsCount": 37,
-    "followersCount": 3358,
-    "viewsCount": "346.0K",
+    "postsCount": 135,
+    "followersCount": "6000",
+    "viewsCount": "1.9M",
     "announcement": "✨ New VIP Backstage Reel is LIVE! Get 50% off this week only with instant UPI scan!",
     "announcementEnabled": true,
     "supportEmail": "contact.rumakumari@gmail.com",
     "supportTelegram": "https://t.me/rumakumari_vip",
-    "supportWhatsApp": "+63 9465507887",
-    "paymentVerificationMode": "manual_approval",
+    "supportWhatsApp": "",
+    "paymentVerificationMode": "instant_utr",
     "pushNotificationsEnabled": true,
     "notifyOnNewPost": true,
     "homepageConfig": {
-      "hero": {
-        "enabled": true,
-        "title": "Ruma Kumari",
-        "description": "Unlock my private, uncut HD photos, backstage reels & VIP stories instantly.",
-        "ctaText": "View Premium Feed",
-        "customCoverUrl": ""
-      },
       "profile": {
         "enabled": true,
         "showStats": true,
@@ -39,12 +32,6 @@
         "enabled": true,
         "title": "Story Highlights & Teasers"
       },
-      "featured": {
-        "enabled": true,
-        "title": "Featured VIP Releases",
-        "subtitle": "Trending high-resolution sets and uncut master videos.",
-        "limit": 8
-      },
       "vipPacks": {
         "enabled": true,
         "title": "Exclusive VIP All-Access Bundles",
@@ -53,11 +40,6 @@
       "latestVideos": {
         "enabled": true,
         "title": "Latest Video Reels & Backstage",
-        "limit": 4
-      },
-      "latestPhotos": {
-        "enabled": true,
-        "title": "Latest HD Photo Drops",
         "limit": 4
       },
       "freeSamples": {
@@ -87,68 +69,71 @@
         "freeSamples",
         "howItWorks",
         "faq"
-      ]
+      ],
+      "hero": {
+        "enabled": true,
+        "title": "Ruma Kumari",
+        "description": "Unlock my private, uncut HD photos, backstage reels & VIP stories instantly.",
+        "ctaText": "View Premium Feed",
+        "customCoverUrl": ""
+      },
+      "featured": {
+        "enabled": true,
+        "title": "Featured VIP Releases",
+        "subtitle": "Trending high-resolution sets and uncut master videos.",
+        "limit": 10
+      },
+      "latestPhotos": {
+        "enabled": true,
+        "title": "Latest HD Photo Drops",
+        "limit": 4
+      }
     },
-    "storyHighlights": [
+    "storyHighlights": [],
+    "supportInstagram": "https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3",
+    "vipPlans": [
       {
-        "id": "highlight-1",
-        "title": "🌸 Ruma Diaries 💕",
-        "coverImage": "https://res.cloudinary.com/mnbjgtqu/image/upload/v1788338893/photos/lakkpxlkwc8a5vojzpdw.jpg",
-        "items": [
-          {
-            "id": "story-1-1",
-            "url": "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=800&auto=format&fit=crop&q=80",
-            "type": "image",
-            "caption": "Morning vibes ✨ pretty mood always"
-          },
-          {
-            "id": "story-1-2",
-            "url": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=800&auto=format&fit=crop&q=80",
-            "type": "image",
-            "caption": "Special shoot day coming up! 📸"
-          }
+        "id": "plan-monthly",
+        "title": "1-Month VIP All-Access Pass",
+        "subtitle": "30 Days Instant Access to All VIP Photos & Reels",
+        "price": 199,
+        "originalPrice": 499,
+        "durationDays": 30,
+        "durationLabel": "30 Days Access",
+        "badge": "POPULAR 🔥",
+        "popular": true,
+        "enabled": true,
+        "perks": [
+          "All HD Photo Sets & Uncensored Albums",
+          "Exclusive Video Reels & Backstage Clips",
+          "Daily Reward Wheel Access",
+          "Direct Instagram DM Support (@ruma__cutegirl)"
         ]
       },
       {
-        "id": "highlight-2",
-        "title": "back look",
-        "coverImage": "https://res.cloudinary.com/mnbjgtqu/image/upload/v1788338590/photos/uinxxu1a0lrls2oem8uo.jpg",
-        "items": [
-          {
-            "id": "story-2-1",
-            "url": "https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=800&auto=format&fit=crop&q=80",
-            "type": "image",
-            "caption": "Gym session progress 💪"
-          }
-        ]
-      },
-      {
-        "id": "highlight-3",
-        "title": "link 🔗",
-        "coverImage": "https://res.cloudinary.com/mnbjgtqu/image/upload/v1788338579/photos/uxzshkfezgzconpwnmdi.jpg",
-        "items": [
-          {
-            "id": "story-3-1",
-            "url": "https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?w=800&auto=format&fit=crop&q=80",
-            "type": "image",
-            "caption": "Instant direct checkout on UPI! Tap below."
-          }
-        ]
-      },
-      {
-        "id": "highlight-4",
-        "title": "🥵 special",
-        "coverImage": "https://res.cloudinary.com/mnbjgtqu/image/upload/v1788338567/photos/omgymjmpmkwxeln7gtxy.jpg",
-        "items": [
-          {
-            "id": "story-4-1",
-            "url": "https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?w=800&auto=format&fit=crop&q=80",
-            "type": "image",
-            "caption": "VIP reel teaser 🔥 check latest upload"
-          }
+        "id": "plan-6months",
+        "title": "6-Month VIP Mega Pass",
+        "subtitle": "180 Days of Complete VIP Content + Future Drops",
+        "price": 499,
+        "originalPrice": 1299,
+        "durationDays": 180,
+        "durationLabel": "6 Months Access",
+        "badge": "BEST VALUE ⚡",
+        "popular": false,
+        "enabled": true,
+        "perks": [
+          "Unlimited Access to All VIP Media",
+          "All Future Backstage Drops Included",
+          "4K Ultra-HD Downloads Enabled",
+          "Priority Instagram DM Support (@ruma__cutegirl)",
+          "3 Bonus Daily Wheel Spins"
         ]
       }
-    ]
+    ],
+    "adminPasscode": "Ashok#8899",
+    "updatedAt": "2026-09-04T09:55:29.406Z",
+    "demoPurged": true,
+    "vapidKey": ""
   },
   "content": [
     {
@@ -1292,6 +1277,9 @@
     }
   ],
   "deletedIds": [
-    "rk-001"
+    "rk-001",
+    "rk-1788203499809",
+    "probe-test-cleanup",
+    "audit-test-content-id"
   ]
 }

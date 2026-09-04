@@ -3,6 +3,7 @@ import { MediaItem, SiteSettings } from './types';
 import {
   fetchSiteSettings,
   fetchContentList,
+  syncDeletedIdsFromServer,
   subscribeToContentList,
   subscribeToSiteSettings,
   getCachedSiteSettingsSync,
@@ -16,18 +17,17 @@ import { Header } from './components/Header';
 import { Footer } from './components/Footer';
 import { BottomMobileNav } from './components/BottomMobileNav';
 import { HomePage } from './pages/HomePage';
-import { ContentFeedPage } from './pages/ContentFeedPage';
-import { PricingPacks } from './components/PricingPacks';
-import { HowItWorks } from './components/HowItWorks';
-import { NotificationPermissionBanner } from './components/NotificationPermissionBanner';
 import { ForegroundNotificationToast, ForegroundNotificationData } from './components/ForegroundNotificationToast';
 import { LiveUnlockActivityToast } from './components/LiveUnlockActivityToast';
 import { FloatingInstagramSupport } from './components/FloatingWhatsAppSupport';
 import { NetworkSpeedBanner } from './components/NetworkSpeedBanner';
-import { setupForegroundMessageListener } from './services/notificationService';
 import { Sparkles, RefreshCw } from 'lucide-react';
 
 // Code-split heavy chunks for Android Mobile fast loading
+const ContentFeedPage = lazy(() => import('./pages/ContentFeedPage').then(m => ({ default: m.ContentFeedPage })));
+const PricingPacks = lazy(() => import('./components/PricingPacks').then(m => ({ default: m.PricingPacks })));
+const HowItWorks = lazy(() => import('./components/HowItWorks').then(m => ({ default: m.HowItWorks })));
+const NotificationPermissionBanner = lazy(() => import('./components/NotificationPermissionBanner').then(m => ({ default: m.NotificationPermissionBanner })));
 const AdminPage = lazy(() => import('./pages/AdminPage').then(m => ({ default: m.AdminPage })));
 const ContentDetailPage = lazy(() => import('./pages/ContentDetailPage').then(m => ({ default: m.ContentDetailPage })));
 const LegalPages = lazy(() => import('./pages/LegalPages').then(m => ({ default: m.LegalPages })));
@@ -102,19 +102,27 @@ export default function App() {
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [shareItem, setShareItem] = useState<MediaItem | null>(null);
 
-  // Setup foreground push notification listener
+  // Setup foreground push notification listener (deferred)
   useEffect(() => {
-    const unsubscribe = setupForegroundMessageListener((payload) => {
-      const title = payload.notification?.title || payload.data?.title || '📸 नया फोटो अपलोड हुआ!';
-      const body = payload.notification?.body || payload.data?.body || 'Ruma Cute Girl पर नया exclusive content उपलब्ध है।';
-      const image = payload.notification?.image || payload.data?.image || '';
-      const postId = payload.data?.postId || '';
-      const url = payload.data?.url || (postId ? `/#detail/${postId}` : '/');
+    let unsubscribe: (() => void) | null = null;
+    let isMounted = true;
+    import('./services/notificationService')
+      .then(({ setupForegroundMessageListener }) => {
+        if (!isMounted) return;
+        unsubscribe = setupForegroundMessageListener((payload) => {
+          const title = payload.notification?.title || payload.data?.title || '📸 नया फोटो अपलोड हुआ!';
+          const body = payload.notification?.body || payload.data?.body || 'Ruma Cute Girl पर नया exclusive content उपलब्ध है।';
+          const image = payload.notification?.image || payload.data?.image || '';
+          const postId = payload.data?.postId || '';
+          const url = payload.data?.url || (postId ? `/#detail/${postId}` : '/');
 
-      setForegroundNotification({ title, body, image, url, postId });
-    });
+          setForegroundNotification({ title, body, image, url, postId });
+        });
+      })
+      .catch(() => {});
 
     return () => {
+      isMounted = false;
       if (unsubscribe) unsubscribe();
     };
   }, []);
@@ -179,13 +187,14 @@ export default function App() {
       console.warn('Background content revalidation:', err);
     });
 
-    // 4. Gentle resync when tab or device becomes active / visible (throttled to once per minute)
+    // 4. Gentle resync when tab or device becomes active / visible (throttled to once every 30 seconds)
     let lastSyncTime = Date.now();
     const handleVisibilityOrFocus = () => {
       const now = Date.now();
-      if (document.visibilityState === 'visible' && now - lastSyncTime > 60000) {
+      if (document.visibilityState === 'visible' && now - lastSyncTime > 30000) {
         lastSyncTime = now;
-        fetchContentList(false).then((freshItems) => {
+        syncDeletedIdsFromServer().catch(() => {});
+        fetchContentList(true).then((freshItems) => {
           if (freshItems && freshItems.length > 0) {
             setContent(freshItems);
           }
@@ -199,9 +208,10 @@ export default function App() {
     window.addEventListener('visibilitychange', handleVisibilityOrFocus);
     window.addEventListener('focus', handleVisibilityOrFocus);
 
-    // 4.1 Gentle background sync every 2 minutes for mobile devices
+    // 4.1 Gentle background sync every 1 minute for mobile devices
     const periodicSync = setInterval(() => {
       if (document.visibilityState === 'visible') {
+        syncDeletedIdsFromServer().catch(() => {});
         fetchContentList(false).then((freshItems) => {
           if (freshItems && freshItems.length > 0) setContent(freshItems);
         }).catch(() => {});
@@ -209,7 +219,7 @@ export default function App() {
           if (freshSettings) setSettings(freshSettings);
         }).catch(() => {});
       }
-    }, 120000);
+    }, 60000);
 
     // 5. Listen for hash & URL changes
     const handleUrlChange = () => {
@@ -367,30 +377,36 @@ export default function App() {
         )}
 
         {currentRoute === 'content' && (
-          <ContentFeedPage
-            content={content}
-            unlockedIds={unlockedIds}
-            onOpenMedia={handleOpenMedia}
-            onBuyMedia={handleBuyMedia}
-            onOpenShare={(item) => handleOpenShare(item)}
-          />
+          <Suspense fallback={<FallbackLoader />}>
+            <ContentFeedPage
+              content={content}
+              unlockedIds={unlockedIds}
+              onOpenMedia={handleOpenMedia}
+              onBuyMedia={handleBuyMedia}
+              onOpenShare={(item) => handleOpenShare(item)}
+            />
+          </Suspense>
         )}
 
         {currentRoute === 'vip-packs' && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            <PricingPacks
-              packs={content.filter((c) => c.type === 'pack')}
-              unlockedIds={unlockedIds}
-              onBuy={handleBuyMedia}
-              onOpen={handleOpenMedia}
-            />
-          </div>
+          <Suspense fallback={<FallbackLoader />}>
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+              <PricingPacks
+                packs={content.filter((c) => c.type === 'pack')}
+                unlockedIds={unlockedIds}
+                onBuy={handleBuyMedia}
+                onOpen={handleOpenMedia}
+              />
+            </div>
+          </Suspense>
         )}
 
         {currentRoute === 'how-it-works' && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-            <HowItWorks />
-          </div>
+          <Suspense fallback={<FallbackLoader />}>
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+              <HowItWorks />
+            </div>
+          </Suspense>
         )}
 
         {currentRoute === 'detail' && activeContentItem && (
@@ -497,7 +513,11 @@ export default function App() {
       </Suspense>
 
       {/* Web Push Notification Opt-in Prompt Banner */}
-      {settings && <NotificationPermissionBanner settings={settings} />}
+      {settings && (
+        <Suspense fallback={null}>
+          <NotificationPermissionBanner settings={settings} />
+        </Suspense>
+      )}
 
       {/* Foreground Notification Toast Popups */}
       <ForegroundNotificationToast

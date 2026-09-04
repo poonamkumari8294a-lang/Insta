@@ -349,7 +349,7 @@ class Database {
     };
   }
 
-  private saveData() {
+  public saveData() {
     try {
       fs.writeFileSync(DATA_FILE, JSON.stringify(this.data, null, 2), 'utf-8');
     } catch (err) {
@@ -507,6 +507,16 @@ class Database {
     }
     this.saveData();
     return order;
+  }
+
+  public deleteOrder(orderId: string): boolean {
+    const idx = this.data.orders.findIndex(o => o.orderId === orderId);
+    if (idx >= 0) {
+      this.data.orders.splice(idx, 1);
+      this.saveData();
+      return true;
+    }
+    return false;
   }
 
   public validateAndProcessUtr(orderId: string, rawUtr: string, screenshotUrl?: string): { success: boolean; order?: OrderItem; error?: string; status?: OrderItem['status'] } {

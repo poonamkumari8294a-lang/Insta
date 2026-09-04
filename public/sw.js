@@ -126,3 +126,20 @@ self.addEventListener('fetch', (event) => {
     );
   }
 });
+
+// Purge media URLs on demand when content is deleted by Admin
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'PURGE_MEDIA_URLS' && Array.isArray(event.data.urls)) {
+    caches.open(CACHE_NAME).then((cache) => {
+      event.data.urls.forEach((url) => {
+        if (url) {
+          cache.delete(url).catch(() => {});
+          try {
+            const parsed = new URL(url);
+            cache.delete(parsed.pathname).catch(() => {});
+          } catch (_) {}
+        }
+      });
+    }).catch(() => {});
+  }
+});
