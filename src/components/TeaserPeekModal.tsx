@@ -75,8 +75,8 @@ export const TeaserPeekModal: React.FC<TeaserPeekModalProps> = ({
             alt={item.title}
             className={`w-full h-full object-cover transition-all duration-700 ${
               isLockedPhase
-                ? 'filter blur-[18px] scale-110 opacity-40'
-                : 'filter blur-[3px] scale-105 opacity-90'
+                ? 'filter blur-[28px] scale-110 opacity-70'
+                : 'filter blur-[10px] scale-105 opacity-85'
             }`}
             referrerPolicy="no-referrer"
           />

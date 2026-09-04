@@ -74,7 +74,7 @@ export const LockedPhotoOverlay: React.FC<LockedPhotoOverlayProps> = ({
         e.stopPropagation();
         onUnlock();
       }}
-      className="absolute inset-0 z-10 flex flex-col items-center justify-between p-3.5 sm:p-5 bg-gradient-to-b from-black/55 via-black/15 to-black/75 backdrop-blur-[1.5px] select-none cursor-pointer transition-all duration-300 hover:backdrop-blur-none group"
+      className="absolute inset-0 z-10 flex flex-col items-center justify-between p-3.5 sm:p-5 bg-gradient-to-b from-black/75 via-black/45 to-black/85 backdrop-blur-[3.5px] select-none cursor-pointer transition-all duration-300 group"
     >
       {/* Top Header Tag & Live Viewer Counter */}
       <div className="w-full flex items-center justify-between gap-2 pt-0.5">
@@ -110,6 +110,12 @@ export const LockedPhotoOverlay: React.FC<LockedPhotoOverlayProps> = ({
         <p className="text-[11px] sm:text-xs text-pink-100 mt-0.5 max-w-[250px] font-bold leading-tight drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]">
           {getSubtitle()}
         </p>
+
+        {/* Blurring notice badge: Explains that content is blurred until payment */}
+        <div className="mt-1.5 px-2.5 py-0.5 rounded-full bg-rose-950/85 border border-rose-500/70 backdrop-blur-md inline-flex items-center gap-1.5 text-[10px] text-rose-200 font-bold shadow-md">
+          <Eye className="w-3 h-3 text-pink-300" />
+          <span>🔒 सिर्फ झलक (पेमेंट के बाद फुल अनब्लर HD)</span>
+        </div>
 
         {/* Glowing Price Tag with Seductive Strikethrough & 85% OFF */}
         <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-black/75 backdrop-blur-md border border-amber-400/80 shadow-xl shadow-amber-500/30">

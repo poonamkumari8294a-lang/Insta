@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { MediaItem } from '../types';
+import { getOptimizedImageUrl } from '../utils/imageOptimizer';
 import {
   X,
   Sparkles,
@@ -193,11 +194,11 @@ export const MediaModal: React.FC<MediaModalProps> = ({
 
           {/* Media Content or Locked Overlay */}
           {!canAccess ? (
-            <div className="relative w-full h-full min-h-[340px] flex items-center justify-center">
+            <div className="relative w-full h-full min-h-[340px] flex items-center justify-center overflow-hidden">
               <img
-                src={item.thumbnailUrl}
+                src={getOptimizedImageUrl(item.thumbnailUrl, 540, 50, true)}
                 alt={item.title}
-                className="w-full h-full object-cover filter blur-[20px] scale-105 opacity-40 select-none pointer-events-none"
+                className="w-full h-full object-cover filter blur-[28px] scale-110 opacity-80 select-none pointer-events-none"
                 referrerPolicy="no-referrer"
               />
               <LockedPhotoOverlay

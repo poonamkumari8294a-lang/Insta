@@ -1,7 +1,8 @@
 import React from 'react';
 import { MediaItem } from '../types';
 import { formatINR } from '../utils/api';
-import { Sparkles, Check, Lock, ShieldCheck, Star } from 'lucide-react';
+import { getOptimizedImageUrl } from '../utils/imageOptimizer';
+import { Sparkles, Check, Lock, ShieldCheck, Star, Eye } from 'lucide-react';
 
 interface PricingPacksProps {
   packs: MediaItem[];
@@ -56,22 +57,51 @@ export const PricingPacks: React.FC<PricingPacksProps> = ({
                 {/* Pack Image Preview (Preserves full aspect ratio with ambient blur background) */}
                 <div className="relative aspect-video rounded-2xl overflow-hidden mb-4 border border-purple-100 shadow-inner bg-purple-950/30 flex items-center justify-center">
                   <img
-                    src={pack.thumbnailUrl}
+                    src={getOptimizedImageUrl(pack.thumbnailUrl, 160, 30, true)}
                     alt=""
                     aria-hidden="true"
-                    className="absolute inset-0 w-full h-full object-cover filter blur-lg scale-110 opacity-50"
+                    className="absolute inset-0 w-full h-full object-cover filter blur-xl scale-125 opacity-60 pointer-events-none"
                     referrerPolicy="no-referrer"
                   />
                   <img
-                    src={pack.thumbnailUrl}
+                    src={getOptimizedImageUrl(pack.thumbnailUrl, 540, 75, !isUnlocked)}
                     alt={pack.title}
                     style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-                    className="relative z-[1] w-full h-full object-contain group-hover:scale-105 transition-transform duration-500"
+                    className={`relative z-[1] w-full h-full object-contain transition-all duration-500 pointer-events-none ${
+                      !isUnlocked
+                        ? 'filter blur-[24px] brightness-[0.85] contrast-[1.15] scale-110 opacity-90'
+                        : 'opacity-100 filter-none scale-100 group-hover:scale-105'
+                    }`}
                     referrerPolicy="no-referrer"
                   />
-                  <div className="absolute inset-0 z-[2] bg-gradient-to-t from-purple-950/80 via-transparent to-transparent pointer-events-none" />
-                  <div className="absolute bottom-2 left-3 z-[3] text-xs font-extrabold text-white">
-                    {pack.photoCount ? `${pack.photoCount} High-Res Items` : 'Full Uncut Video'}
+                  
+                  {/* Frosted locked overlay for locked packs */}
+                  {!isUnlocked ? (
+                    <div 
+                      onClick={() => onBuy(pack)}
+                      className="absolute inset-0 z-[4] bg-gradient-to-t from-black/85 via-black/45 to-black/60 backdrop-blur-[3px] flex flex-col items-center justify-center p-3 text-center cursor-pointer transition-all"
+                    >
+                      <div className="w-11 h-11 rounded-full bg-black/80 border-2 border-pink-400 flex items-center justify-center shadow-lg shadow-pink-500/50 mb-1.5 animate-pulse">
+                        <Lock className="w-5 h-5 text-yellow-300" />
+                      </div>
+                      <span className="text-xs font-black text-white drop-shadow-md">
+                        🔒 VIP बंडल लॉक्ड
+                      </span>
+                      <span className="text-[10px] text-pink-200 font-bold mt-1 bg-black/60 px-2.5 py-0.5 rounded-full border border-pink-500/40">
+                        सिर्फ झलक • पेमेंट के बाद फुल HD अनलॉक
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="absolute inset-0 z-[2] bg-gradient-to-t from-purple-950/80 via-transparent to-transparent pointer-events-none" />
+                  )}
+
+                  <div className="absolute bottom-2 left-3 z-[5] text-xs font-extrabold text-white flex items-center gap-1.5">
+                    {isUnlocked && (
+                      <span className="bg-emerald-500 text-white px-2 py-0.5 rounded-full text-[10px] font-black shadow-xs">
+                        ✓ UNLOCKED
+                      </span>
+                    )}
+                    <span>{pack.photoCount ? `${pack.photoCount} High-Res Items` : 'Full Uncut Video'}</span>
                   </div>
                 </div>
 

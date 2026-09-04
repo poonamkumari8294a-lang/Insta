@@ -129,12 +129,12 @@ export const ContentDetailPage: React.FC<ContentDetailPageProps> = ({
                   />
                 )
               ) : (
-                <div className="relative w-full h-full min-h-[360px] flex flex-col items-center justify-center select-none">
+                <div className="relative w-full h-full min-h-[360px] flex flex-col items-center justify-center select-none overflow-hidden">
                   {/* Blurred Locked Silhouette */}
                   <img
-                    src={getOptimizedImageUrl(item.thumbnailUrl, 320, 45)}
+                    src={getOptimizedImageUrl(item.thumbnailUrl, 480, 50, true)}
                     alt={item.title}
-                    className="w-full h-full object-contain filter blur-[18px] scale-105 opacity-55 select-none pointer-events-none"
+                    className="w-full h-full object-contain filter blur-[28px] scale-110 opacity-85 select-none pointer-events-none"
                     referrerPolicy="no-referrer"
                   />
 

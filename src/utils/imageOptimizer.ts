@@ -15,7 +15,8 @@ import { getAdaptiveImageParams } from './networkSpeedOptimizer';
 export function getOptimizedImageUrl(
   url: string | undefined | null,
   width?: number,
-  quality?: number
+  quality?: number,
+  isBlurred?: boolean
 ): string {
   if (!url) return '';
 
@@ -28,6 +29,9 @@ export function getOptimizedImageUrl(
     return url;
   }
 
+  // Cloudinary blur transform parameter if requested
+  const blurTransform = isBlurred ? ',e_blur:700' : '';
+
   // 1. Unsplash Dynamic CDN URL Optimization (WebP + Exact Width + High Compression, preserving original aspect ratio)
   if (url.includes('images.unsplash.com')) {
     try {
@@ -37,26 +41,30 @@ export function getOptimizedImageUrl(
       urlObj.searchParams.set('auto', 'format');
       urlObj.searchParams.set('fm', 'webp');
       urlObj.searchParams.set('fit', 'max');
+      if (isBlurred) {
+        urlObj.searchParams.set('blur', '80');
+      }
       return urlObj.toString();
     } catch {
       const cleanUrl = url.split('?')[0];
-      return `${cleanUrl}?w=${targetWidth}&q=${targetQuality}&auto=format&fm=webp&fit=max`;
+      const blurQuery = isBlurred ? '&blur=80' : '';
+      return `${cleanUrl}?w=${targetWidth}&q=${targetQuality}&auto=format&fm=webp&fit=max${blurQuery}`;
     }
   }
 
   // 2. Cloudinary Dynamic CDN (c_limit preserves aspect ratio without cropping)
   if (url.includes('res.cloudinary.com')) {
-    if (url.includes(`/upload/w_${targetWidth}`)) {
+    if (url.includes(`/upload/w_${targetWidth}`) && !isBlurred) {
       return url;
     }
     if (url.includes('/video/upload/')) {
       // For video poster/thumbnail previews, generate a lightweight JPG thumbnail at offset 0s
       return url
-        .replace(/\/video\/upload\/(?:[a-z]{1,2}_[^/]+\/)?/, `/video/upload/w_${targetWidth},q_${targetQuality},f_auto,so_0,c_limit/`)
+        .replace(/\/video\/upload\/(?:[a-z]{1,2}_[^/]+\/)?/, `/video/upload/w_${targetWidth},q_${targetQuality}${blurTransform},f_auto,so_0,c_limit/`)
         .replace(/\.(mp4|webm|mov|m4v)(\?.*)?$/i, '.jpg$2');
     }
     if (url.includes('/upload/')) {
-      return url.replace(/\/upload\/(?:[a-z]{1,2}_[^/]+\/)?/, `/upload/w_${targetWidth},q_${targetQuality},f_auto,c_limit/`);
+      return url.replace(/\/upload\/(?:[a-z]{1,2}_[^/]+\/)?/, `/upload/w_${targetWidth},q_${targetQuality}${blurTransform},f_auto,c_limit/`);
     }
     return url;
   }
@@ -69,6 +77,9 @@ export function getOptimizedImageUrl(
       urlObj.searchParams.set('q', targetQuality.toString());
       urlObj.searchParams.set('auto', 'format,compress');
       urlObj.searchParams.set('fit', 'max');
+      if (isBlurred) {
+        urlObj.searchParams.set('blur', '80');
+      }
       return urlObj.toString();
     } catch {
       return url;
@@ -86,15 +97,15 @@ export function getOptimizedImageUrl(
 /**
  * Generates a responsive srcset attribute string for mobile devices (320px to 640px)
  */
-export function getResponsiveSrcSet(url: string | undefined | null): string {
+export function getResponsiveSrcSet(url: string | undefined | null, isBlurred?: boolean): string {
   if (!url || url.startsWith('data:') || url.startsWith('blob:')) {
     return '';
   }
 
   if (url.includes('images.unsplash.com') || url.includes('res.cloudinary.com')) {
-    const w320 = getOptimizedImageUrl(url, 320, 70);
-    const w480 = getOptimizedImageUrl(url, 480, 75);
-    const w640 = getOptimizedImageUrl(url, 640, 75);
+    const w320 = getOptimizedImageUrl(url, 320, 70, isBlurred);
+    const w480 = getOptimizedImageUrl(url, 480, 75, isBlurred);
+    const w640 = getOptimizedImageUrl(url, 640, 75, isBlurred);
 
     return `${w320} 320w, ${w480} 480w, ${w640} 640w`;
   }

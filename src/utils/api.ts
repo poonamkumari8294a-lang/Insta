@@ -627,10 +627,10 @@ export function applyUserAccessTokens(items: MediaItem[]): MediaItem[] {
     const isUnlocked = item.access === 'free' || Boolean(userTokens[item.id]);
     return {
       ...item,
-      mediaUrl: isUnlocked ? item.mediaUrl : (item.previewUrl || item.thumbnailUrl),
+      mediaUrl: isUnlocked ? item.mediaUrl : '',
       galleryUrls: isUnlocked 
         ? (item.galleryUrls && item.galleryUrls.length > 0 ? item.galleryUrls : (item.mediaUrl ? [item.mediaUrl] : [item.thumbnailUrl]))
-        : (item.previewUrl ? [item.previewUrl] : [item.thumbnailUrl])
+        : []
     };
   });
 }
@@ -1092,10 +1092,10 @@ export async function fetchContentDetail(id: string): Promise<MediaItem> {
       const isUnlocked = found.access === 'free' || Boolean(userTokens[found.id]);
       return {
         ...found,
-        mediaUrl: isUnlocked ? found.mediaUrl : (found.previewUrl || found.thumbnailUrl),
+        mediaUrl: isUnlocked ? found.mediaUrl : '',
         galleryUrls: isUnlocked 
           ? (found.galleryUrls && found.galleryUrls.length > 0 ? found.galleryUrls : (found.mediaUrl ? [found.mediaUrl] : [found.thumbnailUrl]))
-          : (found.previewUrl ? [found.previewUrl] : [found.thumbnailUrl])
+          : []
       };
     }
     return null;
@@ -1136,10 +1136,10 @@ export async function fetchContentDetail(id: string): Promise<MediaItem> {
 
       return {
         ...item,
-        mediaUrl: isUnlocked ? item.mediaUrl : (item.previewUrl || item.thumbnailUrl),
+        mediaUrl: isUnlocked ? item.mediaUrl : '',
         galleryUrls: isUnlocked 
           ? (item.galleryUrls && item.galleryUrls.length > 0 ? item.galleryUrls : (item.mediaUrl ? [item.mediaUrl] : [item.thumbnailUrl]))
-          : (item.previewUrl ? [item.previewUrl] : [item.thumbnailUrl])
+          : []
       };
     }
   } catch (err: any) {
