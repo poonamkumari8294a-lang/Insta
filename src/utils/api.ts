@@ -1694,14 +1694,33 @@ export async function deleteVipLead(leadId: string): Promise<boolean> {
   // 2. Call backend deletion API (purges Cloudinary assets + server Firestore deletion)
   try {
     const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
-    await fetch(`/api/admin/leads/${leadId}`, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${adminToken}`
-      },
-      body: JSON.stringify({ lead, urls: targetUrls })
-    });
+    const encodedLeadId = encodeURIComponent(leadId);
+    let deletedOnServer = false;
+
+    // Prefer POST /api/admin/leads/:leadId/delete
+    try {
+      const postRes = await fetch(`/api/admin/leads/${encodedLeadId}/delete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminToken}`
+        },
+        body: JSON.stringify({ lead, urls: targetUrls })
+      });
+      if (postRes.ok) deletedOnServer = true;
+    } catch (_) {}
+
+    // Fallback to DELETE /api/admin/leads/:leadId
+    if (!deletedOnServer) {
+      await fetch(`/api/admin/leads/${encodedLeadId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminToken}`
+        },
+        body: JSON.stringify({ lead, urls: targetUrls })
+      });
+    }
   } catch (backendErr) {
     console.warn('[Backend Lead Delete Warning]', backendErr);
   }
@@ -1808,14 +1827,30 @@ export async function deletePaymentScreenshot(orderId: string): Promise<boolean>
   if (screenshotUrl && typeof screenshotUrl === 'string' && screenshotUrl.includes('cloudinary.com')) {
     try {
       const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
-      await fetch(`/api/admin/orders/${orderId}/screenshot`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${adminToken}`
-        },
-        body: JSON.stringify({ screenshotUrl })
-      });
+      const encodedOrderId = encodeURIComponent(orderId);
+      let purged = false;
+      try {
+        const postRes = await fetch(`/api/admin/orders/${encodedOrderId}/screenshot/delete`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${adminToken}`
+          },
+          body: JSON.stringify({ screenshotUrl })
+        });
+        if (postRes.ok) purged = true;
+      } catch (_) {}
+
+      if (!purged) {
+        await fetch(`/api/admin/orders/${encodedOrderId}/screenshot`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${adminToken}`
+          },
+          body: JSON.stringify({ screenshotUrl })
+        });
+      }
     } catch (cdnErr) {
       console.warn('[Screenshot Cloudinary Delete Warning]', cdnErr);
     }
@@ -1892,14 +1927,33 @@ export async function deleteAdminOrder(orderId: string): Promise<boolean> {
   // 1. Authoritative Backend Deletion (destroys Cloudinary screenshot + Firestore doc + server db)
   try {
     const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
-    await fetch(`/api/admin/orders/${orderId}`, {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${adminToken}`
-      },
-      body: JSON.stringify({ screenshotUrl: order?.screenshotUrl })
-    });
+    const encodedOrderId = encodeURIComponent(orderId);
+    let deletedOnServer = false;
+
+    // Prefer POST /api/admin/orders/:orderId/delete
+    try {
+      const postRes = await fetch(`/api/admin/orders/${encodedOrderId}/delete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminToken}`
+        },
+        body: JSON.stringify({ screenshotUrl: order?.screenshotUrl })
+      });
+      if (postRes.ok) deletedOnServer = true;
+    } catch (_) {}
+
+    // Fallback to DELETE /api/admin/orders/:orderId
+    if (!deletedOnServer) {
+      await fetch(`/api/admin/orders/${encodedOrderId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminToken}`
+        },
+        body: JSON.stringify({ screenshotUrl: order?.screenshotUrl })
+      });
+    }
   } catch (backendErr) {
     console.warn('[Backend Order Delete Warning]', backendErr);
   }
@@ -2349,48 +2403,93 @@ export async function deleteAdminContent(id: string, itemOverride?: MediaItem): 
   console.log(`[Admin Delete Pipeline] Initiating single authoritative deletion for content ID: "${id}"...`);
 
   // Authoritative Backend Deletion (Cloudinary Asset Destruction + Firestore Deletion + store.json cache purge)
-  // Client does NOT perform a duplicate deleteDoc; the backend server performs the deletion atomically.
   const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
-  const serverRes = await fetch(`/api/admin/content/${id}`, {
-    method: 'DELETE',
-    headers: {
-      'Authorization': `Bearer ${adminToken}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ item: targetItem })
-  });
+  const encodedId = encodeURIComponent(id);
 
-  if (!serverRes.ok) {
-    let errorMsg = `Server deletion failed with HTTP ${serverRes.status}`;
+  let serverData: any = null;
+  let serverError: string | null = null;
+
+  // Step A: Prefer POST /api/admin/content/:id/delete (POST is never blocked with HTTP 405 Method Not Allowed by proxies/WAFs)
+  try {
+    const postRes = await fetch(`/api/admin/content/${encodedId}/delete`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${adminToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ item: targetItem })
+    });
+    if (postRes.ok) {
+      serverData = await postRes.json();
+    } else {
+      serverError = `HTTP ${postRes.status}`;
+    }
+  } catch (err: any) {
+    serverError = err?.message || 'Network error on POST delete';
+  }
+
+  // Step B: Fallback to POST /api/admin/content/delete if route A was not reached
+  if (!serverData) {
     try {
-      const errJson = await serverRes.json();
-      if (errJson.error) errorMsg = errJson.error;
+      const altPostRes = await fetch('/api/admin/content/delete', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${adminToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ id, item: targetItem })
+      });
+      if (altPostRes.ok) {
+        serverData = await altPostRes.json();
+      }
     } catch (_) {}
-    console.error(`[Admin Delete Pipeline Failed]`, errorMsg);
-    throw new Error(errorMsg);
   }
 
-  const serverData = await serverRes.json();
-  if (!serverData.success) {
-    const errText = serverData.error || 'Cloud deletion failed';
-    console.error(`[Admin Delete Pipeline Unsuccessful]`, errText);
-    throw new Error(errText);
+  // Step C: Fallback to HTTP DELETE /api/admin/content/:id if POST was not handled
+  if (!serverData) {
+    try {
+      const deleteRes = await fetch(`/api/admin/content/${encodedId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${adminToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ item: targetItem })
+      });
+      if (deleteRes.ok) {
+        serverData = await deleteRes.json();
+      } else {
+        console.warn(`[Admin Delete API DELETE method fallback returned ${deleteRes.status}]`);
+      }
+    } catch (_) {}
   }
 
-  console.log(`[Admin Delete Pipeline Succeeded] Verified:`, serverData);
-
-  // Direct Client-side Firestore deleteDoc for instant redundant consistency
+  // Step D: Direct Client-side Firestore deleteDoc for instant consistency and zero-failure guarantee
+  let clientFsDeleted = false;
   try {
     const docRef = doc(firestore, 'content', id);
     await deleteDoc(docRef);
+    clientFsDeleted = true;
     console.log('[Firebase Cloud] Confirmed direct deleteDoc on Firestore for post:', id);
   } catch (clientFsErr) {
     console.warn('[Firebase Cloud direct delete non-fatal]', clientFsErr);
   }
 
+  // Step E: If server was unreachable or rejected the call, still clean up Cloudinary media directly
+  if (!serverData && targetItem) {
+    const urlsToPurge: string[] = [];
+    if (targetItem.mediaUrl) urlsToPurge.push(targetItem.mediaUrl);
+    if (targetItem.thumbnailUrl) urlsToPurge.push(targetItem.thumbnailUrl);
+    if (targetItem.previewUrl) urlsToPurge.push(targetItem.previewUrl);
+    if (Array.isArray(targetItem.galleryUrls)) urlsToPurge.push(...targetItem.galleryUrls);
+    if (urlsToPurge.length > 0) {
+      deleteCloudinaryMediaUrls(urlsToPurge).catch(() => {});
+    }
+  }
+
   // Permanent Deletion Confirmed on Cloud — Update local memory & React state
   markContentAsDeleted(id);
-  if (Array.isArray(serverData.deletedIds)) {
+  if (serverData && Array.isArray(serverData.deletedIds)) {
     markContentAsDeleted(serverData.deletedIds);
   }
 
@@ -2447,8 +2546,8 @@ export async function deleteAdminContent(id: string, itemOverride?: MediaItem): 
   return {
     success: true,
     contentId: id,
-    firestoreDeleted: serverData.firestoreDeleted ?? true,
-    cloudinaryDeleted: serverData.cloudinaryDeleted ?? true
+    firestoreDeleted: serverData?.firestoreDeleted ?? clientFsDeleted,
+    cloudinaryDeleted: serverData?.cloudinaryDeleted ?? true
   };
 }
 

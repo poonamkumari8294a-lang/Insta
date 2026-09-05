@@ -31,6 +31,7 @@ import {
   changeVipUserId,
   deleteVipLead,
   createVipLead,
+  deleteOrder,
   formatINR
 } from '../utils/api';
 import { uploadFileToStorage, isCloudinaryUrl } from '../services/storage';
@@ -836,11 +837,32 @@ export const UserManagementSection: React.FC<UserManagementSectionProps> = ({
                         )}
                       </div>
 
-                      <div className="text-right">
-                        <div className="font-black text-purple-950">{formatINR(ord.amount)}</div>
-                        <div className="text-[10px] text-purple-900/50">
-                          {new Date(ord.createdAt).toLocaleDateString()}
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <div className="font-black text-purple-950">{formatINR(ord.amount)}</div>
+                          <div className="text-[10px] text-purple-900/50">
+                            {new Date(ord.createdAt).toLocaleDateString()}
+                          </div>
                         </div>
+
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!confirm(`Delete order ${ord.orderId} from database?`)) return;
+                            try {
+                              showToast('Deleting order...', 'info');
+                              await deleteOrder(ord.orderId);
+                              showToast('🗑️ Order deleted successfully');
+                              onReload();
+                            } catch (e: any) {
+                              showToast(e.message || 'Failed to delete order', 'error');
+                            }
+                          }}
+                          className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-colors cursor-pointer"
+                          title="Delete Order"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
                   ))

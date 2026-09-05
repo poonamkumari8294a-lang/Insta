@@ -1317,17 +1317,26 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                           {new Date(o.createdAt).toLocaleDateString()}
                         </td>
                         <td className="py-3 px-3">
-                          {o.status !== 'paid' && (
+                          <div className="flex items-center gap-1.5">
+                            {o.status !== 'paid' && (
+                              <button
+                                onClick={() => {
+                                  setVerifyingOrder(o);
+                                  setVerifyingTxnRef(`ADMIN_VERIFIED_${Date.now()}`);
+                                }}
+                                className="px-2.5 py-1 rounded-xl bg-pink-100 hover:bg-pink-200 text-pink-700 text-[10px] font-black border border-pink-200 transition-colors cursor-pointer"
+                              >
+                                Verify
+                              </button>
+                            )}
                             <button
-                              onClick={() => {
-                                setVerifyingOrder(o);
-                                setVerifyingTxnRef(`ADMIN_VERIFIED_${Date.now()}`);
-                              }}
-                              className="px-2.5 py-1 rounded-xl bg-pink-100 hover:bg-pink-200 text-pink-700 text-[10px] font-black border border-pink-200 transition-colors"
+                              onClick={() => setDeletingOrder(o)}
+                              className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-colors cursor-pointer"
+                              title="Delete Order"
                             >
-                              Verify
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
-                          )}
+                          </div>
                         </td>
                       </tr>
                     ))

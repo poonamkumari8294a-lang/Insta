@@ -66,6 +66,11 @@ export const PaymentManagementSection: React.FC<PaymentManagementSectionProps> =
   const [deletingOrder, setDeletingOrder] = useState<OrderItem | null>(null);
   const [isDeletingOrder, setIsDeletingOrder] = useState(false);
 
+  // Bulk Order Selection & Deletion states
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+
   const [relinkingOrder, setRelinkingOrder] = useState<OrderItem | null>(null);
   const [newScreenshotUrlInput, setNewScreenshotUrlInput] = useState('');
   const [isRelinking, setIsRelinking] = useState(false);
@@ -157,13 +162,54 @@ export const PaymentManagementSection: React.FC<PaymentManagementSectionProps> =
     setIsDeletingOrder(true);
     try {
       await deleteOrder(deletingOrder.orderId);
-      showToast('🗑️ Order record deleted from database');
+      showToast('🗑️ आर्डर और पेमेंट स्क्रीनशॉट सफलता से डिलीट कर दिए गए (Order deleted)');
       setDeletingOrder(null);
+      setSelectedOrderIds(prev => prev.filter(id => id !== deletingOrder.orderId));
       onReload();
     } catch (err: any) {
       showToast(err.message || 'Failed to delete order', 'error');
     } finally {
       setIsDeletingOrder(false);
+    }
+  };
+
+  // Order selection helpers for bulk actions
+  const handleToggleSelectOrder = (orderId: string) => {
+    setSelectedOrderIds(prev =>
+      prev.includes(orderId) ? prev.filter(id => id !== orderId) : [...prev, orderId]
+    );
+  };
+
+  const handleSelectAllOrders = () => {
+    if (filteredOrders.length === 0) return;
+    if (selectedOrderIds.length === filteredOrders.length) {
+      setSelectedOrderIds([]);
+    } else {
+      setSelectedOrderIds(filteredOrders.map(o => o.orderId));
+    }
+  };
+
+  const handleBulkDeleteConfirm = async () => {
+    if (selectedOrderIds.length === 0) return;
+    setIsBulkDeleting(true);
+    let deletedCount = 0;
+    try {
+      for (const id of selectedOrderIds) {
+        try {
+          await deleteOrder(id);
+          deletedCount++;
+        } catch (e) {
+          console.error(`Error deleting order ${id}:`, e);
+        }
+      }
+      showToast(`🗑️ ${deletedCount} आर्डर्स सफलतापूर्वक डेटाबेस और क्लाउड से डिलीट कर दिए गए!`);
+      setSelectedOrderIds([]);
+      setShowBulkDeleteModal(false);
+      onReload();
+    } catch (err: any) {
+      showToast(err.message || 'Bulk delete failed', 'error');
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
@@ -351,12 +397,50 @@ export const PaymentManagementSection: React.FC<PaymentManagementSectionProps> =
             </div>
           </div>
 
+          {/* Bulk Selection Action Bar */}
+          {selectedOrderIds.length > 0 && (
+            <div className="p-3 bg-pink-50 border-2 border-pink-200 rounded-2xl flex items-center justify-between flex-wrap gap-2 animate-in fade-in shadow-xs">
+              <div className="flex items-center gap-2 text-xs font-bold text-purple-950">
+                <span className="px-2.5 py-1 bg-pink-600 text-white rounded-xl text-xs font-black shadow-xs">
+                  {selectedOrderIds.length} Selected
+                </span>
+                <span>आर्डर चुने गए हैं (Orders selected for bulk actions)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedOrderIds([])}
+                  className="px-3 py-1.5 rounded-xl bg-white hover:bg-purple-100 text-purple-900 border border-purple-200 text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Deselect All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowBulkDeleteModal(true)}
+                  className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-black shadow-md shadow-rose-600/25 flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Selected Orders ({selectedOrderIds.length})</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Orders Table */}
           <div className="glass-card rounded-3xl overflow-hidden border border-white/80 shadow-lg">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs text-purple-950">
                 <thead className="border-b border-purple-200 bg-purple-100/70 text-purple-950/80 uppercase text-[10px] font-black">
                   <tr>
+                    <th className="py-3.5 px-3 w-10 text-center">
+                      <input
+                        type="checkbox"
+                        checked={filteredOrders.length > 0 && selectedOrderIds.length === filteredOrders.length}
+                        onChange={handleSelectAllOrders}
+                        className="rounded border-purple-300 text-pink-600 focus:ring-pink-500 cursor-pointer w-4 h-4"
+                        title="Select / Deselect All Orders"
+                      />
+                    </th>
                     <th className="py-3.5 px-4">Order ID</th>
                     <th className="py-3.5 px-4">Customer (Lead)</th>
                     <th className="py-3.5 px-4">Content / Item</th>
@@ -365,13 +449,13 @@ export const PaymentManagementSection: React.FC<PaymentManagementSectionProps> =
                     <th className="py-3.5 px-4">Screenshot</th>
                     <th className="py-3.5 px-4">Submitted UTR</th>
                     <th className="py-3.5 px-4">Date</th>
-                    <th className="py-3.5 px-4 text-right">Verification Action</th>
+                    <th className="py-3.5 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-purple-100 bg-white/60">
                   {filteredOrders.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="text-center py-12 text-purple-900/50 font-medium">
+                      <td colSpan={10} className="text-center py-12 text-purple-900/50 font-medium">
                         <CreditCard className="w-8 h-8 text-purple-300 mx-auto mb-2" />
                         No orders found matching filters.
                       </td>
@@ -381,11 +465,23 @@ export const PaymentManagementSection: React.FC<PaymentManagementSectionProps> =
                       <tr
                         key={o.orderId}
                         className={
-                          o.status === 'waiting_verification'
+                          selectedOrderIds.includes(o.orderId)
+                            ? 'bg-pink-50/70 font-semibold transition-colors'
+                            : o.status === 'waiting_verification'
                             ? 'bg-amber-50/70 hover:bg-amber-50 font-semibold transition-colors'
                             : 'hover:bg-purple-50/50 transition-colors'
                         }
                       >
+                        {/* Checkbox */}
+                        <td className="py-3.5 px-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={selectedOrderIds.includes(o.orderId)}
+                            onChange={() => handleToggleSelectOrder(o.orderId)}
+                            className="rounded border-purple-300 text-pink-600 focus:ring-pink-500 cursor-pointer w-4 h-4"
+                          />
+                        </td>
+
                         {/* Order ID */}
                         <td className="py-3.5 px-4">
                           <div className="flex items-center gap-1">
@@ -565,10 +661,11 @@ export const PaymentManagementSection: React.FC<PaymentManagementSectionProps> =
                             <button
                               type="button"
                               onClick={() => setDeletingOrder(o)}
-                              className="p-1.5 rounded-xl bg-purple-50 hover:bg-rose-100 text-purple-400 hover:text-rose-600 border border-purple-100 transition-colors cursor-pointer"
-                              title="Delete order record"
+                              className="px-2 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-colors cursor-pointer flex items-center gap-1 font-bold text-[11px]"
+                              title="Delete this order completely from database"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">Delete</span>
                             </button>
                           </div>
                         </td>
@@ -694,14 +791,24 @@ export const PaymentManagementSection: React.FC<PaymentManagementSectionProps> =
                         </span>
                       )}
 
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteScreenshot(ord.orderId)}
-                        className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-colors"
-                        title="Delete this screenshot"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteScreenshot(ord.orderId)}
+                          className="p-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 transition-colors cursor-pointer"
+                          title="Delete screenshot image only"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeletingOrder(ord)}
+                          className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 transition-colors cursor-pointer"
+                          title="Delete entire order & image"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -814,7 +921,7 @@ export const PaymentManagementSection: React.FC<PaymentManagementSectionProps> =
                 )}
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 {viewingScreenshotOrder.status === 'waiting_verification' && (
                   <>
                     <button
@@ -843,7 +950,7 @@ export const PaymentManagementSection: React.FC<PaymentManagementSectionProps> =
                     setRelinkingOrder(viewingScreenshotOrder);
                     setNewScreenshotUrlInput(viewingScreenshotOrder.screenshotUrl || '');
                   }}
-                  className="px-3 py-2 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 font-bold text-xs flex items-center gap-1"
+                  className="px-3 py-2 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 font-bold text-xs flex items-center gap-1 cursor-pointer"
                   title="Relink screenshot URL"
                 >
                   <Link2 className="w-3.5 h-3.5" />
@@ -853,10 +960,24 @@ export const PaymentManagementSection: React.FC<PaymentManagementSectionProps> =
                 <button
                   type="button"
                   onClick={() => handleDeleteScreenshot(viewingScreenshotOrder.orderId)}
-                  className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs"
-                  title="Delete screenshot image"
+                  className="px-3 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold text-xs cursor-pointer"
+                  title="Delete screenshot image only"
                 >
                   Delete Image
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const ord = viewingScreenshotOrder;
+                    setViewingScreenshotOrder(null);
+                    setDeletingOrder(ord);
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs shadow-md flex items-center gap-1 cursor-pointer transition-transform active:scale-95"
+                  title="Delete entire order and image from database"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Order</span>
                 </button>
               </div>
             </div>
@@ -1058,13 +1179,33 @@ export const PaymentManagementSection: React.FC<PaymentManagementSectionProps> =
                   Delete Order Record
                 </h3>
                 <p className="text-xs text-purple-900/60 font-medium">
-                  Order ID: <span className="font-mono text-pink-700">{deletingOrder.orderId}</span>
+                  Order ID: <span className="font-mono text-pink-700 font-bold">{deletingOrder.orderId}</span>
                 </p>
               </div>
             </div>
 
+            <div className="p-3 bg-rose-50/70 border border-rose-200/80 rounded-2xl text-xs space-y-1 text-purple-950">
+              <div className="flex justify-between">
+                <span className="text-purple-900/60">Item:</span>
+                <span className="font-bold truncate max-w-[200px]">{deletingOrder.contentTitle}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-purple-900/60">Customer:</span>
+                <span className="font-bold">{deletingOrder.customerName || 'Direct Customer'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-purple-900/60">Amount:</span>
+                <span className="font-black text-pink-700">{formatINR(deletingOrder.amount)}</span>
+              </div>
+              {deletingOrder.screenshotUrl && (
+                <div className="text-[11px] text-rose-700 font-medium pt-1 border-t border-rose-200">
+                  ⚠️ Note: Associated Cloudinary payment receipt will also be permanently deleted.
+                </div>
+              )}
+            </div>
+
             <p className="text-xs text-purple-900/80 leading-relaxed font-medium">
-              क्या आप वाकई इस आर्डर रिकॉर्ड को डेटाबेस से हमेशा के लिए डिलीट करना चाहते हैं?
+              क्या आप वाकई इस आर्डर को डेटाबेस से हमेशा के लिए डिलीट करना चाहते हैं? यह एक्शन रीवर्ट नहीं हो सकता।
             </p>
 
             <div className="flex items-center justify-end gap-2.5 pt-2">
@@ -1072,7 +1213,7 @@ export const PaymentManagementSection: React.FC<PaymentManagementSectionProps> =
                 type="button"
                 disabled={isDeletingOrder}
                 onClick={() => setDeletingOrder(null)}
-                className="px-4 py-2 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 text-xs font-bold"
+                className="px-4 py-2 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 text-xs font-bold cursor-pointer"
               >
                 Cancel
               </button>
@@ -1080,9 +1221,61 @@ export const PaymentManagementSection: React.FC<PaymentManagementSectionProps> =
                 type="button"
                 disabled={isDeletingOrder}
                 onClick={handleDeleteOrderConfirm}
-                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-black shadow-md flex items-center gap-1.5 cursor-pointer"
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-black shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
-                {isDeletingOrder ? 'Deleting...' : 'Confirm Delete'}
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeletingOrder ? 'Deleting...' : 'Confirm Delete Order'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------------------------------------------- */}
+      {/* MODAL 6: BULK DELETE ORDERS CONFIRM */}
+      {/* ---------------------------------------------------- */}
+      {showBulkDeleteModal && (
+        <div className="fixed inset-0 z-50 bg-purple-950/60 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="relative w-full max-w-md bg-white rounded-3xl p-6 border border-white/90 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-2xl bg-rose-100 text-rose-600 shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-display font-black text-base text-purple-950">
+                  Bulk Delete Orders
+                </h3>
+                <p className="text-xs text-rose-600 font-bold">
+                  {selectedOrderIds.length} Orders Selected
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-purple-900/80 leading-relaxed font-medium">
+              क्या आप चुने गए सभी <strong>{selectedOrderIds.length}</strong> आर्डर्स को डेटाबेस और क्लाउड स्टोरेज से हमेशा के लिए डिलीट करना चाहते हैं?
+            </p>
+
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-[11px] text-amber-900 font-medium">
+              ⚠️ चेतावनी: सभी चुने गए आर्डर्स और उनसे जुड़ी पेमेंट रसीदें / स्क्रीनशॉट स्थायी रूप से हटा दिए जाएंगे।
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isBulkDeleting}
+                onClick={() => setShowBulkDeleteModal(false)}
+                className="px-4 py-2 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 text-xs font-bold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isBulkDeleting}
+                onClick={handleBulkDeleteConfirm}
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-black shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isBulkDeleting ? 'Deleting Selected...' : `Delete ${selectedOrderIds.length} Orders`}</span>
               </button>
             </div>
           </div>
