@@ -23,7 +23,9 @@ import {
   adminRejectOrder,
   restorePreviousOriginalData,
   formatINR,
-  CLIENT_SITE_SETTINGS
+  CLIENT_SITE_SETTINGS,
+  subscribeToCrossTabEvents,
+  broadcastCrossTabEvent
 } from '../utils/api';
 import { HomepageControlTab } from '../components/HomepageControlTab';
 import { StoryHighlightsManager } from '../components/StoryHighlightsManager';
@@ -250,10 +252,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     setIsSyncing(true);
     try {
       const [ordersData, contentData, settingsData, leadsData] = await Promise.all([
-        fetchAdminOrders(),
+        fetchAdminOrders(true),
         fetchAdminContent(true),
         fetchSiteSettings(true),
-        fetchVipLeads()
+        fetchVipLeads(true)
       ]);
       const validContent = Array.isArray(contentData) ? contentData : [];
       const validSettings = settingsData || initialSettings;
@@ -288,6 +290,74 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       setIsSyncing(false);
     }
   };
+
+  // ----------------------------------------------------
+  // CROSS-TAB REALTIME SYNCHRONIZATION (0ms Multi-Tab Mirroring)
+  // When an order, post, or lead is deleted in Tab 1, Tab 2 immediately removes it!
+  // ----------------------------------------------------
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    // Listen for events broadcast from other tabs in the same browser
+    const unsubscribe = subscribeToCrossTabEvents((event) => {
+      console.log('[Admin Cross-Tab Event Received]', event);
+
+      if (event.type === 'ORDER_DELETED') {
+        // Tab 2 immediately purges the deleted order from React state
+        setOrdersList((prev) => prev.filter((o) => o.orderId !== event.orderId));
+        setStats((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            totalOrders: Math.max(0, (prev.totalOrders || 1) - 1),
+            recentOrders: prev.recentOrders?.filter((o) => o.orderId !== event.orderId) || []
+          };
+        });
+      } else if (event.type === 'CONTENT_DELETED') {
+        // Tab 2 immediately removes the deleted post
+        setContentList((prev) => prev.filter((c) => c.id !== event.contentId));
+        if (onContentUpdated) {
+          setContentList((current) => {
+            const updated = current.filter((c) => c.id !== event.contentId);
+            onContentUpdated(updated);
+            return updated;
+          });
+        }
+      } else if (event.type === 'SETTINGS_UPDATED' && event.settings) {
+        setSiteSettings(event.settings);
+        if (onSettingsUpdated) onSettingsUpdated(event.settings);
+      } else if (event.type === 'LEAD_DELETED') {
+        // Tab 2 immediately removes deleted lead
+        setVipLeads((prev) => prev.filter((l) => l.id !== event.leadId && l.userId !== event.leadId));
+      } else if (
+        event.type === 'ORDERS_CHANGED' ||
+        event.type === 'CONTENT_CHANGED' ||
+        event.type === 'CONTENT_CREATED' ||
+        event.type === 'CONTENT_UPDATED' ||
+        event.type === 'SETTINGS_CHANGED' ||
+        event.type === 'SYNC_ALL_DATA'
+      ) {
+        // Silently pull fresh data
+        loadAdminData(true);
+      }
+    });
+
+    // When the user switches back or focuses this tab from Tab 1:
+    const handleTabFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') {
+        loadAdminData(true);
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleTabFocusOrVisible);
+    window.addEventListener('focus', handleTabFocusOrVisible);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('visibilitychange', handleTabFocusOrVisible);
+      window.removeEventListener('focus', handleTabFocusOrVisible);
+    };
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (isAuthenticated) {

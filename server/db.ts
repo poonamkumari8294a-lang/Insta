@@ -311,6 +311,8 @@ interface DatabaseSchema {
   orders: OrderItem[];
   tokens: { token: string; contentId: string; orderId: string; expiresAt: string; createdAt: string }[];
   deletedIds?: string[];
+  contentVersion?: number;
+  settingsVersion?: number;
 }
 
 class Database {
@@ -334,7 +336,9 @@ class Database {
           content: filteredContent,
           orders: parsed.orders || [],
           tokens: parsed.tokens || [],
-          deletedIds: Array.from(deletedSet)
+          deletedIds: Array.from(deletedSet),
+          contentVersion: parsed.contentVersion || Date.now(),
+          settingsVersion: parsed.settingsVersion || Date.now()
         };
       }
     } catch (err) {
@@ -345,7 +349,9 @@ class Database {
       content: INITIAL_CONTENT,
       orders: [],
       tokens: [],
-      deletedIds: []
+      deletedIds: [],
+      contentVersion: Date.now(),
+      settingsVersion: Date.now()
     };
   }
 
@@ -357,6 +363,14 @@ class Database {
     }
   }
 
+  public getContentVersion(): number {
+    return this.data.contentVersion || 1;
+  }
+
+  public getSettingsVersion(): number {
+    return this.data.settingsVersion || 1;
+  }
+
   // Site Settings
   public getSettings(): SiteSettings {
     return this.data.settings;
@@ -364,6 +378,7 @@ class Database {
 
   public updateSettings(partial: Partial<SiteSettings>): SiteSettings {
     this.data.settings = { ...this.data.settings, ...partial };
+    this.data.settingsVersion = Date.now();
     this.saveData();
     return this.data.settings;
   }
@@ -398,6 +413,7 @@ class Database {
       createdAt: new Date().toISOString()
     };
     this.data.content.unshift(newItem);
+    this.data.contentVersion = Date.now();
     this.saveData();
     return newItem;
   }
@@ -406,6 +422,7 @@ class Database {
     const idx = this.data.content.findIndex(c => c.id === id);
     if (idx === -1) return null;
     this.data.content[idx] = { ...this.data.content[idx], ...updates };
+    this.data.contentVersion = Date.now();
     this.saveData();
     return this.data.content[idx];
   }
@@ -419,6 +436,7 @@ class Database {
     }
     const prevLen = this.data.content.length;
     this.data.content = this.data.content.filter(c => c.id !== id);
+    this.data.contentVersion = Date.now();
     this.saveData();
     return true;
   }
@@ -455,6 +473,7 @@ class Database {
       !(Array.isArray(c.tags) && c.tags.includes('Starter Demo'))
     );
 
+    this.data.contentVersion = Date.now();
     this.saveData();
     return { deletedCount: newlyPurged.length, purgedIds: newlyPurged };
   }

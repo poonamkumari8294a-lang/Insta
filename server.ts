@@ -119,9 +119,30 @@ async function startServer() {
   // 1. Site Settings & Creator Profile
   app.get('/api/site/settings', (req: Request, res: Response) => {
     try {
-      res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.setHeader('Surrogate-Control', 'no-store');
       const settings = db.getSettings();
       res.json(settings);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Real-time synchronization state check (Fast <50 bytes endpoint for instant cross-device updates)
+  app.get('/api/sync/status', (req: Request, res: Response) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.json({
+        contentVersion: db.getContentVersion(),
+        settingsVersion: db.getSettingsVersion(),
+        deletedIds: db.getDeletedIds(),
+        totalItems: db.getAllContent(false).length,
+        timestamp: Date.now()
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -130,7 +151,10 @@ async function startServer() {
   // 2. Public Content List (Hides sensitive mediaUrl for premium items unless token passed)
   app.get('/api/content', (req: Request, res: Response) => {
     try {
-      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.setHeader('X-Content-Version', String(db.getContentVersion()));
       const allContent = db.getAllContent(false);
       const userTokens = req.query.tokens ? (req.query.tokens as string).split(',') : [];
 

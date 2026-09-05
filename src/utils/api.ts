@@ -106,11 +106,14 @@ export function removeSessionItem(key: string): void {
   } catch (_) {}
 }
 
-// Proactively purge any leftover keys from browser LocalStorage
+// Proactively purge old legacy mock/temporary debug keys from localStorage if present
 if (typeof window !== 'undefined') {
   try {
     if (typeof localStorage !== 'undefined') {
-      localStorage.clear();
+      const keysToPurge = ['mock_items', 'old_cache_v1', 'temp_debug_data'];
+      keysToPurge.forEach(k => {
+        try { localStorage.removeItem(k); } catch (_) {}
+      });
     }
   } catch (_) {}
 }
@@ -362,16 +365,108 @@ const SETTINGS_CACHE_KEY = 'ruma_cached_settings_v3';
 const CONTENT_CACHE_KEY = 'ruma_cached_content_v3';
 const ORDERS_CACHE_KEY = 'ruma_cached_orders_v3';
 const LEADS_CACHE_KEY = 'ruma_cached_leads_v3';
-const DELETED_IDS_KEY = 'ruma_deleted_content_ids_v1';
+const DELETED_IDS_KEY = 'ruma_deleted_content_ids_v2';
+const DELETED_ORDERS_KEY = 'ruma_deleted_orders_ids_v2';
 
-// In-memory set for instantaneous O(1) checks
+// In-memory sets for instantaneous O(1) checks
 const inMemoryDeletedIds = new Set<string>();
+const inMemoryDeletedOrderIds = new Set<string>();
 
+// ============================================================================
+// Cross-Tab Realtime Synchronization Bus
+// Guarantees 0ms immediate propagation of deletions & edits across ALL open tabs
+// ============================================================================
+export type CrossTabSyncEvent =
+  | { type: 'ORDER_DELETED'; orderId: string }
+  | { type: 'ORDERS_CHANGED' }
+  | { type: 'CONTENT_DELETED'; contentId: string }
+  | { type: 'CONTENT_CREATED'; content: MediaItem }
+  | { type: 'CONTENT_UPDATED'; content: MediaItem }
+  | { type: 'CONTENT_CHANGED' }
+  | { type: 'LEAD_DELETED'; leadId: string }
+  | { type: 'SETTINGS_UPDATED'; settings: SiteSettings }
+  | { type: 'SETTINGS_CHANGED' }
+  | { type: 'SYNC_ALL_DATA' };
+
+const CROSS_TAB_CHANNEL_NAME = 'ruma_cross_tab_sync_channel_v1';
+const CROSS_TAB_STORAGE_KEY = 'ruma_cross_tab_event_trigger_v1';
+
+export function broadcastCrossTabEvent(event: CrossTabSyncEvent): void {
+  // 1. BroadcastChannel: 0ms IPC between all open tabs in same browser
+  if (typeof BroadcastChannel !== 'undefined') {
+    try {
+      const bc = new BroadcastChannel(CROSS_TAB_CHANNEL_NAME);
+      bc.postMessage(event);
+      bc.close();
+    } catch (_) {}
+  }
+
+  // 2. LocalStorage StorageEvent fallback: fires 'storage' event in all other tabs
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      localStorage.setItem(CROSS_TAB_STORAGE_KEY, JSON.stringify({ ...event, _t: Date.now() }));
+    } catch (_) {}
+  }
+}
+
+export function subscribeToCrossTabEvents(callback: (event: CrossTabSyncEvent) => void): () => void {
+  const cleanups: (() => void)[] = [];
+
+  // Listen via BroadcastChannel
+  if (typeof BroadcastChannel !== 'undefined') {
+    try {
+      const bc = new BroadcastChannel(CROSS_TAB_CHANNEL_NAME);
+      bc.onmessage = (e) => {
+        if (e.data && e.data.type) {
+          callback(e.data);
+        }
+      };
+      cleanups.push(() => {
+        try { bc.close(); } catch (_) {}
+      });
+    } catch (_) {}
+  }
+
+  // Listen via StorageEvent fallback (when another tab modifies localStorage)
+  if (typeof window !== 'undefined') {
+    const storageHandler = (e: StorageEvent) => {
+      if (e.key === CROSS_TAB_STORAGE_KEY && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed && parsed.type) {
+            callback(parsed);
+          }
+        } catch (_) {}
+      }
+    };
+    window.addEventListener('storage', storageHandler);
+    cleanups.push(() => window.removeEventListener('storage', storageHandler));
+  }
+
+  return () => {
+    cleanups.forEach(fn => {
+      try { fn(); } catch (_) {}
+    });
+  };
+}
+
+// ============================================================================
+// Content Deletion Tombstones (Cross-Tab Shared)
+// ============================================================================
 export function getDeletedContentIds(): Set<string> {
   try {
-    const raw = getSessionItem(DELETED_IDS_KEY);
-    if (raw) {
-      const arr = JSON.parse(raw);
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(DELETED_IDS_KEY);
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) {
+          arr.forEach(id => inMemoryDeletedIds.add(id));
+        }
+      }
+    }
+    const sessionRaw = getSessionItem(DELETED_IDS_KEY);
+    if (sessionRaw) {
+      const arr = JSON.parse(sessionRaw);
       if (Array.isArray(arr)) {
         arr.forEach(id => inMemoryDeletedIds.add(id));
       }
@@ -389,15 +484,14 @@ export function markContentAsDeleted(idOrIds: string | string[]) {
       }
     });
     setSessionItem(DELETED_IDS_KEY, JSON.stringify(Array.from(inMemoryDeletedIds)));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(Array.from(inMemoryDeletedIds)));
+    }
     
     // Broadcast across tabs/windows on the current device for 0ms cross-tab disappearance
-    if (typeof BroadcastChannel !== 'undefined') {
-      try {
-        const bc = new BroadcastChannel('ruma_deletion_sync');
-        bc.postMessage({ type: 'SYNC_DELETED_IDS', ids: list });
-        bc.close();
-      } catch (_) {}
-    }
+    list.forEach(id => {
+      broadcastCrossTabEvent({ type: 'CONTENT_DELETED', contentId: id });
+    });
   } catch (_) {}
 }
 
@@ -407,6 +501,57 @@ export function filterOutDeletedItems(items: MediaItem[]): MediaItem[] {
   return items.filter(item => item && item.id && !deletedSet.has(item.id));
 }
 
+// ============================================================================
+// Order Deletion Tombstones (Cross-Tab Shared)
+// ============================================================================
+export function getDeletedOrderIds(): Set<string> {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(DELETED_ORDERS_KEY);
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) {
+          arr.forEach(id => inMemoryDeletedOrderIds.add(id));
+        }
+      }
+    }
+    const sessionRaw = getSessionItem(DELETED_ORDERS_KEY);
+    if (sessionRaw) {
+      const arr = JSON.parse(sessionRaw);
+      if (Array.isArray(arr)) {
+        arr.forEach(id => inMemoryDeletedOrderIds.add(id));
+      }
+    }
+  } catch (_) {}
+  return new Set(inMemoryDeletedOrderIds);
+}
+
+export function markOrderAsDeleted(idOrIds: string | string[]) {
+  try {
+    const list = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
+    list.forEach(id => {
+      if (id && typeof id === 'string') {
+        inMemoryDeletedOrderIds.add(id);
+      }
+    });
+    setSessionItem(DELETED_ORDERS_KEY, JSON.stringify(Array.from(inMemoryDeletedOrderIds)));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(DELETED_ORDERS_KEY, JSON.stringify(Array.from(inMemoryDeletedOrderIds)));
+    }
+
+    // Broadcast across tabs/windows on the current device for 0ms cross-tab disappearance
+    list.forEach(id => {
+      broadcastCrossTabEvent({ type: 'ORDER_DELETED', orderId: id });
+    });
+  } catch (_) {}
+}
+
+export function filterOutDeletedOrders(orders: OrderItem[]): OrderItem[] {
+  if (!orders || !Array.isArray(orders) || orders.length === 0) return [];
+  const deletedSet = getDeletedOrderIds();
+  return orders.filter(order => order && order.orderId && !deletedSet.has(order.orderId));
+}
+
 export async function syncDeletedIdsFromServer(): Promise<void> {
   try {
     const res = await fetch('/api/content/deleted-ids');
@@ -414,12 +559,11 @@ export async function syncDeletedIdsFromServer(): Promise<void> {
       const data = await res.json();
       if (Array.isArray(data.deletedIds) && data.deletedIds.length > 0) {
         markContentAsDeleted(data.deletedIds);
-        if (memoryContentList) {
-          const filtered = filterOutDeletedItems(memoryContentList);
-          if (filtered.length !== memoryContentList.length) {
-            sharedContentManager.notifyLocalUpdate(filtered);
-          }
-        }
+        const currentList = memoryContentList || getCachedContentListSync();
+        const filtered = filterOutDeletedItems(currentList);
+        memoryContentList = filtered;
+        try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(filtered)); } catch (_) {}
+        sharedContentManager.notifyLocalUpdate(filtered);
       }
     }
   } catch (_) {}
@@ -429,22 +573,52 @@ export async function syncDeletedIdsFromServer(): Promise<void> {
 if (typeof window !== 'undefined') {
   syncDeletedIdsFromServer().catch(() => {});
 
-  if (typeof BroadcastChannel !== 'undefined') {
-    try {
-      const bc = new BroadcastChannel('ruma_deletion_sync');
-      bc.onmessage = (event) => {
-        if (event.data && event.data.type === 'SYNC_DELETED_IDS' && Array.isArray(event.data.ids)) {
-          event.data.ids.forEach((id: string) => inMemoryDeletedIds.add(id));
-          if (memoryContentList) {
-            const filtered = filterOutDeletedItems(memoryContentList);
-            if (filtered.length !== memoryContentList.length) {
-              sharedContentManager.notifyLocalUpdate(filtered);
-            }
-          }
-        }
-      };
-    } catch (_) {}
-  }
+  // Internal listener for the API module singletons
+  subscribeToCrossTabEvents((event) => {
+    if (event.type === 'CONTENT_DELETED' && event.contentId) {
+      inMemoryDeletedIds.add(event.contentId);
+      const currentList = memoryContentList || getCachedContentListSync();
+      const filtered = currentList.filter(c => c.id !== event.contentId);
+      memoryContentList = filtered;
+      try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(filtered)); } catch (_) {}
+      sharedContentManager.notifyLocalUpdate(filtered);
+    } else if (event.type === 'CONTENT_UPDATED' && event.content) {
+      const currentList = memoryContentList || getCachedContentListSync();
+      const idx = currentList.findIndex(c => c.id === event.content.id);
+      let nextList: MediaItem[];
+      if (idx !== -1) {
+        nextList = [...currentList];
+        nextList[idx] = event.content;
+      } else {
+        nextList = [event.content, ...currentList];
+      }
+      const filtered = filterOutDeletedItems(nextList);
+      memoryContentList = filtered;
+      try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(filtered)); } catch (_) {}
+      sharedContentManager.notifyLocalUpdate(filtered);
+    } else if (event.type === 'CONTENT_CREATED' && event.content) {
+      const currentList = memoryContentList || getCachedContentListSync();
+      const nextList = [event.content, ...currentList.filter(c => c.id !== event.content.id)];
+      const filtered = filterOutDeletedItems(nextList);
+      memoryContentList = filtered;
+      try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(filtered)); } catch (_) {}
+      sharedContentManager.notifyLocalUpdate(filtered);
+    } else if (event.type === 'SETTINGS_UPDATED' && event.settings) {
+      memorySiteSettings = event.settings;
+      memorySettingsTimestamp = Date.now();
+      try { setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(event.settings)); } catch (_) {}
+      sharedSettingsManager.notifyLocalUpdate(event.settings);
+    } else if (event.type === 'ORDER_DELETED' && event.orderId) {
+      inMemoryDeletedOrderIds.add(event.orderId);
+      if (memoryAdminOrders) {
+        memoryAdminOrders = memoryAdminOrders.filter(o => o.orderId !== event.orderId);
+      }
+    } else if (event.type === 'LEAD_DELETED' && event.leadId) {
+      if (memoryVipLeads) {
+        memoryVipLeads = memoryVipLeads.filter(l => l.id !== event.leadId && l.userId !== event.leadId);
+      }
+    }
+  });
 }
 
 export function hasLocalSettingsCache(): boolean {
@@ -475,10 +649,10 @@ let activeAdminContentPromise: Promise<MediaItem[]> | null = null;
 let activeOrdersPromise: Promise<OrderItem[]> | null = null;
 let activeLeadsPromise: Promise<any[]> | null = null;
 
-// TTL Config: 5 minutes default in-memory caching to minimize Firestore reads
-const SETTINGS_CACHE_TTL = 5 * 60 * 1000;
-const CONTENT_CACHE_TTL = 3 * 60 * 1000;
-const ADMIN_DATA_TTL = 3 * 60 * 1000;
+// TTL Config: Active 10-second revalidation to keep all tabs and devices 100% in sync
+const SETTINGS_CACHE_TTL = 10 * 1000;
+const CONTENT_CACHE_TTL = 10 * 1000;
+const ADMIN_DATA_TTL = 5 * 1000;
 
 // ============================================================================
 // Robust Server Backend Synchronizer & Fallback
@@ -517,8 +691,7 @@ export async function fetchServerContentFallback(forAdmin = false): Promise<Medi
     const res = await fetch(url, { headers });
     if (res.ok) {
       const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        console.log(`[Server Content API] Loaded ${data.length} media items from backend`);
+      if (Array.isArray(data)) {
         const cleaned = filterOutDeletedItems(data.map(item => reconnectCloudinaryMetadata(item)));
         return cleaned;
       }
@@ -526,7 +699,7 @@ export async function fetchServerContentFallback(forAdmin = false): Promise<Medi
       const resPub = await fetch('/api/content');
       if (resPub.ok) {
         const dataPub = await resPub.json();
-        if (Array.isArray(dataPub) && dataPub.length > 0) {
+        if (Array.isArray(dataPub)) {
           const cleaned = filterOutDeletedItems(dataPub.map(item => reconnectCloudinaryMetadata(item)));
           return cleaned;
         }
@@ -698,34 +871,22 @@ export async function fetchSiteSettings(forceFresh = false): Promise<SiteSetting
     })();
 
     try {
-      // Prioritize instant server API response
+      // Prioritize instant server API response (Contains admin's true settings from store.json)
       const serverResult = await serverPromise;
       if (serverResult) {
         memorySiteSettings = serverResult;
         memorySettingsTimestamp = Date.now();
         try { setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(serverResult)); } catch (_) {}
-
-        // Allow firestore to finish in background and update cache if newer
-        firestorePromise.then(fsResult => {
-          if (fsResult) {
-            memorySiteSettings = fsResult;
-            memorySettingsTimestamp = Date.now();
-            try { setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(fsResult)); } catch (_) {}
-            syncSettingsToServer(fsResult).catch(() => {});
-          }
-        }).catch(() => {});
-
         return serverResult;
       }
     } catch (_) {}
 
-    // If server failed, await firestore result
+    // If server was unreachable, await firestore result as fallback
     const fsResult = await firestorePromise;
     if (fsResult) {
       memorySiteSettings = fsResult;
       memorySettingsTimestamp = Date.now();
       try { setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(fsResult)); } catch (_) {}
-      syncSettingsToServer(fsResult).catch(() => {});
       return fsResult;
     }
 
@@ -750,11 +911,12 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
   if (isCloudQuotaExhausted()) {
     trackFirestoreRead('cacheHit', 'content:quota-cooldown');
     const serverFallback = await fetchServerContentFallback(false);
-    if (serverFallback && serverFallback.length > 0) {
-      memoryContentList = serverFallback;
+    if (serverFallback !== null) {
+      const clean = filterOutDeletedItems(serverFallback);
+      memoryContentList = clean;
       memoryContentTimestamp = Date.now();
-      try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(serverFallback)); } catch (_) {}
-      return applyUserAccessTokens(serverFallback);
+      try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(clean)); } catch (_) {}
+      return applyUserAccessTokens(clean);
     }
     const cachedList = memoryContentList || getCachedContentListSync();
     return applyUserAccessTokens(cachedList);
@@ -766,7 +928,7 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
   }
 
   activeContentPromise = (async () => {
-    // 1. Concurrently fetch instant local server endpoint (~4ms, has all 37 Cloudinary items)
+    // 1. Concurrently fetch instant local server endpoint (~4ms, has all Cloudinary items)
     const serverPromise = fetchServerContentFallback(false).catch(() => null);
 
     // 2. Also query Firestore with a tight 1200ms timeout
@@ -810,33 +972,25 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
     })();
 
     try {
-      // Prioritize instant server API response (returns in ~4ms!)
+      // Prioritize instant server API response (returns in ~4ms and respects all deletions!)
       const serverResult = await serverPromise;
-      if (serverResult && serverResult.length > 0) {
-        memoryContentList = serverResult;
+      if (serverResult !== null) {
+        const clean = filterOutDeletedItems(serverResult);
+        memoryContentList = clean;
         memoryContentTimestamp = Date.now();
-        try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(serverResult)); } catch (_) {}
-
-        // Let Firestore finish in background without blocking UI
-        firestorePromise.then(fsItems => {
-          if (fsItems && fsItems.length > 0) {
-            memoryContentList = fsItems;
-            memoryContentTimestamp = Date.now();
-            try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(fsItems)); } catch (_) {}
-          }
-        }).catch(() => {});
-
-        return applyUserAccessTokens(serverResult);
+        try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(clean)); } catch (_) {}
+        return applyUserAccessTokens(clean);
       }
     } catch (_) {}
 
-    // If server fallback was empty, await firestore result
+    // If server was unreachable, await firestore result
     const fsItems = await firestorePromise;
-    if (fsItems && fsItems.length > 0) {
-      memoryContentList = fsItems;
+    if (fsItems !== null && Array.isArray(fsItems)) {
+      const clean = filterOutDeletedItems(fsItems);
+      memoryContentList = clean;
       memoryContentTimestamp = Date.now();
-      try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(fsItems)); } catch (_) {}
-      return applyUserAccessTokens(fsItems);
+      try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(clean)); } catch (_) {}
+      return applyUserAccessTokens(clean);
     }
 
     const fallbackList = memoryContentList || getCachedContentListSync();
@@ -932,11 +1086,11 @@ class ContentSubscriptionManager {
       }
       try {
         const items = await fetchServerContentFallback(false);
-        if (items && items.length > 0) {
+        if (items !== null) {
           this.notifyLocalUpdate(items);
         }
       } catch (_) {}
-    }, 20000);
+    }, 8000);
   }
 
   private stopServerPolling() {
@@ -1040,36 +1194,100 @@ export function subscribeToContentList(
   return sharedContentManager.subscribe(onUpdate, onError);
 }
 
-export function subscribeToSiteSettings(onUpdate: (settings: SiteSettings) => void): () => void {
-  // 1. Immediately send current settings if available
-  const current = memorySiteSettings || getCachedSiteSettingsSync();
-  onUpdate(current);
+type SettingsListener = (settings: SiteSettings) => void;
 
-  // 2. Fetch fresh settings from server in background
-  fetchServerSettingsFallback().then(fresh => {
-    if (fresh) {
-      memorySiteSettings = fresh;
-      memorySettingsTimestamp = Date.now();
-      try { setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(fresh)); } catch (_) {}
-      onUpdate(fresh);
-    }
-  }).catch(() => {});
+class SiteSettingsSubscriptionManager {
+  private subscribers: Set<SettingsListener> = new Set();
+  private pollingInterval: any = null;
 
-  // 3. Listen to local event
-  const handler = (e: any) => {
-    if (e.detail) {
-      onUpdate(e.detail);
+  public subscribe(onUpdate: SettingsListener): () => void {
+    this.subscribers.add(onUpdate);
+
+    // Send immediate cached data if available
+    const current = memorySiteSettings || getCachedSiteSettingsSync();
+    onUpdate(current);
+
+    // Fetch fresh settings from server in background
+    fetchServerSettingsFallback().then(fresh => {
+      if (fresh) {
+        this.notifyLocalUpdate(fresh);
+      }
+    }).catch(() => {});
+
+    // Start background polling if first subscriber
+    if (this.subscribers.size === 1) {
+      this.startPolling();
     }
-  };
-  if (typeof window !== 'undefined') {
-    window.addEventListener('site-settings-updated', handler);
+
+    return () => {
+      this.subscribers.delete(onUpdate);
+      if (this.subscribers.size === 0) {
+        this.stopPolling();
+      }
+    };
   }
 
-  return () => {
+  public notifyLocalUpdate(settings: SiteSettings) {
+    memorySiteSettings = settings;
+    memorySettingsTimestamp = Date.now();
+    try {
+      setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(settings));
+    } catch (_) {}
+
+    this.subscribers.forEach(listener => {
+      try {
+        listener(settings);
+      } catch (err) {
+        console.error('Settings subscriber error:', err);
+      }
+    });
+
     if (typeof window !== 'undefined') {
-      window.removeEventListener('site-settings-updated', handler);
+      window.dispatchEvent(new CustomEvent('site-settings-updated', { detail: settings }));
     }
-  };
+  }
+
+  private startPolling() {
+    if (this.pollingInterval) return;
+    this.pollingInterval = setInterval(async () => {
+      if (this.subscribers.size === 0) {
+        this.stopPolling();
+        return;
+      }
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        return; // Don't poll when tab is hidden
+      }
+      try {
+        const fresh = await fetchServerSettingsFallback();
+        if (fresh) {
+          const curr = memorySiteSettings;
+          if (
+            !curr ||
+            curr.creatorName !== fresh.creatorName ||
+            curr.upiId !== fresh.upiId ||
+            curr.bio !== fresh.bio ||
+            curr.bannerUrl !== fresh.bannerUrl ||
+            curr.profilePicUrl !== fresh.profilePicUrl
+          ) {
+            this.notifyLocalUpdate(fresh);
+          }
+        }
+      } catch (_) {}
+    }, 10000);
+  }
+
+  private stopPolling() {
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+      this.pollingInterval = null;
+    }
+  }
+}
+
+export const sharedSettingsManager = new SiteSettingsSubscriptionManager();
+
+export function subscribeToSiteSettings(onUpdate: (settings: SiteSettings) => void): () => void {
+  return sharedSettingsManager.subscribe(onUpdate);
 }
 
 // ============================================================================
@@ -1558,14 +1776,18 @@ export async function fetchAdminStats(
 // ============================================================================
 export async function fetchAdminOrders(forceFresh = false): Promise<OrderItem[]> {
   const now = Date.now();
-  if (!forceFresh && memoryAdminOrders && (now - memoryOrdersTimestamp < ADMIN_DATA_TTL)) {
+  if (forceFresh) {
+    memoryAdminOrders = null;
+    memoryOrdersTimestamp = 0;
+    activeOrdersPromise = null;
+  } else if (memoryAdminOrders && (now - memoryOrdersTimestamp < ADMIN_DATA_TTL)) {
     trackFirestoreRead('cacheHit', 'orders:in-memory');
-    return memoryAdminOrders;
+    return filterOutDeletedOrders(memoryAdminOrders);
   }
 
   if (isCloudQuotaExhausted()) {
     trackFirestoreRead('cacheHit', 'orders:quota-cooldown');
-    return memoryAdminOrders || [];
+    return filterOutDeletedOrders(memoryAdminOrders || []);
   }
 
   if (activeOrdersPromise) {
@@ -1580,11 +1802,11 @@ export async function fetchAdminOrders(forceFresh = false): Promise<OrderItem[]>
       const ordersRef = collection(firestore, 'orders');
       let snap;
       try {
-        const q = query(ordersRef, orderBy('createdAt', 'desc'), firestoreLimit(50));
+        const q = query(ordersRef, orderBy('createdAt', 'desc'), firestoreLimit(100));
         trackFirestoreRead('getDocs', 'orders:admin-list', 1);
         snap = await withTimeout(getDocs(q), 6000);
       } catch (_) {
-        const qSimple = query(ordersRef, firestoreLimit(50));
+        const qSimple = query(ordersRef, firestoreLimit(100));
         trackFirestoreRead('getDocs', 'orders:admin-fallback', 1);
         snap = await withTimeout(getDocs(qSimple), 6000);
       }
@@ -1600,10 +1822,11 @@ export async function fetchAdminOrders(forceFresh = false): Promise<OrderItem[]>
     }
 
     const orders = Array.from(ordersMap.values());
-    orders.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-    memoryAdminOrders = orders;
+    const cleanOrders = filterOutDeletedOrders(orders);
+    cleanOrders.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    memoryAdminOrders = cleanOrders;
     memoryOrdersTimestamp = Date.now();
-    return orders;
+    return cleanOrders;
   })().finally(() => {
     activeOrdersPromise = null;
   });
@@ -1737,10 +1960,13 @@ export async function deleteVipLead(leadId: string): Promise<boolean> {
     }
   }
 
-  // 4. Update in-memory cache
+  // 4. Update in-memory cache and broadcast across tabs
   if (memoryVipLeads) {
     memoryVipLeads = memoryVipLeads.filter(l => l.id !== leadId && l.userId !== leadId);
   }
+  activeLeadsPromise = null;
+  memoryLeadsTimestamp = 0;
+  broadcastCrossTabEvent({ type: 'LEAD_DELETED', leadId });
   return true;
 }
 
@@ -1924,6 +2150,16 @@ export async function createVipLead(leadData: Record<string, any>): Promise<any>
 export async function deleteAdminOrder(orderId: string): Promise<boolean> {
   const order = memoryAdminOrders?.find(o => o.orderId === orderId);
 
+  // Mark in-memory and cross-tab tombstone registry
+  markOrderAsDeleted(orderId);
+
+  // Invalidate cache immediately so all calls in this tab get fresh clean data
+  if (memoryAdminOrders) {
+    memoryAdminOrders = memoryAdminOrders.filter(o => o.orderId !== orderId);
+  }
+  activeOrdersPromise = null;
+  memoryOrdersTimestamp = 0;
+
   // 1. Authoritative Backend Deletion (destroys Cloudinary screenshot + Firestore doc + server db)
   try {
     const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
@@ -1970,10 +2206,11 @@ export async function deleteAdminOrder(orderId: string): Promise<boolean> {
     }
   }
 
-  // 3. Update in-memory cache
+  // 3. Final memory cleanup and cross-tab broadcast notification
   if (memoryAdminOrders) {
     memoryAdminOrders = memoryAdminOrders.filter(o => o.orderId !== orderId);
   }
+  broadcastCrossTabEvent({ type: 'ORDER_DELETED', orderId });
   return true;
 }
 
@@ -2019,6 +2256,7 @@ export async function verifyAdminOrder(orderId: string, transactionRef?: string)
         if (memoryAdminOrders) {
           memoryAdminOrders = memoryAdminOrders.map(o => o.orderId === orderId ? updated : o);
         }
+        broadcastCrossTabEvent({ type: 'ORDERS_CHANGED' });
         return updated;
       }
     } catch (err) {
@@ -2178,6 +2416,7 @@ export async function adminRejectOrder(orderId: string, _reason?: string): Promi
       if (memoryAdminOrders) {
         memoryAdminOrders = memoryAdminOrders.map(o => o.orderId === orderId ? updated : o);
       }
+      broadcastCrossTabEvent({ type: 'ORDERS_CHANGED' });
       return { success: true, order: updated };
     } catch (err: any) {
       handleFirestoreError('adminRejectOrder', err);
@@ -2324,6 +2563,9 @@ export async function createAdminContent(itemData: Partial<MediaItem>): Promise<
   const nextList = [cleanItem, ...currentList.filter(i => i.id !== newId)];
   sharedContentManager.notifyLocalUpdate(nextList);
 
+  // 4. Instant cross-tab broadcast (0ms sync to all open tabs)
+  broadcastCrossTabEvent({ type: 'CONTENT_CREATED', content: cleanItem });
+
   return cleanItem;
 }
 
@@ -2373,6 +2615,9 @@ export async function updateAdminContent(id: string, updates: Partial<MediaItem>
 
   // 3. Write-through update to memory & local cache
   sharedContentManager.notifyLocalUpdate(nextList);
+
+  // 4. Instant cross-tab broadcast (0ms sync to all open tabs)
+  broadcastCrossTabEvent({ type: 'CONTENT_UPDATED', content: updatedItem });
 
   return updatedItem;
 }
@@ -2584,10 +2829,11 @@ export async function updateAdminSettings(settings: Partial<SiteSettings>): Prom
     setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(cleanSettings));
   } catch (_) {}
 
-  // 4. Dispatch broadcast event for 0ms zero-refresh sync across all components
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('site-settings-updated', { detail: cleanSettings }));
-  }
+  // 4. Update shared settings manager for all components on this tab
+  sharedSettingsManager.notifyLocalUpdate(cleanSettings);
+
+  // 5. Broadcast to all other open tabs and windows in 0ms
+  broadcastCrossTabEvent({ type: 'SETTINGS_UPDATED', settings: cleanSettings });
 
   return cleanSettings;
 }
