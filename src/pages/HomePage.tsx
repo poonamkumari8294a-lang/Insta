@@ -25,7 +25,8 @@ import {
   CheckCircle,
   Crown,
   Eye,
-  Users
+  Users,
+  Smartphone
 } from 'lucide-react';
 
 // Lazy load below-the-fold static sections and on-demand modals
@@ -33,7 +34,6 @@ const PricingPacks = lazy(() => import('../components/PricingPacks').then(m => (
 const HowItWorks = lazy(() => import('../components/HowItWorks').then(m => ({ default: m.HowItWorks })));
 const FAQSection = lazy(() => import('../components/FAQSection').then(m => ({ default: m.FAQSection })));
 const DailyRewardWheelModal = lazy(() => import('../components/DailyRewardWheelModal').then(m => ({ default: m.DailyRewardWheelModal })));
-const TeaserPeekModal = lazy(() => import('../components/TeaserPeekModal').then(m => ({ default: m.TeaserPeekModal })));
 const StopUserExitModal = lazy(() => import('../components/StopUserExitModal').then(m => ({ default: m.StopUserExitModal })));
 
 interface HomePageProps {
@@ -43,6 +43,7 @@ interface HomePageProps {
   onOpenMedia: (item: MediaItem) => void;
   onBuyMedia: (item: MediaItem) => void;
   onOpenShare?: (item?: MediaItem) => void;
+  onOpenInstall?: () => void;
   onNavigate: (route: string) => void;
 }
 
@@ -53,12 +54,11 @@ export const HomePage: React.FC<HomePageProps> = ({
   onOpenMedia,
   onBuyMedia,
   onOpenShare,
+  onOpenInstall,
   onNavigate,
 }) => {
   const [isWheelOpen, setIsWheelOpen] = useState(false);
   const [isExitModalOpen, setIsExitModalOpen] = useState(false);
-  const [isPeekModalOpen, setIsPeekModalOpen] = useState(false);
-  const [peekItem, setPeekItem] = useState<MediaItem | null>(null);
 
   // Exit intent & idle detection to stop leaving users with an irresistible hot offer
   useEffect(() => {
@@ -268,6 +268,20 @@ export const HomePage: React.FC<HomePageProps> = ({
                         </a>
                       )}
 
+                      {/* Install App / APK Button */}
+                      {onOpenInstall && (
+                        <button
+                          id="hero-btn-install-apk"
+                          type="button"
+                          onClick={() => onOpenInstall()}
+                          className="px-4 sm:px-5 py-3 rounded-2xl text-xs sm:text-sm font-black text-pink-700 bg-gradient-to-r from-pink-100/90 to-purple-100/90 hover:from-pink-200/90 hover:to-purple-200/90 border border-pink-300/80 transition-all flex items-center gap-2 shadow-sm cursor-pointer active:scale-95"
+                          title="फ़ोन में ऐप इंस्टॉल करें"
+                        >
+                          <Smartphone className="w-4 h-4 text-pink-600" />
+                          <span>📱 Install App (APK)</span>
+                        </button>
+                      )}
+
                       {/* Share Profile / Hub Button */}
                       {onOpenShare && (
                         <button
@@ -435,10 +449,6 @@ export const HomePage: React.FC<HomePageProps> = ({
                   isUnlocked={unlockedIds.includes(item.id)}
                   onOpen={onOpenMedia}
                   onBuy={onBuyMedia}
-                  onPeek={(peeked) => {
-                    setPeekItem(peeked);
-                    setIsPeekModalOpen(true);
-                  }}
                   onOpenShare={onOpenShare}
                 />
               ))}
@@ -493,10 +503,6 @@ export const HomePage: React.FC<HomePageProps> = ({
                   isUnlocked={unlockedIds.includes(item.id)}
                   onOpen={onOpenMedia}
                   onBuy={onBuyMedia}
-                  onPeek={(peeked) => {
-                    setPeekItem(peeked);
-                    setIsPeekModalOpen(true);
-                  }}
                   onOpenShare={onOpenShare}
                 />
               ))}
@@ -535,10 +541,6 @@ export const HomePage: React.FC<HomePageProps> = ({
                   isUnlocked={unlockedIds.includes(item.id)}
                   onOpen={onOpenMedia}
                   onBuy={onBuyMedia}
-                  onPeek={(peeked) => {
-                    setPeekItem(peeked);
-                    setIsPeekModalOpen(true);
-                  }}
                   onOpenShare={onOpenShare}
                 />
               ))}
@@ -754,21 +756,6 @@ export const HomePage: React.FC<HomePageProps> = ({
           <DailyRewardWheelModal
             isOpen={isWheelOpen}
             onClose={() => setIsWheelOpen(false)}
-          />
-        </Suspense>
-      )}
-
-      {/* 1-Sec VIP Sneak Peek Preview Modal (Loaded on Demand) */}
-      {isPeekModalOpen && (
-        <Suspense fallback={null}>
-          <TeaserPeekModal
-            item={peekItem}
-            isOpen={isPeekModalOpen}
-            onClose={() => {
-              setIsPeekModalOpen(false);
-              setPeekItem(null);
-            }}
-            onUnlock={(item) => onBuyMedia(item)}
           />
         </Suspense>
       )}

@@ -29,8 +29,8 @@ export function getOptimizedImageUrl(
     return url;
   }
 
-  // Cloudinary blur transform parameter if requested
-  const blurTransform = isBlurred ? ',e_blur:700' : '';
+  // Cloudinary blur transform parameter if requested (refined seductive tease, not washed out gray)
+  const blurTransform = isBlurred ? ',e_blur:160' : '';
 
   // 1. Unsplash Dynamic CDN URL Optimization (WebP + Exact Width + High Compression, preserving original aspect ratio)
   if (url.includes('images.unsplash.com')) {
@@ -42,12 +42,12 @@ export function getOptimizedImageUrl(
       urlObj.searchParams.set('fm', 'webp');
       urlObj.searchParams.set('fit', 'max');
       if (isBlurred) {
-        urlObj.searchParams.set('blur', '80');
+        urlObj.searchParams.set('blur', '25');
       }
       return urlObj.toString();
     } catch {
       const cleanUrl = url.split('?')[0];
-      const blurQuery = isBlurred ? '&blur=80' : '';
+      const blurQuery = isBlurred ? '&blur=25' : '';
       return `${cleanUrl}?w=${targetWidth}&q=${targetQuality}&auto=format&fm=webp&fit=max${blurQuery}`;
     }
   }

@@ -1199,6 +1199,8 @@ type SettingsListener = (settings: SiteSettings) => void;
 class SiteSettingsSubscriptionManager {
   private subscribers: Set<SettingsListener> = new Set();
   private pollingInterval: any = null;
+  private unsubscribeFirestore: Unsubscribe | null = null;
+  private isConnecting = false;
 
   public subscribe(onUpdate: SettingsListener): () => void {
     this.subscribers.add(onUpdate);
@@ -1214,8 +1216,9 @@ class SiteSettingsSubscriptionManager {
       }
     }).catch(() => {});
 
-    // Start background polling if first subscriber
+    // Initialize real-time listeners on first subscriber
     if (this.subscribers.size === 1) {
+      this.connectFirestore();
       this.startPolling();
     }
 
@@ -1223,6 +1226,10 @@ class SiteSettingsSubscriptionManager {
       this.subscribers.delete(onUpdate);
       if (this.subscribers.size === 0) {
         this.stopPolling();
+        if (this.unsubscribeFirestore) {
+          try { this.unsubscribeFirestore(); } catch (_) {}
+          this.unsubscribeFirestore = null;
+        }
       }
     };
   }
@@ -1247,6 +1254,56 @@ class SiteSettingsSubscriptionManager {
     }
   }
 
+  private connectFirestore() {
+    if (isCloudQuotaExhausted() || this.isConnecting || this.unsubscribeFirestore) {
+      return;
+    }
+    this.isConnecting = true;
+
+    try {
+      const docRef = doc(firestore, 'settings', SETTINGS_DOC_ID);
+      console.log('[FIRESTORE SETTINGS] Attaching live onSnapshot listener for instant phone updates...');
+      this.unsubscribeFirestore = onSnapshot(
+        docRef,
+        (snap) => {
+          this.isConnecting = false;
+          if (snap.exists()) {
+            trackFirestoreRead('snapshot', 'shared-settings-listener', 1);
+            const data = snap.data() as Partial<SiteSettings>;
+            const merged: SiteSettings = {
+              ...CLIENT_SITE_SETTINGS,
+              ...data,
+              profilePicUrl: data.profilePicUrl !== undefined ? data.profilePicUrl : CLIENT_SITE_SETTINGS.profilePicUrl,
+              bannerUrl: data.bannerUrl !== undefined ? data.bannerUrl : CLIENT_SITE_SETTINGS.bannerUrl,
+              creatorName: data.creatorName || CLIENT_SITE_SETTINGS.creatorName,
+              upiId: data.upiId || CLIENT_SITE_SETTINGS.upiId,
+              tagline: data.tagline !== undefined ? data.tagline : CLIENT_SITE_SETTINGS.tagline,
+              bio: data.bio !== undefined ? data.bio : CLIENT_SITE_SETTINGS.bio,
+              followersCount: data.followersCount !== undefined ? data.followersCount : CLIENT_SITE_SETTINGS.followersCount,
+              viewsCount: data.viewsCount !== undefined ? data.viewsCount : CLIENT_SITE_SETTINGS.viewsCount,
+              postsCount: data.postsCount !== undefined ? data.postsCount : CLIENT_SITE_SETTINGS.postsCount,
+              instagramUrl: (data.instagramUrl && data.instagramUrl.includes('ruma__cutegirl')) ? 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3' : (data.instagramUrl || CLIENT_SITE_SETTINGS.instagramUrl),
+              supportInstagram: data.supportInstagram || 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3',
+              instagramHandle: data.instagramHandle && data.instagramHandle !== '@ruma__cuteg...' ? data.instagramHandle : '@ruma__cutegirl'
+            };
+            this.notifyLocalUpdate(merged);
+          }
+        },
+        (error) => {
+          this.isConnecting = false;
+          console.warn('[Firebase Settings Listener Error - switching to fast polling]', error?.message || error);
+          if (this.unsubscribeFirestore) {
+            try { this.unsubscribeFirestore(); } catch (_) {}
+            this.unsubscribeFirestore = null;
+          }
+        }
+      );
+    } catch (err) {
+      this.isConnecting = false;
+      console.warn('[Firebase Settings Listener Setup Error]', err);
+    }
+  }
+
   private startPolling() {
     if (this.pollingInterval) return;
     this.pollingInterval = setInterval(async () => {
@@ -1267,13 +1324,21 @@ class SiteSettingsSubscriptionManager {
             curr.upiId !== fresh.upiId ||
             curr.bio !== fresh.bio ||
             curr.bannerUrl !== fresh.bannerUrl ||
-            curr.profilePicUrl !== fresh.profilePicUrl
+            curr.profilePicUrl !== fresh.profilePicUrl ||
+            String(curr.followersCount) !== String(fresh.followersCount) ||
+            String(curr.viewsCount) !== String(fresh.viewsCount) ||
+            Number(curr.postsCount) !== Number(fresh.postsCount) ||
+            curr.tagline !== fresh.tagline ||
+            curr.announcement !== fresh.announcement ||
+            curr.announcementEnabled !== fresh.announcementEnabled ||
+            curr.badgeText !== fresh.badgeText ||
+            curr.supportWhatsApp !== fresh.supportWhatsApp
           ) {
             this.notifyLocalUpdate(fresh);
           }
         }
       } catch (_) {}
-    }, 10000);
+    }, 4000);
   }
 
   private stopPolling() {

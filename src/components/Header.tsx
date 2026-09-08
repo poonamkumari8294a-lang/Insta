@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { SiteSettings } from '../types';
-import { BadgeCheck, Instagram, Sparkles, Lock, Menu, X, ShieldCheck, Heart, Film, Share2, MessageCircle } from 'lucide-react';
+import { BadgeCheck, Instagram, Sparkles, Lock, Menu, X, ShieldCheck, Heart, Film, Share2, MessageCircle, Smartphone } from 'lucide-react';
 
 interface HeaderProps {
   settings: SiteSettings;
   unlockedCount: number;
   onOpenPurchases: () => void;
   onOpenShare?: () => void;
+  onOpenInstall?: () => void;
   activeTab: string;
   onNavigate: (route: string) => void;
 }
@@ -16,6 +17,7 @@ export const Header: React.FC<HeaderProps> = ({
   unlockedCount,
   onOpenPurchases,
   onOpenShare,
+  onOpenInstall,
   activeTab,
   onNavigate,
 }) => {
@@ -145,6 +147,20 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Right Actions: Share, My Purchases & Instant Unlock Button */}
           <div className="flex items-center gap-2 sm:gap-2.5">
+            {/* Install App / APK Button */}
+            {onOpenInstall && (
+              <button
+                id="header-btn-install-app"
+                type="button"
+                onClick={onOpenInstall}
+                className="px-3 py-2 rounded-2xl text-xs font-bold text-pink-700 bg-pink-50 hover:bg-pink-100/80 border border-pink-200/80 shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                title="फ़ोन पर ऐप इंस्टॉल करें (Install App / APK)"
+              >
+                <Smartphone className="w-3.5 h-3.5 text-pink-600" />
+                <span className="hidden sm:inline">Install App</span>
+              </button>
+            )}
+
             {/* Share Button (Desktop & Tablet) */}
             {onOpenShare && (
               <button
@@ -214,7 +230,9 @@ export const Header: React.FC<HeaderProps> = ({
                 {settings.creatorName}
                 <BadgeCheck className="w-4 h-4 text-blue-500" />
               </div>
-              <div className="text-xs text-purple-900/70">{settings.viewsCount} monthly views • {settings.followersCount.toLocaleString()} followers</div>
+              <div className="text-xs text-purple-900/70">
+                {settings.viewsCount} monthly views • {typeof settings.followersCount === 'number' ? settings.followersCount.toLocaleString() : (settings.followersCount || '0')} followers
+              </div>
             </div>
           </div>
 
@@ -261,6 +279,21 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           <div className="pt-2 flex flex-col gap-2">
+            {onOpenInstall && (
+              <button
+                id="header-btn-mobile-install-app"
+                type="button"
+                onClick={() => {
+                  onOpenInstall();
+                  setMobileMenuOpen(false);
+                }}
+                className="w-full py-2.5 px-4 rounded-2xl text-xs font-bold text-pink-700 bg-pink-50 hover:bg-pink-100 border border-pink-200 flex items-center justify-center gap-2 shadow-xs cursor-pointer transition-all"
+              >
+                <Smartphone className="w-4 h-4 text-pink-600" />
+                <span>📱 फ़ोन पर ऐप इंस्टॉल करें (Install App / APK)</span>
+              </button>
+            )}
+
             {onOpenShare && (
               <button
                 type="button"

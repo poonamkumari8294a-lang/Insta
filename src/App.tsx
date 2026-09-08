@@ -35,6 +35,7 @@ const PaymentModal = lazy(() => import('./components/PaymentModal').then(m => ({
 const MediaModal = lazy(() => import('./components/MediaModal').then(m => ({ default: m.MediaModal })));
 const ShareModal = lazy(() => import('./components/ShareModal').then(m => ({ default: m.ShareModal })));
 const PurchasedDrawer = lazy(() => import('./components/PurchasedDrawer').then(m => ({ default: m.PurchasedDrawer })));
+const InstallPromptModal = lazy(() => import('./components/InstallPromptModal').then(m => ({ default: m.InstallPromptModal })));
 
 const FallbackLoader = () => (
   <div className="flex items-center justify-center p-8">
@@ -101,6 +102,21 @@ export default function App() {
   const [isPurchasedDrawerOpen, setIsPurchasedDrawerOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [shareItem, setShareItem] = useState<MediaItem | null>(null);
+  const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
+
+  // Listen for browser PWA beforeinstallprompt event
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredInstallPrompt(e);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
 
   // Setup foreground push notification listener (deferred)
   useEffect(() => {
@@ -187,11 +203,11 @@ export default function App() {
       console.warn('Background content revalidation:', err);
     });
 
-    // 4. Instant resync when tab or device becomes active / visible (throttled to once every 5 seconds)
+    // 4. Instant resync when tab or device becomes active / visible (throttled to once every 2 seconds)
     let lastSyncTime = Date.now();
     const handleVisibilityOrFocus = () => {
       const now = Date.now();
-      if (document.visibilityState === 'visible' && now - lastSyncTime > 5000) {
+      if (document.visibilityState === 'visible' && now - lastSyncTime > 2000) {
         lastSyncTime = now;
         syncDeletedIdsFromServer().catch(() => {});
         fetchContentList(true).then((freshItems) => {
@@ -208,7 +224,7 @@ export default function App() {
     window.addEventListener('visibilitychange', handleVisibilityOrFocus);
     window.addEventListener('focus', handleVisibilityOrFocus);
 
-    // 4.1 Periodic background sync every 15 seconds for all devices
+    // 4.1 Periodic background sync every 5 seconds for all phones and devices
     const periodicSync = setInterval(() => {
       if (document.visibilityState === 'visible') {
         syncDeletedIdsFromServer().catch(() => {});
@@ -219,7 +235,7 @@ export default function App() {
           if (freshSettings) setSettings(freshSettings);
         }).catch(() => {});
       }
-    }, 15000);
+    }, 5000);
 
     // 5. Listen for hash & URL changes
     const handleUrlChange = () => {
@@ -357,6 +373,7 @@ export default function App() {
           unlockedCount={unlockedIds.length}
           onOpenPurchases={() => setIsPurchasedDrawerOpen(true)}
           onOpenShare={() => handleOpenShare(null)}
+          onOpenInstall={() => setIsInstallModalOpen(true)}
           activeTab={currentRoute}
           onNavigate={(route) => navigateTo(route)}
         />
@@ -372,6 +389,7 @@ export default function App() {
             onOpenMedia={handleOpenMedia}
             onBuyMedia={handleBuyMedia}
             onOpenShare={(item) => handleOpenShare(item)}
+            onOpenInstall={() => setIsInstallModalOpen(true)}
             onNavigate={(route) => navigateTo(route)}
           />
         )}
@@ -508,6 +526,14 @@ export default function App() {
             isOpen={isShareModalOpen}
             onClose={() => setIsShareModalOpen(false)}
             item={shareItem}
+          />
+        )}
+
+        {isInstallModalOpen && (
+          <InstallPromptModal
+            isOpen={isInstallModalOpen}
+            onClose={() => setIsInstallModalOpen(false)}
+            deferredPrompt={deferredInstallPrompt}
           />
         )}
       </Suspense>

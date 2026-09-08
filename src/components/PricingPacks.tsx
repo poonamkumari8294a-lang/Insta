@@ -88,7 +88,7 @@ export const PricingPacks: React.FC<PricingPacksProps> = ({
                         🔒 VIP बंडल लॉक्ड
                       </span>
                       <span className="text-[10px] text-pink-200 font-bold mt-1 bg-black/60 px-2.5 py-0.5 rounded-full border border-pink-500/40">
-                        सिर्फ झलक • पेमेंट के बाद फुल HD अनलॉक
+                        VIP Exclusive • पेमेंट के बाद फुल HD अनलॉक
                       </span>
                     </div>
                   ) : (

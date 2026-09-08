@@ -1,0 +1,19 @@
+{
+  "name": "Ruma Kumari Official VIP",
+  "short_name": "Ruma VIP",
+  "description": "Exclusive VIP photos and videos with instant UPI unlock.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d0214",
+  "theme_color": "#0d0214",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

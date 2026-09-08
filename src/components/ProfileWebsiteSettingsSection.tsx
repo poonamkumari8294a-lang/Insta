@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { SiteSettings, VipPlan } from '../types';
 import {
   Camera,
@@ -51,6 +51,18 @@ export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSecti
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('profile');
   const [formData, setFormData] = useState<Partial<SiteSettings>>({ ...settings });
+
+  // Keep formData in sync if parent passes updated settings
+  useEffect(() => {
+    if (settings) {
+      setFormData(prev => ({
+        ...settings,
+        // preserve local edits if user is actively editing
+        ...prev
+      }));
+    }
+  }, [settings]);
+
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<{ type: 'success' | 'error' | null; message: string }>({
     type: null,
@@ -189,9 +201,8 @@ export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSecti
       const payload: Partial<SiteSettings> = {
         ...formData,
         postsCount: Number(formData.postsCount) || 0,
-        // followersCount can be string like "303K" or number
-        followersCount: formData.followersCount ?? '303K',
-        viewsCount: String(formData.viewsCount || '1.2M').trim(),
+        followersCount: formData.followersCount !== undefined && formData.followersCount !== '' ? formData.followersCount : '303K',
+        viewsCount: formData.viewsCount !== undefined && formData.viewsCount !== '' ? String(formData.viewsCount).trim() : '1.2M',
         updatedAt: new Date().toISOString()
       };
 
@@ -659,9 +670,9 @@ export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSecti
                 </label>
                 <input
                   type="text"
-                  value={formData.followersCount ?? '303K'}
+                  value={formData.followersCount !== undefined ? formData.followersCount : (settings.followersCount || '')}
                   onChange={(e) => handleChange('followersCount', e.target.value)}
-                  placeholder="e.g. 303K or 3358"
+                  placeholder="e.g. 303K or 6000"
                   className="w-full bg-white border border-purple-200 rounded-2xl px-3.5 py-2 text-xs font-bold text-purple-950 shadow-xs"
                 />
               </div>
@@ -672,7 +683,7 @@ export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSecti
                 </label>
                 <input
                   type="text"
-                  value={formData.viewsCount ?? '1.2M'}
+                  value={formData.viewsCount !== undefined ? formData.viewsCount : (settings.viewsCount || '')}
                   onChange={(e) => handleChange('viewsCount', e.target.value)}
                   placeholder="e.g. 1.2M or 346.0K"
                   className="w-full bg-white border border-purple-200 rounded-2xl px-3.5 py-2 text-xs font-bold text-pink-700 shadow-xs"
@@ -770,15 +781,28 @@ export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSecti
             </div>
           </div>
 
-          <div className="pt-2 flex justify-end">
+          <div className="pt-3 flex flex-col sm:flex-row items-center justify-between gap-3 bg-purple-50/50 p-3.5 rounded-2xl border border-purple-100">
+            <p className="text-[11px] text-purple-900/70 font-medium">
+              💡 फॉलोअर्स या अन्य बदलाव करने के बाद <strong>"सेटिंग्स सेव करें"</strong> बटन अवश्य दबाएं।
+            </p>
             <button
+              id="save-profile-settings-btn"
               type="button"
               onClick={() => handleSaveAll()}
               disabled={isSaving}
-              className="glow-pink-btn px-6 py-2.5 rounded-2xl text-xs font-black text-white shadow-md flex items-center gap-1.5 cursor-pointer"
+              className="w-full sm:w-auto glow-pink-btn px-6 py-3 rounded-2xl text-xs sm:text-sm font-black text-white shadow-lg flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all"
             >
-              <Save className="w-4 h-4" />
-              <span>Save Profile Settings</span>
+              {isSaving ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                  <span>सेव हो रहा है...</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  <span>💾 सेटिंग्स सेव करें (Save Profile & Stats)</span>
+                </>
+              )}
             </button>
           </div>
         </div>
