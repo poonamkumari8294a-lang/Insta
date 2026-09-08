@@ -26,6 +26,10 @@ export interface MediaItem {
   published: boolean;
   featured?: boolean;
   createdAt: string;
+  // Card frame size & photo display settings
+  aspectRatio?: '4/5' | '9/16' | '3/4' | '1/1' | 'auto' | string;
+  objectFit?: 'cover' | 'contain' | string;
+  objectPosition?: 'top' | 'center' | 'bottom' | string;
 }
 
 export interface OrderItem {
@@ -133,6 +137,13 @@ export interface HomepageSectionConfig {
   sectionOrder: string[];
 }
 
+export interface CardDisplaySettings {
+  defaultAspectRatio: '4/5' | '9/16' | '3/4' | '1/1' | 'auto';
+  defaultObjectFit: 'cover' | 'contain';
+  defaultObjectPosition: 'top' | 'center' | 'bottom';
+  enableBlurBackdrop?: boolean;
+}
+
 export interface SiteSettings {
   creatorName: string;
   username: string;
@@ -173,6 +184,7 @@ export interface SiteSettings {
   vipPlans?: VipPlan[];
   storyHighlights: StoryHighlight[];
   homepageConfig?: HomepageSectionConfig;
+  cardDisplaySettings?: CardDisplaySettings;
   // Push Notification settings
   pushNotificationsEnabled?: boolean;
   notifyOnNewPost?: boolean;

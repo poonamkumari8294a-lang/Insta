@@ -84,6 +84,7 @@ import {
   BellRing,
   Send,
   Radio,
+  Crop,
   User,
   Phone,
   MessageCircle,
@@ -2241,6 +2242,86 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                   required
                   helperText="Shown on public cards. If using multi-photo above, you can also star any photo to make it cover."
                 />
+              </div>
+
+              {/* 3. Card Frame & Photo Display Settings for this Item */}
+              <div className="p-4 rounded-3xl bg-gradient-to-r from-pink-50/70 via-purple-50/50 to-white border-2 border-pink-200/90 space-y-3.5 shadow-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-xl bg-pink-600 text-white shadow-xs">
+                      <Crop className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black text-purple-950">
+                        फोटो व कार्ड फ्रेम डिस्प्ले सेटिंग्स (Card Frame & Crop Controls)
+                      </h4>
+                      <p className="text-[10px] text-purple-900/70 font-medium">
+                        इस पोस्ट के लिए फ्रेम का साइज (4:5, 9:16, 3:4, Auto) और फोटो फिट (Cover / Contain) कस्टमाइज़ करें।
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Frame Ratio */}
+                  <div>
+                    <label className="text-[11px] font-black text-purple-950 block mb-1">
+                      फ्रेम साइज / अनुपात
+                    </label>
+                    <select
+                      value={contentFormData.aspectRatio || ''}
+                      onChange={(e) => setContentFormData({ ...contentFormData, aspectRatio: e.target.value ? (e.target.value as any) : undefined })}
+                      className="w-full bg-white border border-purple-200 rounded-xl px-3 py-2 text-xs font-bold text-purple-950 shadow-xs focus:ring-2 focus:ring-pink-300"
+                    >
+                      <option value="">ग्लोबल डिफ़ॉल्ट (साइट सेटिंग अनुसार)</option>
+                      <option value="4/5">4:5 मानक पोर्ट्रेट (Instagram)</option>
+                      <option value="9/16">9:16 फुल वर्टिकल (रील / स्टोरी)</option>
+                      <option value="3/4">3:4 लंबा क्लासिक पोर्ट्रेट</option>
+                      <option value="1/1">1:1 चौकोर (Square)</option>
+                      <option value="auto">Auto / Natural (100% पूरी फोटो)</option>
+                    </select>
+                  </div>
+
+                  {/* Fit Mode */}
+                  <div>
+                    <label className="text-[11px] font-black text-purple-950 block mb-1">
+                      फोटो डिस्प्ले फिट
+                    </label>
+                    <select
+                      value={contentFormData.objectFit || ''}
+                      onChange={(e) => setContentFormData({ ...contentFormData, objectFit: e.target.value ? (e.target.value as any) : undefined })}
+                      className="w-full bg-white border border-purple-200 rounded-xl px-3 py-2 text-xs font-bold text-purple-950 shadow-xs focus:ring-2 focus:ring-pink-300"
+                    >
+                      <option value="">ग्लोबल डिफ़ॉल्ट (साइट सेटिंग)</option>
+                      <option value="cover">Cover (पूरा फ्रेम भरें)</option>
+                      <option value="contain">Contain (पूरी फोटो बिना कटे + ब्लर बैकड्रॉप)</option>
+                    </select>
+                  </div>
+
+                  {/* Object Position / Face Focus */}
+                  <div>
+                    <label className="text-[11px] font-black text-purple-950 block mb-1">
+                      फोकस (सिर व चेहरा संरेखण)
+                    </label>
+                    <select
+                      value={contentFormData.objectPosition || 'top'}
+                      onChange={(e) => setContentFormData({ ...contentFormData, objectPosition: e.target.value ? (e.target.value as any) : 'top' })}
+                      className="w-full bg-white border border-purple-200 rounded-xl px-3 py-2 text-xs font-bold text-purple-950 shadow-xs focus:ring-2 focus:ring-pink-300"
+                    >
+                      <option value="top">Top (सिर व चेहरा हमेशा सामने दिखेगा 👑)</option>
+                      <option value="center">Center (मध्य 50%)</option>
+                      <option value="bottom">Bottom (निचला हिस्सा)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Helpful Tip */}
+                <div className="p-2.5 rounded-xl bg-purple-50/80 border border-purple-100 flex items-center gap-2 text-[11px] text-purple-900/80">
+                  <Sparkles className="w-3.5 h-3.5 text-pink-600 shrink-0" />
+                  <span>
+                    <strong>सुझाव:</strong> यदि मॉडल का सिर या चेहरा कट रहा हो, तो <strong>"Top फोकस"</strong> या <strong>"9:16 फुल वर्टिकल"</strong> या <strong>"Contain"</strong> चुनें।
+                  </span>
+                </div>
               </div>
 
               {/* Optional Video Duration & Teaser */}

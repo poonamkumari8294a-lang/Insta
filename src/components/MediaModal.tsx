@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { MediaItem } from '../types';
 import { getOptimizedImageUrl } from '../utils/imageOptimizer';
+import { getStoredTokens } from '../utils/api';
 import {
   X,
   Sparkles,
@@ -80,15 +81,11 @@ export const MediaModal: React.FC<MediaModalProps> = ({
     };
 
     window.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('blur', handleBlur);
-    window.addEventListener('focus', handleFocus);
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('keydown', handleKeyDown);
 
     return () => {
       window.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', handleBlur);
-      window.removeEventListener('focus', handleFocus);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('keydown', handleKeyDown);
     };
@@ -96,7 +93,9 @@ export const MediaModal: React.FC<MediaModalProps> = ({
 
   if (!isOpen || !item) return null;
 
-  const canAccess = item.access === 'free' || isUnlocked;
+  const storedTokens = getStoredTokens();
+  const isLocallyUnlocked = isUnlocked || Boolean(storedTokens[item.id]);
+  const canAccess = item.access === 'free' || isLocallyUnlocked;
 
   const galleryList = (item.galleryUrls && item.galleryUrls.length > 0)
     ? item.galleryUrls
@@ -129,11 +128,11 @@ export const MediaModal: React.FC<MediaModalProps> = ({
               item.access === 'free'
                 ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
                 : canAccess
-                ? 'bg-pink-100 text-pink-700 border border-pink-200'
+                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                 : 'bg-purple-100 text-purple-800 border border-purple-200'
             }`}>
               <Sparkles className="w-3 h-3 text-pink-600" />
-              {item.access === 'free' ? 'Free Preview' : canAccess ? 'VIP Unlocked' : 'VIP Locked'}
+              {item.access === 'free' ? 'Free Preview' : canAccess ? '✨ VIP Unlocked • Ultra HD' : 'VIP Locked'}
             </span>
             <h2 className="text-sm sm:text-base font-black text-purple-950 truncate max-w-[200px] sm:max-w-md">
               {item.title}
@@ -168,9 +167,9 @@ export const MediaModal: React.FC<MediaModalProps> = ({
         {/* Media Player Area with DRM & Anti-Recording Watermarks */}
         <div
           onContextMenu={(e) => e.preventDefault()}
-          className="relative flex-1 bg-zinc-950 flex items-center justify-center min-h-[300px] sm:min-h-[460px] max-h-[65vh] overflow-hidden select-none protected-media-container"
+          className="relative flex-1 bg-zinc-950 flex items-center justify-center min-h-[300px] sm:min-h-[460px] max-h-[75vh] overflow-hidden select-none protected-media-container"
         >
-          {/* Obfuscation Shield when recording or app lost focus */}
+          {/* Obfuscation Shield when document is hidden */}
           {isScreenProtected && (
             <div className="absolute inset-0 z-30 bg-black/95 backdrop-blur-3xl flex flex-col items-center justify-center p-6 text-center text-white space-y-3">
               <div className="w-14 h-14 rounded-full bg-pink-500/20 border border-pink-500 flex items-center justify-center text-pink-400">
@@ -183,14 +182,23 @@ export const MediaModal: React.FC<MediaModalProps> = ({
             </div>
           )}
 
-          {/* Dynamic Floating Watermark Tile Grid */}
-          <div className="absolute inset-0 pointer-events-none z-20 flex flex-wrap items-center justify-around opacity-[0.18] overflow-hidden select-none rotate-[-15deg] scale-125">
-            {Array.from({ length: 12 }).map((_, idx) => (
-              <div key={idx} className="p-8 text-[11px] font-mono font-black text-white/90 whitespace-nowrap">
-                @{creatorName} VIP • PRIVATE • NON-TRANSFERABLE
-              </div>
-            ))}
-          </div>
+          {/* Discreet creator brand tag when unlocked */}
+          {canAccess && (
+            <div className="absolute bottom-3 right-3 pointer-events-none opacity-80 text-[10px] font-mono font-bold text-white bg-black/60 px-3 py-1 rounded-full backdrop-blur-md z-20 border border-white/20">
+              ✨ @{creatorName} VIP • Exclusive HD
+            </div>
+          )}
+
+          {/* Dynamic Floating Watermark Tile Grid only when locked */}
+          {!canAccess && (
+            <div className="absolute inset-0 pointer-events-none z-20 flex flex-wrap items-center justify-around opacity-[0.18] overflow-hidden select-none rotate-[-15deg] scale-125">
+              {Array.from({ length: 12 }).map((_, idx) => (
+                <div key={idx} className="p-8 text-[11px] font-mono font-black text-white/90 whitespace-nowrap">
+                  @{creatorName} VIP • PRIVATE • NON-TRANSFERABLE
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Media Content or Locked Overlay */}
           {!canAccess ? (
@@ -221,23 +229,18 @@ export const MediaModal: React.FC<MediaModalProps> = ({
                 controlsList="nodownload noplaybackrate"
                 disablePictureInPicture
                 onContextMenu={(e) => e.preventDefault()}
-                className="w-full h-full max-h-[65vh] object-contain pointer-events-auto"
+                className="w-full h-full max-h-[72vh] object-contain pointer-events-auto"
               />
-
-              {/* Dynamic Timestamp & Viewer Watermark */}
-              <div className="absolute bottom-4 right-4 pointer-events-none opacity-70 text-[10px] font-mono text-white bg-black/70 px-2.5 py-1 rounded-md backdrop-blur-sm z-20">
-                @{creatorName} VIP • {item.id} • {new Date().toLocaleDateString()}
-              </div>
             </div>
           ) : (
-            <div className="relative w-full h-full flex flex-col items-center justify-center p-2">
+            <div className="relative w-full h-full flex flex-col items-center justify-center p-2 sm:p-4">
               <img
                 key={activePhotoSrc}
                 src={activePhotoSrc}
                 alt={`${item.title} - ${photoIndex + 1}`}
                 onContextMenu={(e) => e.preventDefault()}
                 onDragStart={(e) => e.preventDefault()}
-                className="w-full h-full max-h-[60vh] object-contain rounded-lg pointer-events-none animate-in fade-in zoom-in-95 duration-150"
+                className="w-full h-full max-h-[72vh] object-contain rounded-2xl shadow-2xl animate-in fade-in zoom-in-95 duration-200 select-none"
                 referrerPolicy="no-referrer"
               />
 

@@ -21,6 +21,12 @@ export const CLIENT_SITE_SETTINGS: SiteSettings = {
   supportWhatsApp: '',
   supportInstagram: 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3',
   paymentVerificationMode: 'manual_approval',
+  cardDisplaySettings: {
+    defaultAspectRatio: '4/5',
+    defaultObjectFit: 'cover',
+    defaultObjectPosition: 'top',
+    enableBlurBackdrop: true,
+  },
   pushNotificationsEnabled: true,
   notifyOnNewPost: true,
   vipPlans: [

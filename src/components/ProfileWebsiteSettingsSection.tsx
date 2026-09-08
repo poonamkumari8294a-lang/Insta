@@ -31,7 +31,12 @@ import {
   Trash2,
   ExternalLink,
   BadgeCheck,
-  Radio
+  Radio,
+  Crop,
+  LayoutGrid,
+  Maximize2,
+  Sliders,
+  Image as ImageIcon
 } from 'lucide-react';
 import { uploadToCloudinary } from '../services/cloudinary';
 import { updateAdminSettings, getSecretUrl, triggerPushNotificationToSubscribers, getAdminToken } from '../utils/api';
@@ -42,7 +47,7 @@ interface ProfileWebsiteSettingsSectionProps {
   subscriberCount?: number;
 }
 
-type SubTab = 'profile' | 'payment' | 'whatsapp' | 'banner' | 'security';
+type SubTab = 'profile' | 'display' | 'payment' | 'whatsapp' | 'banner' | 'security';
 
 export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSectionProps> = ({
   settings,
@@ -455,6 +460,19 @@ export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSecti
 
         <button
           type="button"
+          onClick={() => setActiveSubTab('display')}
+          className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+            activeSubTab === 'display'
+              ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-md'
+              : 'text-purple-900/70 hover:text-purple-950 hover:bg-purple-50'
+          }`}
+        >
+          <Crop className="w-3.5 h-3.5" />
+          <span>2. 🖼️ फोटो फ्रेम व साइज (Photo & Frame Size)</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveSubTab('payment')}
           className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
             activeSubTab === 'payment'
@@ -463,7 +481,7 @@ export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSecti
           }`}
         >
           <Smartphone className="w-3.5 h-3.5" />
-          <span>2. UPI & Payment</span>
+          <span>3. UPI & Payment</span>
         </button>
 
         <button
@@ -476,7 +494,7 @@ export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSecti
           }`}
         >
           <Instagram className="w-3.5 h-3.5" />
-          <span>3. Instagram & Social Support</span>
+          <span>4. Instagram & Social Support</span>
         </button>
 
         <button
@@ -489,7 +507,7 @@ export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSecti
           }`}
         >
           <Flame className="w-3.5 h-3.5" />
-          <span>4. Banner & Announcement</span>
+          <span>5. Banner & Announcement</span>
         </button>
 
         <button
@@ -502,7 +520,7 @@ export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSecti
           }`}
         >
           <Lock className="w-3.5 h-3.5" />
-          <span>5. Security & Push</span>
+          <span>6. Security & Push</span>
         </button>
       </div>
 
@@ -809,7 +827,483 @@ export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSecti
       )}
 
       {/* ==================================================================== */}
-      {/* SUB-TAB 2: PAYMENT & UPI SETTINGS */}
+      {/* SUB-TAB 2: PHOTO & CARD FRAME SETTINGS */}
+      {/* ==================================================================== */}
+      {activeSubTab === 'display' && (
+        <div className="glass-card rounded-3xl p-6 sm:p-8 border border-purple-200 space-y-6 shadow-md animate-in fade-in">
+          {/* Header Info Banner */}
+          <div className="p-5 rounded-3xl bg-gradient-to-r from-pink-50 via-purple-50 to-white border-2 border-pink-200 space-y-2">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-2xl bg-gradient-to-tr from-pink-600 to-purple-600 text-white shadow-md">
+                <Crop className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base sm:text-lg font-black text-purple-950">
+                  फोटो व कार्ड फ्रेम डिस्प्ले सेटिंग्स (Photo Frame & Crop Controls)
+                </h3>
+                <p className="text-xs text-purple-900/70 font-medium">
+                  यहाँ से तय करें कि वेबसाइट के होमपेज व गैलरी में फोटो कैसे दिखेंगी — फ्रेम का साइज (4:5, 9:16, 3:4, Auto), फोटो फिटिंग (Cover vs Contain) और सिर/चेहरा कटने से बचाने की सेटिंग्स।
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Presets for 1-Click Setup */}
+          <div className="space-y-2">
+            <label className="text-xs font-black text-purple-950 flex items-center gap-1.5 uppercase tracking-wider">
+              <Sparkles className="w-3.5 h-3.5 text-pink-600" />
+              <span>1-क्लिक क्विक प्रीसेट्स (Quick Setup Presets)</span>
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  const updated = {
+                    ...(formData.cardDisplaySettings || {
+                      defaultAspectRatio: '4/5',
+                      defaultObjectFit: 'cover',
+                      defaultObjectPosition: 'top',
+                      enableBlurBackdrop: true,
+                    }),
+                    defaultAspectRatio: '4/5' as const,
+                    defaultObjectFit: 'cover' as const,
+                    defaultObjectPosition: 'top' as const,
+                  };
+                  setFormData({ ...formData, cardDisplaySettings: updated });
+                }}
+                className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                  formData.cardDisplaySettings?.defaultAspectRatio === '4/5' &&
+                  formData.cardDisplaySettings?.defaultObjectPosition === 'top' &&
+                  formData.cardDisplaySettings?.defaultObjectFit === 'cover'
+                    ? 'bg-pink-50 border-pink-400 ring-2 ring-pink-300/60 shadow-sm'
+                    : 'bg-white hover:bg-purple-50/60 border-purple-200'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-black text-purple-950">⭐ सुरक्षित पोर्ट्रेट (Top Focus)</span>
+                  <span className="text-[10px] font-bold text-pink-600 bg-pink-100 px-1.5 py-0.5 rounded">डिफ़ॉल्ट</span>
+                </div>
+                <p className="text-[11px] text-purple-900/70">
+                  4:5 फ्रेम + Top फोकस: सिर व चेहरा कभी नहीं कटेगा।
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const updated = {
+                    ...(formData.cardDisplaySettings || {
+                      defaultAspectRatio: '4/5',
+                      defaultObjectFit: 'cover',
+                      defaultObjectPosition: 'top',
+                      enableBlurBackdrop: true,
+                    }),
+                    defaultAspectRatio: '9/16' as const,
+                    defaultObjectFit: 'cover' as const,
+                    defaultObjectPosition: 'top' as const,
+                  };
+                  setFormData({ ...formData, cardDisplaySettings: updated });
+                }}
+                className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                  formData.cardDisplaySettings?.defaultAspectRatio === '9/16'
+                    ? 'bg-pink-50 border-pink-400 ring-2 ring-pink-300/60 shadow-sm'
+                    : 'bg-white hover:bg-purple-50/60 border-purple-200'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-black text-purple-950">📱 फुल लंबाई रील (9:16)</span>
+                  <span className="text-[10px] font-bold text-purple-600 bg-purple-100 px-1.5 py-0.5 rounded">रील / स्टोरी</span>
+                </div>
+                <p className="text-[11px] text-purple-900/70">
+                  लंबा 9:16 फ्रेम: फुल बॉडी फोटो और रील सिर से पैर तक पूरी दिखती हैं।
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const updated = {
+                    ...(formData.cardDisplaySettings || {
+                      defaultAspectRatio: '4/5',
+                      defaultObjectFit: 'cover',
+                      defaultObjectPosition: 'top',
+                      enableBlurBackdrop: true,
+                    }),
+                    defaultAspectRatio: '4/5' as const,
+                    defaultObjectFit: 'contain' as const,
+                    defaultObjectPosition: 'center' as const,
+                  };
+                  setFormData({ ...formData, cardDisplaySettings: updated });
+                }}
+                className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                  formData.cardDisplaySettings?.defaultObjectFit === 'contain' &&
+                  formData.cardDisplaySettings?.defaultAspectRatio === '4/5'
+                    ? 'bg-pink-50 border-pink-400 ring-2 ring-pink-300/60 shadow-sm'
+                    : 'bg-white hover:bg-purple-50/60 border-purple-200'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-black text-purple-950">🖼️ 100% पूरी फोटो (Contain)</span>
+                  <span className="text-[10px] font-bold text-emerald-600 bg-emerald-100 px-1.5 py-0.5 rounded">नो क्रॉप</span>
+                </div>
+                <p className="text-[11px] text-purple-900/70">
+                  फोटो का 1px भी नहीं कटेगा + पीछे सुंदर ब्लर ग्लास दिखेगा।
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const updated = {
+                    ...(formData.cardDisplaySettings || {
+                      defaultAspectRatio: '4/5',
+                      defaultObjectFit: 'cover',
+                      defaultObjectPosition: 'top',
+                      enableBlurBackdrop: true,
+                    }),
+                    defaultAspectRatio: 'auto' as const,
+                    defaultObjectFit: 'contain' as const,
+                    defaultObjectPosition: 'center' as const,
+                  };
+                  setFormData({ ...formData, cardDisplaySettings: updated });
+                }}
+                className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                  formData.cardDisplaySettings?.defaultAspectRatio === 'auto'
+                    ? 'bg-pink-50 border-pink-400 ring-2 ring-pink-300/60 shadow-sm'
+                    : 'bg-white hover:bg-purple-50/60 border-purple-200'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-black text-purple-950">📐 नेचुरल रेशियो (Auto)</span>
+                  <span className="text-[10px] font-bold text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded">मूल अनुपात</span>
+                </div>
+                <p className="text-[11px] text-purple-900/70">
+                  हर फोटो अपनी मूल ऊंचाई व चौड़ाई के अनुसार खुलेगी।
+                </p>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Left Controls Column */}
+            <div className="lg:col-span-7 space-y-6">
+              {/* 1. Aspect Ratio / Frame Size */}
+              <div className="p-5 rounded-3xl bg-white border border-purple-200 shadow-xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black text-purple-950 uppercase tracking-wider flex items-center gap-1.5">
+                    <Maximize2 className="w-3.5 h-3.5 text-purple-700" />
+                    <span>1. कार्ड व फ्रेम का साइज (Card Aspect Ratio)</span>
+                  </label>
+                  <span className="text-[11px] font-bold text-pink-600">
+                    वर्तमान: {formData.cardDisplaySettings?.defaultAspectRatio || '4/5'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  {[
+                    { id: '4/5', label: '4:5 (मानक पोर्ट्रेट)', desc: 'Instagram Feed स्टाइल' },
+                    { id: '9/16', label: '9:16 (फुल वर्टिकल)', desc: 'लंबा रील/स्टोरी फ्रेम (नो कट)' },
+                    { id: '3/4', label: '3:4 (लंबा पोर्ट्रेट)', desc: 'क्लासिक फोन कैमरा' },
+                    { id: '1/1', label: '1:1 (स्क्वायर चौकोर)', desc: 'बराबर चौकोर बॉक्स' },
+                    { id: 'auto', label: 'Auto (मूल अनुपात)', desc: 'फोटो की असली ऊंचाई' },
+                  ].map((ratio) => {
+                    const isSelected =
+                      (formData.cardDisplaySettings?.defaultAspectRatio || '4/5') === ratio.id;
+                    return (
+                      <button
+                        key={ratio.id}
+                        type="button"
+                        onClick={() => {
+                          const updated = {
+                            ...(formData.cardDisplaySettings || {
+                              defaultAspectRatio: '4/5',
+                              defaultObjectFit: 'cover',
+                              defaultObjectPosition: 'top',
+                              enableBlurBackdrop: true,
+                            }),
+                            defaultAspectRatio: ratio.id as any,
+                          };
+                          setFormData({ ...formData, cardDisplaySettings: updated });
+                        }}
+                        className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-gradient-to-r from-pink-50 to-purple-50 border-pink-400 ring-2 ring-pink-300/50 shadow-sm'
+                            : 'bg-white hover:bg-purple-50/50 border-purple-100'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className={`text-xs font-black ${isSelected ? 'text-pink-700' : 'text-purple-950'}`}>
+                            {ratio.label}
+                          </span>
+                          {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-pink-600" />}
+                        </div>
+                        <span className="text-[10px] text-purple-900/60 block font-medium">
+                          {ratio.desc}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 2. Object Fit Mode */}
+              <div className="p-5 rounded-3xl bg-white border border-purple-200 shadow-xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black text-purple-950 uppercase tracking-wider flex items-center gap-1.5">
+                    <Sliders className="w-3.5 h-3.5 text-purple-700" />
+                    <span>2. फोटो फिटिंग मोड (Image Fit Mode)</span>
+                  </label>
+                  <span className="text-[11px] font-bold text-pink-600">
+                    वर्तमान: {formData.cardDisplaySettings?.defaultObjectFit === 'contain' ? 'Contain (पूरी फोटो)' : 'Cover (पूरा फ्रेम)'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated = {
+                        ...(formData.cardDisplaySettings || {
+                          defaultAspectRatio: '4/5',
+                          defaultObjectFit: 'cover',
+                          defaultObjectPosition: 'top',
+                          enableBlurBackdrop: true,
+                        }),
+                        defaultObjectFit: 'cover' as const,
+                      };
+                      setFormData({ ...formData, cardDisplaySettings: updated });
+                    }}
+                    className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
+                      (formData.cardDisplaySettings?.defaultObjectFit || 'cover') === 'cover'
+                        ? 'bg-gradient-to-r from-pink-50 to-purple-50 border-pink-400 ring-2 ring-pink-300/50 shadow-sm'
+                        : 'bg-white hover:bg-purple-50/50 border-purple-100'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-black text-purple-950">
+                        Cover (फ्रेम पूरा भरें)
+                      </span>
+                      {(formData.cardDisplaySettings?.defaultObjectFit || 'cover') === 'cover' && (
+                        <CheckCircle2 className="w-4 h-4 text-pink-600" />
+                      )}
+                    </div>
+                    <p className="text-[11px] text-purple-900/70">
+                      फोटो पूरे फ्रेम में भरी रहती है। 'Top फोकस' के साथ सिर/चेहरा कभी नहीं कटता।
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated = {
+                        ...(formData.cardDisplaySettings || {
+                          defaultAspectRatio: '4/5',
+                          defaultObjectFit: 'cover',
+                          defaultObjectPosition: 'top',
+                          enableBlurBackdrop: true,
+                        }),
+                        defaultObjectFit: 'contain' as const,
+                      };
+                      setFormData({ ...formData, cardDisplaySettings: updated });
+                    }}
+                    className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
+                      formData.cardDisplaySettings?.defaultObjectFit === 'contain'
+                        ? 'bg-gradient-to-r from-pink-50 to-purple-50 border-pink-400 ring-2 ring-pink-300/50 shadow-sm'
+                        : 'bg-white hover:bg-purple-50/50 border-purple-100'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-black text-purple-950">
+                        Contain (पूरी फोटो 100% बिना कटे)
+                      </span>
+                      {formData.cardDisplaySettings?.defaultObjectFit === 'contain' && (
+                        <CheckCircle2 className="w-4 h-4 text-pink-600" />
+                      )}
+                    </div>
+                    <p className="text-[11px] text-purple-900/70">
+                      फोटो का 1% हिस्सा भी नहीं कटेगा। फ्रेम के खाली हिस्सों में बैकग्राउंड ब्लर रहेगा।
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* 3. Focal Alignment / Face & Head Position */}
+              <div className="p-5 rounded-3xl bg-white border border-purple-200 shadow-xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black text-purple-950 uppercase tracking-wider flex items-center gap-1.5">
+                    <Crop className="w-3.5 h-3.5 text-purple-700" />
+                    <span>3. फोकस संरेखण (चेहरा व सिर कटने से बचाएं)</span>
+                  </label>
+                  <span className="text-[11px] font-bold text-pink-600">
+                    वर्तमान: {formData.cardDisplaySettings?.defaultObjectPosition || 'top'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2.5">
+                  {[
+                    { id: 'top', label: 'Top (ऊपर से 👑)', desc: 'सिर व चेहरा हमेशा दिखेगा' },
+                    { id: 'center', label: 'Center (मध्य)', desc: 'फोटो के बीच से' },
+                    { id: 'bottom', label: 'Bottom (नीचे)', desc: 'निचले हिस्से से' },
+                  ].map((pos) => {
+                    const isSelected =
+                      (formData.cardDisplaySettings?.defaultObjectPosition || 'top') === pos.id;
+                    return (
+                      <button
+                        key={pos.id}
+                        type="button"
+                        onClick={() => {
+                          const updated = {
+                            ...(formData.cardDisplaySettings || {
+                              defaultAspectRatio: '4/5',
+                              defaultObjectFit: 'cover',
+                              defaultObjectPosition: 'top',
+                              enableBlurBackdrop: true,
+                            }),
+                            defaultObjectPosition: pos.id as any,
+                          };
+                          setFormData({ ...formData, cardDisplaySettings: updated });
+                        }}
+                        className={`p-3 rounded-2xl border text-center transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-gradient-to-r from-pink-50 to-purple-50 border-pink-400 ring-2 ring-pink-300/50 shadow-sm'
+                            : 'bg-white hover:bg-purple-50/50 border-purple-100'
+                        }`}
+                      >
+                        <span className={`text-xs font-black block mb-0.5 ${isSelected ? 'text-pink-700' : 'text-purple-950'}`}>
+                          {pos.label}
+                        </span>
+                        <span className="text-[10px] text-purple-900/60 block font-medium">
+                          {pos.desc}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Right Live Preview Column */}
+            <div className="lg:col-span-5 sticky top-6 space-y-4">
+              <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-b from-purple-50/90 to-pink-50/70 border-2 border-purple-200 shadow-md space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-purple-950 uppercase tracking-wider flex items-center gap-1.5">
+                    <Eye className="w-3.5 h-3.5 text-pink-600" />
+                    <span>लाइव कार्ड प्रीव्यू (Live Card Preview)</span>
+                  </span>
+                  <span className="text-[10px] font-mono font-bold text-purple-900/60 bg-white px-2 py-0.5 rounded-full border border-purple-200">
+                    रेशियो: {formData.cardDisplaySettings?.defaultAspectRatio || '4/5'}
+                  </span>
+                </div>
+
+                {/* Simulated ContentCard Canvas */}
+                <div className="w-full max-w-[280px] mx-auto rounded-2xl bg-white border border-purple-200 shadow-lg overflow-hidden">
+                  {/* Card Header mock */}
+                  <div className="p-3 flex items-center gap-2 border-b border-purple-100">
+                    <img
+                      src={formData.profilePicUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500'}
+                      alt="Creator"
+                      className="w-7 h-7 rounded-full object-cover border border-pink-300"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[11px] font-black text-purple-950 truncate">
+                        {formData.creatorName || 'Ruma Kumari'}
+                      </div>
+                      <div className="text-[9px] text-purple-900/60 truncate">
+                        {formData.username ? `@${formData.username}` : '@ruma__cutegirl'}
+                      </div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-pink-100 text-pink-700">
+                      PHOTO
+                    </span>
+                  </div>
+
+                  {/* Media Canvas with Chosen Frame & Fit */}
+                  <div
+                    className={`relative w-full ${
+                      formData.cardDisplaySettings?.defaultAspectRatio === '9/16'
+                        ? 'aspect-[9/16]'
+                        : formData.cardDisplaySettings?.defaultAspectRatio === '3/4'
+                        ? 'aspect-[3/4]'
+                        : formData.cardDisplaySettings?.defaultAspectRatio === '1/1'
+                        ? 'aspect-square'
+                        : formData.cardDisplaySettings?.defaultAspectRatio === 'auto'
+                        ? 'aspect-auto min-h-[220px] max-h-[340px]'
+                        : 'aspect-[4/5]'
+                    } bg-purple-950/20 overflow-hidden flex items-center justify-center`}
+                  >
+                    {/* Blurred backdrop if contain mode */}
+                    {formData.cardDisplaySettings?.defaultObjectFit === 'contain' && (
+                      <img
+                        src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=800"
+                        alt=""
+                        className="absolute inset-0 w-full h-full object-cover filter blur-xl scale-125 opacity-50"
+                      />
+                    )}
+
+                    <img
+                      src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=800"
+                      alt="Sample Portrait"
+                      className={`w-full h-full ${
+                        formData.cardDisplaySettings?.defaultObjectFit === 'contain'
+                          ? 'relative z-[1] object-contain'
+                          : `object-cover ${
+                              formData.cardDisplaySettings?.defaultObjectPosition === 'center'
+                                ? 'object-center'
+                                : formData.cardDisplaySettings?.defaultObjectPosition === 'bottom'
+                                ? 'object-bottom'
+                                : 'object-top'
+                            }`
+                      }`}
+                    />
+
+                    {/* Ribbon */}
+                    <span className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[9px] font-black bg-emerald-500 text-white shadow-xs z-10">
+                      UNLOCKED
+                    </span>
+                  </div>
+
+                  {/* Card Bottom Mock */}
+                  <div className="p-3 bg-white space-y-1">
+                    <p className="text-[11px] font-black text-purple-950 truncate">
+                      Exclusive Golden Glow Photoshoot
+                    </p>
+                    <p className="text-[10px] text-purple-900/60 font-mono">
+                      फ्रेम: {formData.cardDisplaySettings?.defaultAspectRatio || '4/5'} | फिट: {formData.cardDisplaySettings?.defaultObjectFit || 'cover'} | फोकस: {formData.cardDisplaySettings?.defaultObjectPosition || 'top'}
+                    </p>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-center text-purple-900/70 font-medium">
+                  👆 वेबसाइट के होमपेज पर हर फोटो इसी अनुपात और संरेखण में प्रदर्शित होगी।
+                </p>
+              </div>
+
+              {/* Save Button */}
+              <button
+                type="button"
+                onClick={() => handleSaveAll()}
+                disabled={isSaving}
+                className="w-full glow-pink-btn py-3 rounded-2xl text-xs sm:text-sm font-black text-white shadow-lg flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all"
+              >
+                {isSaving ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                    <span>सेव हो रहा है...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    <span>💾 फोटो फ्रेम सेटिंग्स सेव करें (Save Frame Settings)</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================================== */}
+      {/* SUB-TAB 3: PAYMENT & UPI SETTINGS */}
       {/* ==================================================================== */}
       {activeSubTab === 'payment' && (
         <div className="glass-card rounded-3xl p-6 sm:p-8 border border-purple-200 space-y-6 shadow-md animate-in fade-in">

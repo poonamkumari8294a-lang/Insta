@@ -80,6 +80,12 @@ const inMemorySessionStore: Record<string, string> = {};
 
 export function getSessionItem(key: string): string | null {
   try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const val = localStorage.getItem(key);
+      if (val !== null) return val;
+    }
+  } catch (_) {}
+  try {
     if (typeof window !== 'undefined' && window.sessionStorage) {
       const val = sessionStorage.getItem(key);
       if (val !== null) return val;
@@ -91,6 +97,11 @@ export function getSessionItem(key: string): string | null {
 export function setSessionItem(key: string, value: string): void {
   inMemorySessionStore[key] = value;
   try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.setItem(key, value);
+    }
+  } catch (_) {}
+  try {
     if (typeof window !== 'undefined' && window.sessionStorage) {
       sessionStorage.setItem(key, value);
     }
@@ -100,25 +111,18 @@ export function setSessionItem(key: string, value: string): void {
 export function removeSessionItem(key: string): void {
   delete inMemorySessionStore[key];
   try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.removeItem(key);
+    }
+  } catch (_) {}
+  try {
     if (typeof window !== 'undefined' && window.sessionStorage) {
       sessionStorage.removeItem(key);
     }
   } catch (_) {}
 }
 
-// Proactively purge old legacy mock/temporary debug keys from localStorage if present
-if (typeof window !== 'undefined') {
-  try {
-    if (typeof localStorage !== 'undefined') {
-      const keysToPurge = ['mock_items', 'old_cache_v1', 'temp_debug_data'];
-      keysToPurge.forEach(k => {
-        try { localStorage.removeItem(k); } catch (_) {}
-      });
-    }
-  } catch (_) {}
-}
-
-// Customer Session ID helper (In-memory & session only)
+// Customer Session ID helper (In-memory & persistent)
 export function getOrCreateSessionId(): string {
   let sessionId = getSessionItem(SESSION_ID_KEY);
   if (!sessionId) {
@@ -128,7 +132,7 @@ export function getOrCreateSessionId(): string {
   return sessionId;
 }
 
-// Session / Memory Storage for Unlocked Tokens
+// Persistent Storage for Unlocked Tokens
 export function getStoredTokens(): Record<string, string> {
   try {
     const raw = getSessionItem(TOKENS_STORAGE_KEY);
@@ -138,10 +142,19 @@ export function getStoredTokens(): Record<string, string> {
   }
 }
 
-export function saveAccessToken(contentId: string, token: string) {
+export function saveAccessToken(contentId: string, token?: string): Record<string, string> {
   const tokens = getStoredTokens();
-  tokens[contentId] = token;
+  const validToken = token || `tok_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  tokens[contentId] = validToken;
   setSessionItem(TOKENS_STORAGE_KEY, JSON.stringify(tokens));
+
+  // Instantly notify listeners across tabs and components
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(new CustomEvent('ruma_tokens_updated', { detail: { contentId, token: validToken } }));
+    } catch (_) {}
+  }
+  return tokens;
 }
 
 export function getStoredOrders(): string[] {
@@ -798,12 +811,15 @@ export function applyUserAccessTokens(items: MediaItem[]): MediaItem[] {
   const userTokens = getStoredTokens();
   return items.map(item => {
     const isUnlocked = item.access === 'free' || Boolean(userTokens[item.id]);
+    const rawMedia = (item as any)._rawMediaUrl || item.mediaUrl || item.thumbnailUrl;
+    const rawGallery = (item as any)._rawGalleryUrls || (item.galleryUrls && item.galleryUrls.length > 0 ? item.galleryUrls : (rawMedia ? [rawMedia] : [item.thumbnailUrl]));
+
     return {
       ...item,
-      mediaUrl: isUnlocked ? item.mediaUrl : '',
-      galleryUrls: isUnlocked 
-        ? (item.galleryUrls && item.galleryUrls.length > 0 ? item.galleryUrls : (item.mediaUrl ? [item.mediaUrl] : [item.thumbnailUrl]))
-        : []
+      _rawMediaUrl: rawMedia,
+      _rawGalleryUrls: rawGallery,
+      mediaUrl: isUnlocked ? (rawMedia || item.thumbnailUrl) : '',
+      galleryUrls: isUnlocked ? rawGallery : []
     };
   });
 }
@@ -1680,8 +1696,9 @@ export async function checkOrderStatus(orderId: string): Promise<{
       const snap = await withTimeout(getDoc(orderRef), 3000);
       if (snap.exists()) {
         const order = snap.data() as OrderItem;
-        if (order.status === 'paid' && order.accessToken && order.contentId) {
-          saveAccessToken(order.contentId, order.accessToken);
+        if (order.status === 'paid' && order.contentId) {
+          const validTok = order.accessToken || `tok_paid_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          saveAccessToken(order.contentId, validTok);
         }
         return {
           orderId: order.orderId,
@@ -1698,6 +1715,19 @@ export async function checkOrderStatus(orderId: string): Promise<{
       handleFirestoreError('checkOrderStatus', err);
     }
   }
+
+  // Resilient fallback to backend server endpoint
+  try {
+    const res = await fetch(`/api/orders/status/${encodeURIComponent(orderId)}`);
+    if (res.ok) {
+      const serverOrder = await res.json();
+      if (serverOrder && serverOrder.status === 'paid' && serverOrder.contentId) {
+        const validTok = serverOrder.accessToken || `tok_paid_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        saveAccessToken(serverOrder.contentId, validTok);
+      }
+      return serverOrder;
+    }
+  } catch (_) {}
 
   return {
     orderId,

@@ -23,7 +23,6 @@ import {
   ShieldCheck,
   AlertCircle,
   Sparkles,
-  ExternalLink,
   Lock,
   ArrowRight,
   CheckCircle2,
@@ -31,29 +30,32 @@ import {
   Smartphone,
   HelpCircle,
   FileCheck,
-  Flame,
   Zap,
-  Crown,
-  Eye,
   Download,
   Upload,
   Camera,
   Trash2,
-  Star,
   User,
   Phone,
   Edit3,
-  MessageCircle
+  MessageCircle,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  BadgeCheck,
+  CreditCard
 } from 'lucide-react';
 
 interface PaymentModalProps {
   item: MediaItem | null;
+  isOpen?: boolean;
   onClose: () => void;
   onSuccess: (item: MediaItem) => void;
 }
 
 export const PaymentModal: React.FC<PaymentModalProps> = ({
   item,
+  isOpen = true,
   onClose,
   onSuccess,
 }) => {
@@ -72,7 +74,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     mode: string;
   } | null>(null);
 
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copiedUpi, setCopiedUpi] = useState(false);
   const [copiedOrderId, setCopiedOrderId] = useState(false);
@@ -87,15 +89,15 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   const [screenshotName, setScreenshotName] = useState<string | null>(null);
   const [isProcessingScreenshot, setIsProcessingScreenshot] = useState(false);
   const screenshotInputRef = useRef<HTMLInputElement>(null);
-  const [recentBuyersCount] = useState(() => Math.floor(Math.random() * 24) + 48);
   const pollingRef = useRef<any>(null);
 
-  // Mandatory Customer Personal Details (Name & 10-digit Phone)
+  // Customer Personal Details (Name & 10-digit WhatsApp Phone)
   const [userName, setUserName] = useState('');
   const [userPhone, setUserPhone] = useState('');
   const [showEditDetails, setShowEditDetails] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
 
+  // Load existing profile if available
   useEffect(() => {
     const saved = getStoredUserProfile();
     if (saved) {
@@ -134,18 +136,18 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     }
   };
 
-  // Initialize Order Instantly (0ms response)
+  // Initialize Order Instantly
   useEffect(() => {
     if (!item) return;
 
     let isMounted = true;
     setError(null);
+    setLoading(true);
 
     const savedUser = getStoredUserProfile();
     const initName = savedUser?.name || '';
     const initPhone = savedUser?.phone || '';
 
-    // Call instant order generator with item override for 0ms loading
     createOrder(item.id, item, initName, initPhone)
       .then((res) => {
         if (isMounted) {
@@ -156,7 +158,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       })
       .catch((err) => {
         if (isMounted) {
-          setError(err.message || 'पेमेंट इनिशियलाइज़ करने में त्रुटि हुई');
+          setError(err.message || 'पेमेंट इनिशियलाइज़ करने में समस्या हुई। कृपया पुनः प्रयास करें।');
           setLoading(false);
         }
       });
@@ -167,7 +169,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     };
   }, [item]);
 
-  // Polling for status
+  // Polling for automated payment confirmation
   useEffect(() => {
     if (!orderData || paymentStatus === 'paid' || paymentStatus === 'failed' || paymentStatus === 'expired') {
       if (pollingRef.current) clearInterval(pollingRef.current);
@@ -179,14 +181,15 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         const statusRes = await checkOrderStatus(orderData.order.orderId);
         if (statusRes.status === 'paid') {
           setPaymentStatus('paid');
-          if (statusRes.accessToken && item) {
-            saveAccessToken(item.id, statusRes.accessToken);
+          if (item) {
+            const validTok = statusRes.accessToken || `tok_paid_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            saveAccessToken(item.id, validTok);
           }
           confetti({
-            particleCount: 140,
-            spread: 100,
+            particleCount: 150,
+            spread: 90,
             origin: { y: 0.55 },
-            colors: ['#ec4899', '#f43f5e', '#fbbf24', '#34d399', '#60a5fa']
+            colors: ['#10b981', '#6366f1', '#ec4899', '#f59e0b']
           });
           clearInterval(pollingRef.current);
         } else if (statusRes.status === 'expired' || statusRes.status === 'failed') {
@@ -223,7 +226,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     return () => clearInterval(timer);
   }, [timeLeft, paymentStatus]);
 
-  if (!item) return null;
+  if (!item || !isOpen) return null;
 
   const formatTimer = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -249,7 +252,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     if (!orderData?.qrDataUrl) return;
     const link = document.createElement('a');
     link.href = orderData.qrDataUrl;
-    link.download = `VIP-UPI-QR-${item.id}.png`;
+    link.download = `UPI-QR-${item.id}.png`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -268,7 +271,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     const cleanPhone = userPhone.trim().replace(/[^0-9]/g, '');
 
     if (!cleanName || cleanName.length < 2) {
-      setDetailsError('कृपया अपना पूरा नाम दर्ज करें।');
+      setDetailsError('कृपया अपना नाम दर्ज करें (Please enter your full name).');
       setShowEditDetails(true);
       return;
     }
@@ -317,14 +320,15 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       if (res.success) {
         if (res.status === 'paid') {
           setPaymentStatus('paid');
-          if (res.order?.accessToken && item) {
-            saveAccessToken(item.id, res.order.accessToken);
+          if (item) {
+            const validTok = res.order?.accessToken || `tok_paid_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            saveAccessToken(item.id, validTok);
           }
           confetti({
-            particleCount: 150,
+            particleCount: 160,
             spread: 90,
             origin: { y: 0.55 },
-            colors: ['#ec4899', '#f43f5e', '#fbbf24', '#34d399']
+            colors: ['#10b981', '#3b82f6', '#ec4899', '#f59e0b']
           });
         } else {
           setPaymentStatus('waiting_verification');
@@ -347,8 +351,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       const res = await devSimulatePayment(orderData.order.orderId);
       if (res.success) {
         setPaymentStatus('paid');
-        if (res.order.accessToken && item) {
-          saveAccessToken(item.id, res.order.accessToken);
+        if (item) {
+          const validTok = res.order?.accessToken || `tok_paid_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          saveAccessToken(item.id, validTok);
         }
         confetti({
           particleCount: 120,
@@ -367,40 +372,32 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   const hasSavedDetails = userName.trim().length >= 2 && userPhone.trim().replace(/[^0-9]/g, '').length === 10;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xl flex items-center justify-center p-3 sm:p-4 md:p-6 overflow-y-auto animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 md:p-6 overflow-y-auto animate-in fade-in duration-200">
       
-      {/* Modal Card with Seductive Glowing Border */}
-      <div className="relative w-full max-w-lg bg-white/95 backdrop-blur-2xl rounded-3xl border-2 border-pink-400 overflow-hidden shadow-2xl my-auto animate-in zoom-in-95 duration-200">
+      {/* Main Checkout Container */}
+      <div className="relative w-full max-w-lg bg-white rounded-3xl border border-slate-200/80 overflow-hidden shadow-2xl my-auto animate-in zoom-in-95 duration-200">
         
-        {/* Top Alluring Offer Banner with Flame Pulse */}
-        <div className="bg-gradient-to-r from-rose-600 via-pink-600 to-purple-600 px-4 py-2.5 text-white flex items-center justify-between text-xs font-black shadow-inner">
-          <div className="flex items-center gap-1.5 animate-pulse">
-            <Flame className="w-4 h-4 text-yellow-300 animate-flame" />
-            <span className="tracking-wide uppercase text-[11px] sm:text-xs">
-              🔥 VIP UNCENSORED ACCESS • 85% छूट केवल आज!
-            </span>
-          </div>
-          <div className="flex items-center gap-1 bg-black/40 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold">
-            <Sparkles className="w-3 h-3 text-yellow-300" />
-            <span>{recentBuyersCount} लोग अभी अनलॉक कर रहे हैं</span>
-          </div>
-        </div>
-
-        {/* Header with Title & Close */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-purple-100 bg-white">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2.5 rounded-2xl bg-gradient-to-br from-rose-500 to-pink-600 text-white flex items-center justify-center shadow-md shadow-pink-500/30">
-              <Crown className="w-5 h-5 text-yellow-200" />
+        {/* Professional Header */}
+        <div className="bg-slate-900 text-white px-5 py-4 flex items-center justify-between border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 flex items-center justify-center shadow-md shadow-emerald-500/20">
+              <div className="w-full h-full bg-slate-900 rounded-[14px] flex items-center justify-center">
+                <ShieldCheck className="w-5 h-5 text-emerald-400" />
+              </div>
             </div>
             <div>
-              <h3 className="text-sm sm:text-base font-black text-purple-950 font-display flex items-center gap-1.5">
-                <span>VIP 1-क्लिक तुरंत UPI अनलॉक</span>
-                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200">
-                  0-Sec Fast
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm sm:text-base font-black tracking-tight text-white">
+                  सुरक्षित UPI पेमेंट (Secure Checkout)
+                </h3>
+                <span className="hidden sm:inline-flex text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  256-Bit SSL
                 </span>
-              </h3>
-              <p className="text-[11px] text-purple-900/70 font-semibold">
-                बिना इंतज़ार किए तुरंत अनलॉक करें • 100% प्राइवेट
+              </div>
+              <p className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                <span>100% सुरक्षित व गोपनीय</span>
+                <span>•</span>
+                <span>तुरंत VIP अनलॉक</span>
               </p>
             </div>
           </div>
@@ -408,7 +405,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           <button
             id="payment-modal-close-btn"
             onClick={onClose}
-            className="p-2 rounded-xl bg-purple-50 text-purple-900/60 hover:text-purple-950 hover:bg-pink-100 border border-purple-100 transition-colors shadow-sm cursor-pointer"
+            className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors cursor-pointer"
+            title="बंद करें"
           >
             <X className="w-5 h-5" />
           </button>
@@ -420,24 +418,25 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           {error ? (
             <div className="py-10 flex flex-col items-center justify-center text-center">
               <AlertCircle className="w-12 h-12 text-rose-500 mb-3" />
-              <h4 className="text-base font-bold text-purple-950">भुगतान आरंभ करने में त्रुटि</h4>
-              <p className="text-xs text-purple-900/70 max-w-xs mt-1">{error}</p>
+              <h4 className="text-base font-bold text-slate-900">भुगतान आरंभ करने में समस्या हुई</h4>
+              <p className="text-xs text-slate-600 max-w-xs mt-1">{error}</p>
               <button
                 onClick={() => {
                   setError(null);
                   createOrder(item.id, item, userName, userPhone).then((res) => setOrderData(res));
                 }}
-                className="mt-4 px-5 py-2.5 rounded-2xl bg-pink-600 text-white text-xs font-bold hover:bg-pink-500 transition-colors shadow-md"
+                className="mt-4 px-5 py-2.5 rounded-2xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-500 transition-colors shadow-md cursor-pointer"
               >
                 पुनः प्रयास करें (Try Again)
               </button>
             </div>
+
           ) : paymentStatus === 'waiting_verification' ? (
 
             /* WAITING VERIFICATION STATE */
             <div className="py-6 flex flex-col items-center justify-center text-center space-y-4">
               <div className="relative">
-                <div className="w-20 h-20 rounded-full bg-amber-100 border-2 border-amber-400 text-amber-600 flex items-center justify-center shadow-lg shadow-amber-500/10">
+                <div className="w-20 h-20 rounded-full bg-amber-50 border-2 border-amber-400 text-amber-600 flex items-center justify-center shadow-lg shadow-amber-500/10">
                   <FileCheck className="w-10 h-10 text-amber-600 animate-pulse" />
                 </div>
                 <span className="absolute -top-1 -right-1 flex h-4 w-4">
@@ -447,20 +446,20 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               </div>
 
               <div>
-                <h4 className="text-lg font-black text-purple-950 font-display">
+                <h4 className="text-lg font-black text-slate-900">
                   पेमेंट वेरिफिकेशन प्रगति पर है ⏳
                 </h4>
-                <p className="text-xs text-purple-900/80 mt-1 max-w-sm font-medium">
-                  आपका 12-अंकों का UTR <span className="font-mono font-bold text-pink-700">#{utrNumber}</span> प्राप्त हो गया है।
+                <p className="text-xs text-slate-600 mt-1 max-w-sm font-medium">
+                  आपका UTR <span className="font-mono font-bold text-emerald-700">#{utrNumber}</span> प्राप्त हो गया है।
                 </p>
                 {userName && (
-                  <p className="text-xs text-purple-950 font-bold mt-1">
-                    👤 VIP खरीदार: {userName} (+91 {userPhone})
+                  <p className="text-xs text-slate-700 font-bold mt-1">
+                    👤 VIP सदस्य: {userName} (+91 {userPhone})
                   </p>
                 )}
               </div>
 
-              <div className="w-full p-4 rounded-2xl bg-amber-50/80 border border-amber-200 text-left space-y-2 text-xs">
+              <div className="w-full p-4 rounded-2xl bg-amber-50/70 border border-amber-200 text-left space-y-2 text-xs">
                 <div className="flex items-center justify-between">
                   <span className="text-amber-900/70 font-semibold">ऑर्डर आईडी:</span>
                   <span className="font-mono font-bold text-amber-950">{orderData?.order.orderId}</span>
@@ -471,23 +470,23 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 </div>
               </div>
 
-              <div className="p-3 rounded-2xl bg-purple-50 border border-purple-100 text-xs text-purple-900/80 text-center font-medium space-y-2">
-                <div>⚡ <strong>कृपया इस स्क्रीन पर बने रहें।</strong> कन्फर्म होते ही आपका VIP कंटेंट तुरंत स्क्रीन पर खुल जाएगा।</div>
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-700 text-center font-medium space-y-2.5 w-full">
+                <div>⚡ <strong>कृपया 1-2 मिनट प्रतीक्षा करें।</strong> कन्फर्म होते ही स्क्रीन पर फुल फोटो अपने आप खुल जाएगी।</div>
                 
                 <a
                   href={`https://wa.me/639465507887?text=${encodeURIComponent(`Hello Ruma! Maine Payment kar diya hai.\n\n📦 Order ID: ${orderData?.order.orderId || ''}\n💰 Amount: ₹${item.price}\n🔑 UTR: ${utrNumber}\n👤 Name: ${userName || ''} (+91 ${userPhone || ''})\n\nKripya turant approve karein!`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center gap-1.5 py-2 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs shadow-md shadow-emerald-600/30 transition-transform active:scale-95"
+                  className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm transition-transform active:scale-95"
                 >
                   <MessageCircle className="w-4 h-4" />
-                  <span>व्हाट्सएप (+63 9465507887) पर स्क्रीनशॉट भेजकर तुरंत अनलॉक करवाएं</span>
+                  <span>व्हाट्सएप पर स्क्रीनशॉट भेजकर तुरंत अनलॉक करवाएं</span>
                 </a>
               </div>
 
               <button
                 onClick={() => setPaymentStatus('pending')}
-                className="text-xs text-purple-700 hover:text-pink-600 font-bold underline cursor-pointer"
+                className="text-xs text-slate-600 hover:text-emerald-700 font-bold underline cursor-pointer"
               >
                 ← UTR नंबर बदलें या दोबारा प्रयास करें
               </button>
@@ -495,149 +494,149 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
           ) : paymentStatus === 'paid' ? (
             
-            /* SUCCESS STATE */
-            <div className="py-6 flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-300">
+            /* SUCCESS STATE WITH CLEAR UNBLURRED PHOTO */
+            <div className="py-4 sm:py-6 flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-300">
               <div className="relative mb-3">
-                <div className="absolute -inset-3 rounded-full bg-gradient-to-r from-emerald-400 to-teal-500 opacity-60 blur-lg animate-pulse" />
-                <div className="relative w-20 h-20 rounded-full bg-emerald-100 border-3 border-emerald-500 text-emerald-600 flex items-center justify-center shadow-xl shadow-emerald-500/30">
-                  <CheckCircle2 className="w-12 h-12" />
+                <div className="absolute -inset-3 rounded-full bg-emerald-400 opacity-40 blur-lg animate-pulse" />
+                <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-emerald-100 border-2 border-emerald-500 text-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+                  <CheckCircle2 className="w-10 h-10 sm:w-12 sm:h-12" />
                 </div>
               </div>
-              <h3 className="text-xl sm:text-2xl font-black text-purple-950 font-display">
-                🎉 अनलॉक सफल रहा! (VIP Unlocked)
+              <h3 className="text-xl sm:text-2xl font-black text-slate-900">
+                🎉 भुगतान सफल रहा! (VIP Unlocked)
               </h3>
-              <p className="text-xs sm:text-sm text-purple-900/80 mt-1 max-w-sm font-medium">
-                नमस्ते <strong className="text-pink-600">{userName || 'VIP Member'}</strong>, आपका पेमेंट <strong className="text-emerald-600 font-bold">{formatINR(item.price)}</strong> सत्यापित हो चुका है।
+              <p className="text-xs sm:text-sm text-slate-600 mt-1 max-w-sm font-medium">
+                नमस्ते <strong className="text-slate-900">{userName || 'VIP Member'}</strong>, आपका पेमेंट <strong className="text-emerald-600 font-bold">{formatINR(item.price)}</strong> सत्यापित हो चुका है।
               </p>
+
+              {/* Unblurred Clear Photo Showcase */}
+              <div className="relative my-4 w-44 h-44 sm:w-52 sm:h-52 rounded-2xl overflow-hidden border-2 border-emerald-500 shadow-xl shadow-emerald-500/20 bg-slate-950 flex items-center justify-center">
+                <img
+                  src={item.mediaUrl || item.thumbnailUrl}
+                  alt={item.title}
+                  className="w-full h-full object-cover animate-in fade-in zoom-in-95 duration-300 select-none"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-2 text-center">
+                  <span className="text-[10px] font-black uppercase text-emerald-300 bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-400/40 inline-flex items-center gap-1 shadow-sm">
+                    <Sparkles className="w-3 h-3 text-emerald-400" />
+                    100% UNBLURRED ULTRA HD
+                  </span>
+                </div>
+              </div>
 
               <button
                 id="btn-unlock-content-now"
-                onClick={() => onSuccess(item)}
-                className="w-full mt-6 hot-vip-btn py-4 px-6 rounded-2xl text-sm font-black text-white flex items-center justify-center gap-2 shadow-2xl shadow-rose-600/40 cursor-pointer"
+                onClick={() => {
+                  if (item) {
+                    const validTok = orderData?.order?.accessToken || `tok_paid_${Date.now()}`;
+                    saveAccessToken(item.id, validTok);
+                  }
+                  onSuccess(item);
+                }}
+                className="w-full mt-2 py-4 px-6 rounded-2xl text-sm sm:text-base font-black text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 flex items-center justify-center gap-2 shadow-xl shadow-emerald-600/30 cursor-pointer transition-transform active:scale-95"
               >
-                <span>🔥 अभी देखें & चलाएं (Watch / View Now)</span>
-                <ArrowRight className="w-4 h-4" />
+                <span>🔥 अभी फ़ोटो फुल स्क्रीन में देखें (View Full Photo)</span>
+                <ArrowRight className="w-5 h-5" />
               </button>
             </div>
 
           ) : (
 
-            /* ACTIVE INSTANT PAYMENT STATE */
+            /* PROFESSIONAL ACTIVE PAYMENT STATE */
             <div className="space-y-4">
               
-              {/* Seductive VIP Teaser Banner */}
-              <div className="relative rounded-3xl overflow-hidden border-2 border-pink-400 bg-gradient-to-br from-purple-950 via-pink-950 to-purple-950 text-white p-3.5 sm:p-4 shadow-xl">
-                <div className="relative z-10 flex items-center justify-between gap-3">
-                  
-                  {/* Media Thumbnail with Blurred Lock */}
-                  <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-2xl overflow-hidden border-2 border-pink-400 shrink-0 shadow-lg">
+              {/* Clean Order Summary Card */}
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50 border border-slate-200/90 flex items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="relative w-14 h-14 sm:w-16 sm:h-16 rounded-xl overflow-hidden border border-slate-300 shrink-0 bg-slate-900 shadow-xs">
                     <img
                       src={item.thumbnailUrl}
                       alt={item.title}
-                      className="w-full h-full object-cover filter blur-[6px] scale-110"
+                      className="w-full h-full object-cover filter blur-[4px] scale-110"
                       referrerPolicy="no-referrer"
                     />
                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                      <div className="p-1.5 rounded-full bg-pink-600 text-white shadow-md animate-pulse">
-                        <Lock className="w-4 h-4" />
-                      </div>
+                      <Lock className="w-4 h-4 text-white" />
                     </div>
-                    <span className="absolute bottom-1 right-1 text-[8px] font-black uppercase bg-rose-600 text-white px-1 rounded">
-                      VIP 4K
-                    </span>
                   </div>
-
-                  {/* Description & Value Props */}
-                  <div className="flex-1 min-w-0">
+                  <div className="min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[9px] font-black text-amber-300 uppercase tracking-widest bg-amber-400/20 px-2 py-0.5 rounded-full border border-amber-300/30 flex items-center gap-0.5">
-                        <Star className="w-2.5 h-2.5 fill-amber-300" />
-                        UNCENSORED
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
+                        {item.type === 'video' ? 'Full HD Video' : 'Ultra HD Photoset'}
                       </span>
-                      <span className="text-[10px] text-pink-300 font-semibold truncate">
-                        {item.type === 'video' ? 'Full HD Video' : 'HD Photos Set'}
+                      <span className="text-[10px] font-bold text-slate-500 hidden sm:inline">
+                        • 0-सेकंड डिलीवरी
                       </span>
                     </div>
-
-                    <h4 className="text-xs sm:text-sm font-black text-white truncate mt-1">
+                    <h4 className="text-xs sm:text-sm font-black text-slate-900 truncate mt-1">
                       {item.title}
                     </h4>
-
-                    <div className="mt-1 flex items-center gap-2 text-[10px] text-pink-200">
-                      <span className="flex items-center gap-1">
-                        <Zap className="w-3 h-3 text-yellow-400" /> तुरंत 0-सेकंड एक्सेस
-                      </span>
-                      <span className="flex items-center gap-1 text-emerald-300">
-                        <ShieldCheck className="w-3 h-3 text-emerald-400" /> 100% सेफ
-                      </span>
-                    </div>
+                    <p className="text-[11px] text-slate-500 font-medium">
+                      एक्सक्लूसिव अनसेंसर्ड VIP कंटेंट
+                    </p>
                   </div>
+                </div>
 
-                  {/* Strikethrough & Hot Price */}
-                  <div className="text-right shrink-0">
-                    <span className="text-[10px] text-pink-300/80 line-through block font-semibold">
-                      ₹{originalPrice}
-                    </span>
-                    <span className="text-xl sm:text-2xl font-black text-yellow-300 font-display block leading-none">
-                      {formatINR(item.price)}
-                    </span>
-                    <span className="inline-block mt-1 text-[9px] font-black uppercase bg-gradient-to-r from-rose-600 to-pink-600 text-white px-1.5 py-0.5 rounded shadow-xs animate-pulse">
-                      85% OFF
-                    </span>
-                  </div>
+                <div className="text-right shrink-0">
+                  <span className="text-[11px] text-slate-400 line-through block font-medium">
+                    ₹{originalPrice}
+                  </span>
+                  <span className="text-xl sm:text-2xl font-black text-slate-950 font-display block leading-none">
+                    {formatINR(item.price)}
+                  </span>
+                  <span className="inline-block mt-1 text-[9px] font-black uppercase bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">
+                    ऑफर लागू
+                  </span>
                 </div>
               </div>
 
-              {/* STEP 1: MANDATORY USER PERSONAL DATA (NAME & 10-DIGIT MOBILE NUMBER) */}
-              <div className="p-4 rounded-3xl bg-gradient-to-br from-rose-50 via-pink-50 to-purple-50 border-2 border-pink-300 shadow-md space-y-3">
+              {/* STEP 1: CUSTOMER DETAILS (NAME & 10-DIGIT WHATSAPP NUMBER) */}
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="w-5 h-5 rounded-full bg-pink-600 text-white text-[11px] font-black flex items-center justify-center shadow-sm">
+                    <span className="w-5 h-5 rounded-full bg-slate-900 text-white text-[11px] font-bold flex items-center justify-center">
                       1
                     </span>
-                    <h5 className="text-xs sm:text-sm font-black text-purple-950 uppercase tracking-tight">
-                      अपना नाम & व्हाट्सएप नंबर दर्ज करें (VIP एक्सेस हेतु आवश्यक)
+                    <h5 className="text-xs sm:text-sm font-bold text-slate-900">
+                      ग्राहक विवरण (Customer Details)
                     </h5>
                   </div>
                   {hasSavedDetails && !showEditDetails && (
                     <button
                       type="button"
                       onClick={() => setShowEditDetails(true)}
-                      className="text-[11px] text-pink-700 hover:text-pink-900 font-black underline flex items-center gap-0.5 cursor-pointer"
+                      className="text-[11px] text-emerald-700 hover:text-emerald-800 font-bold flex items-center gap-1 cursor-pointer"
                     >
                       <Edit3 className="w-3 h-3" />
-                      <span>बदलें</span>
+                      <span>बदलें (Edit)</span>
                     </button>
                   )}
                 </div>
 
                 {hasSavedDetails && !showEditDetails ? (
-                  <div className="flex items-center justify-between p-3 rounded-2xl bg-white/90 border border-purple-200 shadow-inner">
-                    <div className="flex items-center gap-2.5">
-                      <div className="p-2 rounded-xl bg-pink-100 text-pink-600">
-                        <User className="w-4 h-4" />
+                  <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-1.5 font-bold text-slate-900">
+                        <User className="w-3.5 h-3.5 text-slate-500" />
+                        <span>{userName}</span>
                       </div>
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-black text-purple-950">{userName}</span>
-                          <span className="text-[9px] font-black bg-emerald-100 text-emerald-700 px-2 py-0.2 rounded-full border border-emerald-300">
-                            VIP Active ✓
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-purple-900/70 font-mono font-bold flex items-center gap-1">
-                          <Phone className="w-3 h-3 text-pink-600" />
-                          <span>+91 {userPhone}</span>
-                        </div>
+                      <span className="text-slate-300">•</span>
+                      <div className="flex items-center gap-1.5 font-mono font-semibold text-slate-700">
+                        <Phone className="w-3.5 h-3.5 text-slate-500" />
+                        <span>+91 {userPhone}</span>
                       </div>
                     </div>
+                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                      सत्यापित ✓
+                    </span>
                   </div>
                 ) : (
                   <div className="space-y-2.5">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       <div>
-                        <label className="text-[11px] font-black text-purple-950 block mb-1 flex items-center gap-1">
-                          <User className="w-3.5 h-3.5 text-pink-600" />
-                          <span>आपका नाम (Your Full Name) *</span>
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                          आपका नाम (Your Full Name) *
                         </label>
                         <input
                           type="text"
@@ -648,17 +647,16 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                             if (detailsError) setDetailsError(null);
                           }}
                           placeholder="उदा. राहुल कुमार"
-                          className="w-full bg-white border-2 border-purple-200 focus:border-pink-500 focus:ring-2 focus:ring-pink-200 rounded-xl px-3.5 py-2.5 text-xs text-purple-950 placeholder-purple-900/40 font-bold shadow-xs outline-none"
+                          className="w-full bg-slate-50 border border-slate-300 focus:border-emerald-600 focus:bg-white rounded-xl px-3 py-2 text-xs text-slate-900 placeholder-slate-400 font-medium outline-none transition-colors"
                         />
                       </div>
 
                       <div>
-                        <label className="text-[11px] font-black text-purple-950 block mb-1 flex items-center gap-1">
-                          <Phone className="w-3.5 h-3.5 text-pink-600" />
-                          <span>व्हाट्सएप मोबाइल नंबर (10 अंक) *</span>
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                          व्हाट्सएप नंबर (10 Digits) *
                         </label>
                         <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-black text-purple-900/60 font-mono">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500 font-mono">
                             +91
                           </span>
                           <input
@@ -672,7 +670,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                               if (detailsError) setDetailsError(null);
                             }}
                             placeholder="9876543210"
-                            className="w-full bg-white border-2 border-purple-200 focus:border-pink-500 focus:ring-2 focus:ring-pink-200 rounded-xl pl-11 pr-3.5 py-2.5 text-xs font-mono font-bold text-purple-950 placeholder-purple-900/40 shadow-xs outline-none"
+                            className="w-full bg-slate-50 border border-slate-300 focus:border-emerald-600 focus:bg-white rounded-xl pl-11 pr-3 py-2 text-xs font-mono font-medium text-slate-900 placeholder-slate-400 outline-none transition-colors"
                           />
                         </div>
                       </div>
@@ -683,7 +681,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                         <button
                           type="button"
                           onClick={() => setShowEditDetails(false)}
-                          className="px-3 py-1 bg-pink-600 text-white rounded-lg text-xs font-bold shadow cursor-pointer"
+                          className="px-3 py-1 bg-slate-900 text-white rounded-lg text-xs font-bold shadow cursor-pointer hover:bg-slate-800"
                         >
                           सेव करें ✓
                         </button>
@@ -693,91 +691,88 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 )}
 
                 {detailsError && (
-                  <div className="p-2 rounded-xl bg-rose-100 border border-rose-200 text-rose-700 text-[11px] font-bold flex items-center gap-1.5">
+                  <div className="p-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-bold flex items-center gap-1.5">
                     <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                     <span>{detailsError}</span>
                   </div>
                 )}
-
-                <p className="text-[10px] text-purple-900/60 font-semibold flex items-center gap-1">
-                  <ShieldCheck className="w-3 h-3 text-emerald-600" />
-                  <span>आपकी जानकारी 100% गोपनीय है और सिर्फ VIP डिलीवरी के लिए इस्तेमाल होगी।</span>
-                </p>
               </div>
 
-              {/* STEP 2: DYNAMIC QR CODE CONTAINER */}
-              <div className="flex flex-col items-center justify-center p-4 rounded-3xl bg-white border-2 border-purple-100 text-center relative overflow-hidden shadow-md">
-                
-                {/* Header & Urgency Countdown Timer */}
-                <div className="flex items-center justify-between w-full mb-3 px-1">
-                  <span className="text-xs font-black uppercase text-purple-950 tracking-wide flex items-center gap-1.5">
-                    <span className="w-5 h-5 rounded-full bg-rose-600 text-white text-[11px] font-black flex items-center justify-center">2</span>
-                    <span>UPI QR कोड स्कैन करके पेमेंट करें:</span>
-                  </span>
-                  
-                  <div className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-bold shadow-xs animate-pulse">
-                    <Clock className="w-3 h-3 text-rose-600" />
-                    <span>समय शेष: <strong className="font-mono text-rose-950">{formatTimer(timeLeft)}</strong></span>
+              {/* STEP 2: SCAN QR CODE TO PAY */}
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-slate-900 text-white text-[11px] font-bold flex items-center justify-center">
+                      2
+                    </span>
+                    <h5 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                      <QrCode className="w-4 h-4 text-emerald-600" />
+                      <span>QR कोड स्कैन करके भुगतान करें (Scan QR to Pay)</span>
+                    </h5>
+                  </div>
+
+                  <div className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-100 border border-slate-200 text-slate-700 text-[11px] font-bold">
+                    <Clock className="w-3 h-3 text-emerald-600" />
+                    <span className="font-mono">{formatTimer(timeLeft)}</span>
                   </div>
                 </div>
 
-                {/* QR Code Container with Seductive Glowing Ring & Scanline */}
-                <div className="relative p-1.5 rounded-3xl bg-gradient-to-tr from-rose-500 via-pink-600 to-amber-400 shadow-xl">
-                  <div className="p-3 bg-white rounded-[22px] flex flex-col items-center relative overflow-hidden">
+                {/* QR Code Presentation */}
+                <div className="flex flex-col items-center text-center space-y-3 pt-1">
+                  <div className="p-3 bg-white border-2 border-slate-900 rounded-2xl shadow-md inline-block relative">
                     {orderData?.qrDataUrl ? (
                       <div className="relative group">
                         <img
                           src={orderData.qrDataUrl}
                           alt="UPI Dynamic QR Code"
-                          className="w-44 h-44 sm:w-48 sm:h-48 object-contain rounded-xl"
+                          className="w-44 h-44 sm:w-48 sm:h-48 object-contain rounded-lg"
                         />
-                        {/* Laser Scanline */}
                         <div className="hot-scanner-line" />
                       </div>
                     ) : (
                       <div className="w-44 h-44 flex items-center justify-center">
-                        <RefreshCw className="w-8 h-8 animate-spin text-pink-600" />
+                        <RefreshCw className="w-8 h-8 animate-spin text-slate-600" />
                       </div>
                     )}
                   </div>
-                </div>
 
-                {/* 1-Click Download QR Code Button */}
-                <div className="flex items-center gap-2 mt-3 w-full max-w-xs">
-                  <button
-                    type="button"
-                    onClick={handleDownloadQr}
-                    className="flex-1 py-2.5 px-3 rounded-2xl bg-gradient-to-r from-rose-600 to-pink-600 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-rose-600/25 hover:brightness-110 active:scale-95 transition-all cursor-pointer"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>QR कोड डाउनलोड करें (Save QR)</span>
-                  </button>
-                </div>
+                  <p className="text-xs text-slate-600 font-medium max-w-xs">
+                    किसी भी ऐप <strong>(PhonePe, Google Pay, Paytm, BHIM)</strong> से यह QR कोड स्कैन करके <strong className="text-emerald-700 font-bold">{formatINR(item.price)}</strong> पे करें।
+                  </p>
 
-                {/* 1-Click Copy UPI ID */}
-                <div className="w-full mt-3 pt-3 border-t border-purple-100 space-y-2 text-left">
-                  <div className="p-2.5 rounded-2xl bg-pink-50/80 border border-pink-200 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 w-full max-w-xs">
+                    <button
+                      type="button"
+                      onClick={handleDownloadQr}
+                      className="w-full py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs flex items-center justify-center gap-1.5 border border-slate-300 transition-colors cursor-pointer active:scale-95"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>QR कोड डाउनलोड करें (Save QR)</span>
+                    </button>
+                  </div>
+
+                  <div className="w-full p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs text-left">
                     <div className="min-w-0">
-                      <span className="text-[10px] font-black uppercase text-pink-700 block">
+                      <span className="text-[10px] text-slate-500 font-bold block uppercase">
                         Payee UPI ID
                       </span>
-                      <p className="font-mono font-black text-xs sm:text-sm text-purple-950 truncate">
+                      <p className="font-mono font-bold text-slate-900 text-xs truncate">
                         {orderData?.order.upiId || 'rima11q@ptyes'}
                       </p>
                     </div>
                     <button
                       type="button"
                       onClick={handleCopyUpi}
-                      className="px-3.5 py-1.5 rounded-xl bg-purple-950 text-white font-black text-xs flex items-center gap-1.5 hover:bg-pink-600 active:scale-95 transition-all shrink-0 cursor-pointer shadow-sm"
+                      className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-800 font-bold text-xs flex items-center gap-1 hover:bg-slate-100 cursor-pointer shadow-xs active:scale-95 shrink-0"
                     >
                       {copiedUpi ? (
                         <>
-                          <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          <span className="text-emerald-300">कॉपी हुआ!</span>
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          <span className="text-emerald-700">कॉपी हुआ!</span>
                         </>
                       ) : (
                         <>
-                          <Copy className="w-3.5 h-3.5 text-pink-400" />
+                          <Copy className="w-3 h-3" />
                           <span>Copy UPI</span>
                         </>
                       )}
@@ -786,17 +781,21 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 </div>
               </div>
 
-              {/* STEP 3: 12-DIGIT UTR NUMBER & SCREENSHOT SUBMISSION */}
-              <div className="p-4 rounded-3xl bg-gradient-to-br from-purple-50 via-pink-50/60 to-white border-2 border-purple-300 shadow-lg space-y-3">
+              {/* STEP 3: 12-DIGIT UTR VERIFICATION & OPTIONAL SCREENSHOT */}
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3">
                 <div className="flex items-center justify-between">
-                  <h5 className="text-xs sm:text-sm font-black text-purple-950 flex items-center gap-1.5">
-                    <span className="w-5 h-5 rounded-full bg-rose-600 text-white text-[11px] font-black flex items-center justify-center">3</span>
-                    <span>पेमेंट के बाद 12-अंकों का UTR No. डालें:</span>
-                  </h5>
+                  <div className="flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-slate-900 text-white text-[11px] font-bold flex items-center justify-center">
+                      3
+                    </span>
+                    <h5 className="text-xs sm:text-sm font-bold text-slate-900">
+                      पेमेंट कन्फर्म करें (Enter 12-Digit UTR No.)
+                    </h5>
+                  </div>
                   <button
                     type="button"
                     onClick={() => setShowUtrHelp(!showUtrHelp)}
-                    className="text-[11px] text-pink-700 font-bold hover:underline flex items-center gap-0.5 cursor-pointer"
+                    className="text-[11px] text-emerald-700 font-bold hover:underline flex items-center gap-0.5 cursor-pointer"
                   >
                     <HelpCircle className="w-3.5 h-3.5" />
                     <span>UTR कहाँ देखें?</span>
@@ -804,9 +803,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 </div>
 
                 {showUtrHelp && (
-                  <div className="p-3 rounded-2xl bg-white border border-purple-200 text-[11px] text-purple-900/80 space-y-1 shadow-inner">
-                    <div className="font-bold text-purple-950">📱 <strong>UTR / UPI Ref No. खोजें:</strong></div>
-                    <ul className="list-disc list-inside space-y-0.5 pl-1">
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-700 space-y-1.5 animate-in fade-in duration-150">
+                    <div className="font-bold text-slate-900">📱 UTR / UPI Transaction Reference No. खोजने का तरीका:</div>
+                    <ul className="list-disc list-inside space-y-1 pl-1">
                       <li><strong>PhonePe:</strong> हिस्ट्री ➔ पेमेंट विवरण ➔ <strong>"UTR"</strong> (12 अंक)।</li>
                       <li><strong>Google Pay:</strong> लेन-देन विवरण ➔ <strong>"UPI Transaction ID"</strong> (12 अंक)।</li>
                       <li><strong>Paytm:</strong> पासबुक ➔ <strong>"UPI Ref No."</strong> (12 अंक)।</li>
@@ -827,23 +826,23 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                         setUtrNumber(val);
                         if (utrError) setUtrError(null);
                       }}
-                      placeholder="e.g. 423812345678 (12 Digits)"
-                      className="w-full bg-white border-2 border-purple-300 focus:border-rose-500 focus:ring-2 focus:ring-rose-200 rounded-2xl px-4 py-3.5 text-sm sm:text-base font-mono font-bold text-purple-950 tracking-wider shadow-inner"
+                      placeholder="उदा. 423812345678 (12 अंक)"
+                      className="w-full bg-slate-50 border border-slate-300 focus:border-emerald-600 focus:bg-white rounded-xl px-3.5 py-3 text-sm font-mono font-bold text-slate-900 tracking-wider outline-none transition-colors"
                     />
-                    <span className={`absolute right-3.5 top-3.5 text-[11px] font-bold ${utrNumber.length === 12 ? 'text-emerald-600 font-black' : 'text-purple-900/50'}`}>
+                    <span className={`absolute right-3.5 top-3.5 text-[11px] font-bold ${utrNumber.length === 12 ? 'text-emerald-600' : 'text-slate-400'}`}>
                       {utrNumber.length}/12 {utrNumber.length === 12 ? '✓' : 'अंक'}
                     </span>
                   </div>
 
-                  {/* Screenshot Upload */}
-                  <div className="p-3 bg-white rounded-2xl border border-purple-200 space-y-2">
+                  {/* Optional Screenshot Upload */}
+                  <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
                     <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-black text-purple-950 flex items-center gap-1.5">
-                        <Camera className="w-3.5 h-3.5 text-rose-600" />
-                        <span>पेमेंट स्क्रीनशॉट (वैकल्पिक / Optional):</span>
+                      <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                        <Camera className="w-3.5 h-3.5 text-slate-500" />
+                        <span>पेमेंट रसीद / स्क्रीनशॉट (वैकल्पिक / Optional):</span>
                       </label>
-                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
-                        फास्ट अनलॉक
+                      <span className="text-[10px] font-semibold text-slate-500">
+                        फास्ट वेरिफिकेशन
                       </span>
                     </div>
 
@@ -856,40 +855,38 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                     />
 
                     {isProcessingScreenshot ? (
-                      <div className="py-3 px-3 rounded-xl bg-purple-50 text-xs font-bold text-purple-900 flex items-center justify-center gap-2 animate-pulse">
-                        <RefreshCw className="w-4 h-4 animate-spin text-pink-600" />
+                      <div className="py-2.5 px-3 rounded-lg bg-white border border-slate-200 text-xs font-bold text-slate-700 flex items-center justify-center gap-2">
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-600" />
                         <span>स्क्रीनशॉट प्रोसेस हो रहा है...</span>
                       </div>
                     ) : screenshotUrl ? (
-                      <div className="flex items-center justify-between gap-2 p-2 bg-emerald-50 rounded-xl border border-emerald-200">
+                      <div className="flex items-center justify-between gap-2 p-1.5 bg-white rounded-lg border border-slate-200">
                         <div className="flex items-center gap-2 min-w-0">
                           <img
                             src={screenshotUrl}
                             alt="Receipt"
-                            className="w-10 h-10 object-cover rounded-lg border border-emerald-300 shrink-0"
+                            className="w-9 h-9 object-cover rounded-md border border-slate-200 shrink-0"
                           />
-                          <span className="text-xs font-bold text-emerald-950 truncate">
+                          <span className="text-xs font-bold text-emerald-700 truncate">
                             स्क्रीनशॉट संलग्न है ✓
                           </span>
                         </div>
                         <button
                           type="button"
                           onClick={handleRemoveScreenshot}
-                          className="p-1.5 rounded-lg bg-white text-rose-600 hover:bg-rose-50 border border-rose-200 cursor-pointer"
+                          className="p-1 rounded-md text-rose-600 hover:bg-rose-50 cursor-pointer"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                     ) : (
                       <button
                         type="button"
                         onClick={() => screenshotInputRef.current?.click()}
-                        className="w-full py-2.5 px-3 rounded-xl border-2 border-dashed border-purple-300 hover:border-pink-500 bg-purple-50/50 hover:bg-pink-50 text-purple-900 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        className="w-full py-2 px-3 rounded-lg border border-dashed border-slate-300 hover:border-emerald-500 bg-white text-slate-700 transition-all flex items-center justify-center gap-1.5 cursor-pointer text-xs font-medium"
                       >
-                        <Upload className="w-4 h-4 text-pink-600" />
-                        <span className="text-xs font-bold">
-                          स्क्रीनशॉट अपलोड करें (गैलरी से चुनें)
-                        </span>
+                        <Upload className="w-3.5 h-3.5 text-slate-500" />
+                        <span>स्क्रीनशॉट अपलोड करें (गैलरी से)</span>
                       </button>
                     )}
                   </div>
@@ -901,14 +898,15 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                     </div>
                   )}
 
+                  {/* Primary CTA Button */}
                   <button
                     id="btn-verify-utr-submit"
                     type="submit"
                     disabled={isSubmittingUtr || utrNumber.length !== 12}
-                    className={`w-full py-3.5 px-4 rounded-2xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-lg transition-all ${
+                    className={`w-full py-3.5 px-4 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-md transition-all ${
                       utrNumber.length === 12
-                        ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white shadow-emerald-600/30 hover:brightness-110 active:scale-[0.99] cursor-pointer'
-                        : 'bg-zinc-200 text-zinc-500 cursor-not-allowed'
+                        ? 'bg-slate-900 hover:bg-slate-800 text-white cursor-pointer active:scale-[0.99]'
+                        : 'bg-slate-200 text-slate-400 cursor-not-allowed'
                     }`}
                   >
                     {isSubmittingUtr ? (
@@ -918,37 +916,37 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                       </>
                     ) : (
                       <>
-                        <CheckCircle2 className="w-4 h-4 text-white" />
-                        <span>सत्यापित करें & अनलॉक करें (Verify & Unlock)</span>
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        <span>पेमेंट वेरिफाई करें & अनलॉक करें (Verify & Unlock)</span>
                       </>
                     )}
                   </button>
                 </form>
               </div>
 
-              {/* Dev Simulation */}
+              {/* Dev Simulation Sandbox */}
               {orderData?.mode === 'sandbox_simulator' && (
-                <div className="p-3 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-between text-xs">
-                  <span className="font-bold text-amber-900">🛠️ Admin Sandbox Test</span>
+                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between text-xs">
+                  <span className="font-bold text-amber-900">🛠️ Admin Sandbox Test Mode</span>
                   <button
                     onClick={handleTestSimulate}
                     disabled={isSimulating}
-                    className="px-2.5 py-1 rounded-xl bg-amber-600 text-white font-bold text-[11px] cursor-pointer"
+                    className="px-2.5 py-1 rounded-lg bg-amber-600 text-white font-bold text-[11px] cursor-pointer hover:bg-amber-700"
                   >
                     {isSimulating ? 'Testing...' : '⚡ Test Unlock'}
                   </button>
                 </div>
               )}
 
-              {/* WhatsApp Payment Support Helper */}
-              <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-between text-xs gap-2">
+              {/* WhatsApp Support Helper */}
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs gap-2">
                 <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-xl bg-emerald-100 text-emerald-700 shrink-0">
+                  <div className="p-1.5 rounded-lg bg-emerald-100 text-emerald-700 shrink-0">
                     <MessageCircle className="w-4 h-4" />
                   </div>
                   <div>
-                    <h6 className="font-bold text-emerald-950 text-[11px] leading-tight">पेमेंट में कोई परेशानी है?</h6>
-                    <p className="text-[10px] text-emerald-800/80 font-medium">WhatsApp पर 24/7 तुरंत सहायता प्राप्त करें</p>
+                    <h6 className="font-bold text-slate-900 text-xs leading-tight">भुगतान में कोई सहायता चाहिए?</h6>
+                    <p className="text-[10px] text-slate-500">व्हाट्सएप पर 24/7 तत्काल सहायता</p>
                   </div>
                 </div>
 
@@ -956,17 +954,26 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                   href={`https://wa.me/639465507887?text=${encodeURIComponent(`Hello! Mujhe payment karne me help chahiye.\nItem: ${item.title} (₹${item.price})\nOrder ID: ${orderData?.order.orderId || ''}`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[11px] shadow-sm flex items-center gap-1 shrink-0 transition-transform active:scale-95"
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] shadow-xs flex items-center gap-1 shrink-0 transition-transform active:scale-95"
                 >
                   <MessageCircle className="w-3.5 h-3.5" />
-                  <span>+63 9465507887</span>
+                  <span>व्हाट्सएप चैट</span>
                 </a>
               </div>
 
-              {/* Security Guarantee */}
-              <div className="flex items-center justify-center gap-1.5 text-[11px] text-purple-900/60 pt-1 font-semibold">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                <span>256-Bit एन्क्रिप्टेड सुरक्षित भुगतान • 100% प्राइवेट व तुरंत डिलीवरी</span>
+              {/* Security & Privacy Badges */}
+              <div className="flex items-center justify-center gap-3 text-[10px] text-slate-500 pt-1 font-medium">
+                <span className="flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  256-Bit SSL सुरक्षित
+                </span>
+                <span>•</span>
+                <span className="flex items-center gap-1">
+                  <BadgeCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  NPCI UPI अनुकूल
+                </span>
+                <span>•</span>
+                <span>100% गोपनीय व तुरंत डिलीवरी</span>
               </div>
 
             </div>

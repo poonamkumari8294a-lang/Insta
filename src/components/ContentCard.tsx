@@ -55,6 +55,40 @@ const ContentCardComponent: React.FC<ContentCardProps> = ({
   const creatorAvatar = settings?.profilePicUrl || FALLBACK_AVATAR;
   const creatorHandle = settings?.instagramHandle || '@ruma__cutegirl';
 
+  // Dynamic Card Display Controls (Item-specific override or Global Site Settings)
+  const displaySettings = settings?.cardDisplaySettings;
+  const activeAspectRatio = item.aspectRatio || displaySettings?.defaultAspectRatio || '4/5';
+  const activeObjectFit = item.objectFit || displaySettings?.defaultObjectFit || 'cover';
+  const activeObjectPosition = item.objectPosition || displaySettings?.defaultObjectPosition || 'top';
+
+  const getAspectRatioClass = () => {
+    switch (activeAspectRatio) {
+      case '9/16':
+        return 'aspect-[9/16]';
+      case '3/4':
+        return 'aspect-[3/4]';
+      case '1/1':
+        return 'aspect-square';
+      case 'auto':
+        return 'aspect-auto min-h-[320px] max-h-[600px]';
+      case '4/5':
+      default:
+        return 'aspect-[4/5]';
+    }
+  };
+
+  const getObjectPositionClass = () => {
+    switch (activeObjectPosition) {
+      case 'center':
+        return 'object-center';
+      case 'bottom':
+        return 'object-bottom';
+      case 'top':
+      default:
+        return 'object-top'; // Default 'object-top' ensures head & face are NEVER cut off!
+    }
+  };
+
   const postUrl = `${window.location.origin}${window.location.pathname}#media/${item.id}`;
   const shareText = `🔥 Check out "${item.title}" by ${creatorName}:`;
 
@@ -175,10 +209,20 @@ const ContentCardComponent: React.FC<ContentCardProps> = ({
       <div
         onClick={() => (canAccess ? onOpen(item) : onBuy(item))}
         onContextMenu={(e) => e.preventDefault()}
-        className="relative w-full aspect-[4/5] bg-gradient-to-br from-purple-950/20 via-pink-950/15 to-purple-900/25 overflow-hidden cursor-pointer flex items-center justify-center select-none"
+        className={`relative w-full ${getAspectRatioClass()} bg-gradient-to-br from-purple-950/20 via-pink-950/15 to-purple-900/25 overflow-hidden cursor-pointer flex items-center justify-center select-none`}
       >
-        {/* Ambient Glow */}
-        <div className="absolute inset-0 bg-gradient-to-b from-purple-950/20 via-transparent to-black/30 pointer-events-none" />
+        {/* Ambient Blurred Backdrop for Contain Mode or Glow */}
+        {activeObjectFit === 'contain' ? (
+          <img
+            src={imageSource}
+            alt=""
+            aria-hidden="true"
+            className="absolute inset-0 w-full h-full object-cover filter blur-2xl scale-125 opacity-40 select-none pointer-events-none"
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-b from-purple-950/20 via-transparent to-black/30 pointer-events-none" />
+        )}
 
         {/* Foreground Image */}
         <img
@@ -187,7 +231,11 @@ const ContentCardComponent: React.FC<ContentCardProps> = ({
           loading={priority ? 'eager' : 'lazy'}
           decoding="async"
           onError={() => setImgFailed(true)}
-          className={`w-full h-full object-cover transition-all duration-500 pointer-events-none ${
+          className={`w-full h-full ${
+            activeObjectFit === 'contain'
+              ? 'relative z-[1] object-contain'
+              : `object-cover ${getObjectPositionClass()}`
+          } transition-all duration-500 pointer-events-none ${
             !canAccess
               ? 'filter blur-[7px] brightness-[0.92] contrast-[1.08] saturate-[1.1] scale-105 opacity-95'
               : 'group-hover:scale-105 opacity-100'

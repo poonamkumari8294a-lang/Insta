@@ -9,6 +9,8 @@ import {
   getCachedSiteSettingsSync,
   getCachedContentListSync,
   getStoredTokens,
+  saveAccessToken,
+  applyUserAccessTokens,
   hasLocalSettingsCache,
   isCloudQuotaExhausted,
   resetQuotaCircuitBreaker
@@ -246,6 +248,8 @@ export default function App() {
 
     window.addEventListener('hashchange', handleUrlChange);
     window.addEventListener('popstate', handleUrlChange);
+    window.addEventListener('ruma_tokens_updated', refreshTokens);
+    window.addEventListener('storage', refreshTokens);
 
     return () => {
       unsubscribeSettings();
@@ -255,6 +259,8 @@ export default function App() {
       window.removeEventListener('focus', handleVisibilityOrFocus);
       window.removeEventListener('hashchange', handleUrlChange);
       window.removeEventListener('popstate', handleUrlChange);
+      window.removeEventListener('ruma_tokens_updated', refreshTokens);
+      window.removeEventListener('storage', refreshTokens);
     };
   }, []);
 
@@ -297,9 +303,31 @@ export default function App() {
 
   // Payment Success Handler
   const handlePaymentSuccess = (item: MediaItem) => {
-    refreshTokens();
+    const existing = getStoredTokens();
+    const token = existing[item.id] || `tok_paid_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    saveAccessToken(item.id, token);
+
+    const updatedTokens = {
+      ...existing,
+      [item.id]: token
+    };
+    setUnlockedTokens(updatedTokens);
+
+    // Re-apply tokens to content state so mediaUrl & galleryUrls are preserved
+    setContent(prev => applyUserAccessTokens(prev));
+
     setPurchasingItem(null);
-    setActiveMediaItem(item);
+
+    // Make sure the active media item has its full mediaUrl and is unlocked
+    const latestItem = content.find(c => c.id === item.id) || item;
+    const resolvedItem: MediaItem = {
+      ...latestItem,
+      mediaUrl: latestItem.mediaUrl || item.mediaUrl || latestItem.thumbnailUrl,
+      galleryUrls: (latestItem.galleryUrls && latestItem.galleryUrls.length > 0)
+        ? latestItem.galleryUrls
+        : (item.galleryUrls && item.galleryUrls.length > 0 ? item.galleryUrls : [latestItem.mediaUrl || item.mediaUrl || latestItem.thumbnailUrl])
+    };
+    setActiveMediaItem(resolvedItem);
   };
 
   const unlockedIds = Object.keys(unlockedTokens);
@@ -432,7 +460,7 @@ export default function App() {
             <ContentDetailPage
               item={activeContentItem}
               allContent={content}
-              isUnlocked={unlockedIds.includes(activeContentItem.id)}
+              isUnlocked={unlockedIds.includes(activeContentItem.id) || Boolean(unlockedTokens[activeContentItem.id]) || Boolean(getStoredTokens()[activeContentItem.id])}
               unlockedIds={unlockedIds}
               onBack={() => navigateTo('content')}
               onBuy={handleBuyMedia}
@@ -508,7 +536,7 @@ export default function App() {
             onClose={() => setActiveMediaItem(null)}
             creatorName={settings?.creatorName || 'Ruma Kumari'}
             onBuy={handleBuyMedia}
-            isUnlocked={unlockedIds.includes(activeMediaItem.id)}
+            isUnlocked={unlockedIds.includes(activeMediaItem.id) || Boolean(unlockedTokens[activeMediaItem.id]) || Boolean(getStoredTokens()[activeMediaItem.id])}
           />
         )}
 
