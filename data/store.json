@@ -10,8 +10,8 @@
     "instagramHandle": "@ruma__cutegirl",
     "badgeText": "VIP Creator",
     "upiId": "rima11q@ptyes",
-    "postsCount": 135,
-    "followersCount": "6000",
+    "postsCount": 37,
+    "followersCount": "6500",
     "viewsCount": "1.9M",
     "announcement": "✨ New VIP Backstage Reel is LIVE! Get 50% off this week only with instant UPI scan!",
     "announcementEnabled": true,
@@ -131,7 +131,7 @@
       }
     ],
     "adminPasscode": "Ashok#8899",
-    "updatedAt": "2026-09-04T09:55:29.406Z",
+    "updatedAt": "2026-09-08T12:00:00.000Z",
     "demoPurged": true,
     "vapidKey": ""
   },
@@ -1284,5 +1284,7 @@
     "test123",
     "test_content_123",
     "probe-test-405"
-  ]
+  ],
+  "contentVersion": 1788866571853,
+  "settingsVersion": 1788868786327
 }

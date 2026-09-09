@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { MediaItem, OrderItem, SiteSettings, AdminStats, VipLeadItem, VipPlan } from '../types';
 import {
   adminLogin,
@@ -223,6 +223,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const [verifyingTxnRef, setVerifyingTxnRef] = useState('');
   const [rejectingOrder, setRejectingOrder] = useState<OrderItem | null>(null);
 
+  const lastAdminSyncRef = useRef({
+    ordersVersion: 0,
+    leadsVersion: 0,
+    contentVersion: 0,
+    settingsVersion: 0
+  });
+
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
@@ -247,8 +254,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     }
   };
 
-  // Load Admin Data (with live sync)
-  const loadAdminData = async (silent = false) => {
+  // Load Admin Data (with cross-device live sync)
+  const loadAdminData = async (silent = false, showNotification = false) => {
     if (!silent) setLoading(true);
     setIsSyncing(true);
     try {
@@ -277,8 +284,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         .then((cnt) => setSubscriberCount(cnt))
         .catch(() => {});
 
-      if (silent) {
-        showToast('✅ सभी लाइव डेटा सिंक हो गया है (Data synced successfully)');
+      if (showNotification) {
+        showToast('✅ सभी डिवाइस का लाइव डेटा सिंक हो गया (All live data synced across all devices)');
       }
     } catch (err: any) {
       console.error(err);
@@ -357,6 +364,47 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       unsubscribe();
       window.removeEventListener('visibilitychange', handleTabFocusOrVisible);
       window.removeEventListener('focus', handleTabFocusOrVisible);
+    };
+  }, [isAuthenticated]);
+
+  // ----------------------------------------------------
+  // CROSS-DEVICE REALTIME AUTO-SYNC (Phone & Desktop Sync)
+  // Checks backend sync status every 5 seconds so both phone and PC show identical data
+  // ----------------------------------------------------
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    let isMounted = true;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/sync/status', {
+          headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
+        });
+        if (!res.ok) return;
+        const status = await res.json();
+        if (!status || !isMounted) return;
+
+        const needsSync =
+          (status.ordersVersion && status.ordersVersion !== lastAdminSyncRef.current.ordersVersion) ||
+          (status.leadsVersion && status.leadsVersion !== lastAdminSyncRef.current.leadsVersion) ||
+          (status.contentVersion && status.contentVersion !== lastAdminSyncRef.current.contentVersion) ||
+          (status.settingsVersion && status.settingsVersion !== lastAdminSyncRef.current.settingsVersion);
+
+        if (needsSync) {
+          lastAdminSyncRef.current = {
+            ordersVersion: status.ordersVersion || 0,
+            leadsVersion: status.leadsVersion || 0,
+            contentVersion: status.contentVersion || 0,
+            settingsVersion: status.settingsVersion || 0
+          };
+          loadAdminData(true, false);
+        }
+      } catch (_) {}
+    }, 5000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
     };
   }, [isAuthenticated]);
 
@@ -955,8 +1003,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           <div>
             <h1 className="font-display font-black text-lg sm:text-xl text-purple-950 flex items-center gap-2">
               Creator Complete Control Center
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-700 border border-emerald-200">
-                Live Admin
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                लाइव सिंक (Phone & PC)
               </span>
             </h1>
             <p className="text-xs text-purple-900/70 font-medium">
@@ -968,10 +1017,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
-            onClick={() => loadAdminData(true)}
+            onClick={() => loadAdminData(false, true)}
             disabled={isSyncing}
             className="px-3.5 py-2 rounded-2xl bg-white hover:bg-purple-50 text-purple-900 text-xs font-bold border border-purple-200 shadow-sm flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
-            title="Refresh and sync all data directly from website and database"
+            title="Refresh and sync all data directly from website and database across all devices"
           >
             <RefreshCw className={`w-3.5 h-3.5 text-pink-600 ${isSyncing ? 'animate-spin' : ''}`} />
             <span>{isSyncing ? 'सिंक हो रहा है...' : 'डेटा रिफ्रेश (Sync Data)'}</span>
@@ -1195,7 +1244,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 <Eye className="w-3.5 h-3.5 text-blue-600" />
               </div>
               <div className="font-display text-xl font-black text-purple-950 mt-1">
-                {stats.totalViews ? stats.totalViews.toLocaleString() : siteSettings?.viewsCount || '346.0K'}
+                {stats.totalViews ? stats.totalViews.toLocaleString() : siteSettings?.viewsCount || '1.9M'}
               </div>
               <div className="text-[10px] text-purple-900/60 font-semibold mt-0.5">Impressions</div>
             </div>

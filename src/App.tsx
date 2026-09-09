@@ -4,6 +4,7 @@ import {
   fetchSiteSettings,
   fetchContentList,
   syncDeletedIdsFromServer,
+  syncAppStateFromServer,
   subscribeToContentList,
   subscribeToSiteSettings,
   getCachedSiteSettingsSync,
@@ -196,14 +197,8 @@ export default function App() {
       }
     );
 
-    // 3. Background fresh content revalidation from server (ensures other devices catch up instantly)
-    fetchContentList(true).then((freshItems) => {
-      if (Array.isArray(freshItems)) {
-        setContent(freshItems);
-      }
-    }).catch((err) => {
-      console.warn('Background content revalidation:', err);
-    });
+    // 3. Authoritative fresh sync from server (ensures all devices & phones get the exact same content and settings)
+    syncAppStateFromServer(true).catch(() => {});
 
     // 4. Instant resync when tab or device becomes active / visible (throttled to once every 2 seconds)
     let lastSyncTime = Date.now();
@@ -211,33 +206,19 @@ export default function App() {
       const now = Date.now();
       if (document.visibilityState === 'visible' && now - lastSyncTime > 2000) {
         lastSyncTime = now;
-        syncDeletedIdsFromServer().catch(() => {});
-        fetchContentList(true).then((freshItems) => {
-          if (Array.isArray(freshItems)) {
-            setContent(freshItems);
-          }
-        }).catch(() => {});
-        fetchSiteSettings(true).then((freshSettings) => {
-          if (freshSettings) setSettings(freshSettings);
-        }).catch(() => {});
+        syncAppStateFromServer(true).catch(() => {});
       }
     };
 
     window.addEventListener('visibilitychange', handleVisibilityOrFocus);
     window.addEventListener('focus', handleVisibilityOrFocus);
 
-    // 4.1 Periodic background sync every 5 seconds for all phones and devices
+    // 4.1 Periodic background sync every 4 seconds for all phones and devices
     const periodicSync = setInterval(() => {
       if (document.visibilityState === 'visible') {
-        syncDeletedIdsFromServer().catch(() => {});
-        fetchContentList(true).then((freshItems) => {
-          if (Array.isArray(freshItems)) setContent(freshItems);
-        }).catch(() => {});
-        fetchSiteSettings(true).then((freshSettings) => {
-          if (freshSettings) setSettings(freshSettings);
-        }).catch(() => {});
+        syncAppStateFromServer(false).catch(() => {});
       }
-    }, 5000);
+    }, 4000);
 
     // 5. Listen for hash & URL changes
     const handleUrlChange = () => {

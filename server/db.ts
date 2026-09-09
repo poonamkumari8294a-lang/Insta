@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { MediaItem, OrderItem, SiteSettings, AdminStats } from '../src/types';
+import { MediaItem, OrderItem, SiteSettings, AdminStats, VipLeadItem } from '../src/types';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DATA_FILE = path.join(DATA_DIR, 'store.json');
@@ -10,6 +10,51 @@ const DATA_FILE = path.join(DATA_DIR, 'store.json');
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
+
+export const DEFAULT_VIP_LEADS: VipLeadItem[] = [
+  {
+    id: 'lead_9876543210_01',
+    userId: 'vip_9876543210',
+    name: 'Rahul Sharma',
+    phone: '9876543210',
+    email: 'rahul.s@gmail.com',
+    status: 'active',
+    vipStatus: 'active',
+    tier: 'Gold VIP',
+    unlockedCount: 5,
+    totalSpent: 495,
+    createdAt: '2026-08-15T10:30:00.000Z',
+    source: 'web_unlock_prompt'
+  },
+  {
+    id: 'lead_9123456780_02',
+    userId: 'vip_9123456780',
+    name: 'Amit Verma',
+    phone: '9123456780',
+    email: 'amit.v@outlook.com',
+    status: 'active',
+    vipStatus: 'active',
+    tier: 'Platinum VIP',
+    unlockedCount: 8,
+    totalSpent: 792,
+    createdAt: '2026-08-20T14:15:00.000Z',
+    source: 'web_unlock_prompt'
+  },
+  {
+    id: 'lead_9988776655_03',
+    userId: 'vip_9988776655',
+    name: 'Vikram Singh',
+    phone: '9988776655',
+    email: 'vikram.singh@gmail.com',
+    status: 'active',
+    vipStatus: 'active',
+    tier: 'Gold VIP',
+    unlockedCount: 3,
+    totalSpent: 297,
+    createdAt: '2026-08-25T18:45:00.000Z',
+    source: 'web_unlock_prompt'
+  }
+];
 
 // Initial default site settings
 export const DEFAULT_SITE_SETTINGS: SiteSettings = {
@@ -23,9 +68,9 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   instagramHandle: '@ruma__cuteg...',
   badgeText: 'VIP Creator',
   upiId: process.env.CREATOR_UPI_ID || 'rima11q@ptyes',
-  postsCount: 135,
-  followersCount: 3358,
-  viewsCount: '346.0K',
+  postsCount: 37,
+  followersCount: 6500,
+  viewsCount: '1.9M',
   announcement: '✨ New VIP Backstage Reel is LIVE! Get 50% off this week only with instant UPI scan!',
   announcementEnabled: true,
   supportEmail: 'contact.rumakumari@gmail.com',
@@ -309,10 +354,13 @@ interface DatabaseSchema {
   settings: SiteSettings;
   content: MediaItem[];
   orders: OrderItem[];
+  leads: VipLeadItem[];
   tokens: { token: string; contentId: string; orderId: string; expiresAt: string; createdAt: string }[];
   deletedIds?: string[];
   contentVersion?: number;
   settingsVersion?: number;
+  ordersVersion?: number;
+  leadsVersion?: number;
 }
 
 class Database {
@@ -330,15 +378,21 @@ class Database {
         const deletedSet = new Set<string>(Array.isArray(parsed.deletedIds) ? parsed.deletedIds : []);
         const rawContent: MediaItem[] = parsed.content || INITIAL_CONTENT;
         const filteredContent = rawContent.filter(c => !deletedSet.has(c.id));
+        const loadedLeads: VipLeadItem[] = (Array.isArray(parsed.leads) && parsed.leads.length > 0)
+          ? parsed.leads
+          : DEFAULT_VIP_LEADS;
 
         return {
           settings: { ...DEFAULT_SITE_SETTINGS, ...(parsed.settings || {}) },
           content: filteredContent,
           orders: parsed.orders || [],
+          leads: loadedLeads,
           tokens: parsed.tokens || [],
           deletedIds: Array.from(deletedSet),
           contentVersion: parsed.contentVersion || Date.now(),
-          settingsVersion: parsed.settingsVersion || Date.now()
+          settingsVersion: parsed.settingsVersion || Date.now(),
+          ordersVersion: parsed.ordersVersion || Date.now(),
+          leadsVersion: parsed.leadsVersion || Date.now()
         };
       }
     } catch (err) {
@@ -348,10 +402,13 @@ class Database {
       settings: DEFAULT_SITE_SETTINGS,
       content: INITIAL_CONTENT,
       orders: [],
+      leads: DEFAULT_VIP_LEADS,
       tokens: [],
       deletedIds: [],
       contentVersion: Date.now(),
-      settingsVersion: Date.now()
+      settingsVersion: Date.now(),
+      ordersVersion: Date.now(),
+      leadsVersion: Date.now()
     };
   }
 
@@ -371,6 +428,14 @@ class Database {
     return this.data.settingsVersion || 1;
   }
 
+  public getOrdersVersion(): number {
+    return this.data.ordersVersion || 1;
+  }
+
+  public getLeadsVersion(): number {
+    return this.data.leadsVersion || 1;
+  }
+
   // Site Settings
   public getSettings(): SiteSettings {
     return this.data.settings;
@@ -387,10 +452,8 @@ class Database {
   public getAllContent(includeUnpublished = false): MediaItem[] {
     const deletedSet = new Set<string>(this.data.deletedIds || []);
     const liveContent = this.data.content.filter(c => !deletedSet.has(c.id));
-    if (includeUnpublished) {
-      return liveContent;
-    }
-    return liveContent.filter(c => c.published);
+    const list = includeUnpublished ? liveContent : liveContent.filter(c => c.published);
+    return [...list].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
   }
 
   public getDeletedIds(): string[] {
@@ -402,6 +465,24 @@ class Database {
       return undefined;
     }
     return this.data.content.find(c => c.id === id);
+  }
+
+  public upsertContent(item: MediaItem): MediaItem {
+    if (!item.id) {
+      item.id = `rk-${Date.now().toString(36)}`;
+    }
+    const idx = this.data.content.findIndex(c => c.id === item.id);
+    if (idx !== -1) {
+      this.data.content[idx] = { ...this.data.content[idx], ...item };
+    } else {
+      this.data.content.unshift(item);
+    }
+    if (this.data.deletedIds) {
+      this.data.deletedIds = this.data.deletedIds.filter(id => id !== item.id);
+    }
+    this.data.contentVersion = Date.now();
+    this.saveData();
+    return item;
   }
 
   public addContent(item: Omit<MediaItem, 'id' | 'createdAt' | 'views' | 'likes'>): MediaItem {
@@ -488,9 +569,19 @@ class Database {
 
   // Orders Operations
   public createOrder(order: OrderItem): OrderItem {
-    this.data.orders.unshift(order);
+    const existingIdx = this.data.orders.findIndex(o => o.orderId === order.orderId);
+    if (existingIdx >= 0) {
+      this.data.orders[existingIdx] = { ...this.data.orders[existingIdx], ...order };
+    } else {
+      this.data.orders.unshift(order);
+    }
+    this.data.ordersVersion = Date.now();
     this.saveData();
     return order;
+  }
+
+  public upsertOrder(order: OrderItem): OrderItem {
+    return this.createOrder(order);
   }
 
   public getOrder(orderId: string): OrderItem | undefined {
@@ -523,7 +614,19 @@ class Database {
         expiresAt,
         createdAt: new Date().toISOString()
       });
+
+      // Auto-upsert or update VIP Lead when order is paid
+      if (order.customerPhone) {
+        this.upsertLead({
+          name: order.customerName || 'VIP Member',
+          phone: order.customerPhone,
+          amount: order.amount,
+          vipStatus: 'active',
+          status: 'active'
+        });
+      }
     }
+    this.data.ordersVersion = Date.now();
     this.saveData();
     return order;
   }
@@ -532,6 +635,78 @@ class Database {
     const idx = this.data.orders.findIndex(o => o.orderId === orderId);
     if (idx >= 0) {
       this.data.orders.splice(idx, 1);
+      this.data.ordersVersion = Date.now();
+      this.saveData();
+      return true;
+    }
+    return false;
+  }
+
+  // VIP Leads / Members Operations
+  public getAllLeads(): VipLeadItem[] {
+    if (!this.data.leads || this.data.leads.length === 0) {
+      this.data.leads = [...DEFAULT_VIP_LEADS];
+      this.saveData();
+    }
+    return this.data.leads;
+  }
+
+  public getLead(leadId: string): VipLeadItem | undefined {
+    return (this.data.leads || []).find(l => l.id === leadId || l.userId === leadId);
+  }
+
+  public upsertLead(leadData: Partial<VipLeadItem>): VipLeadItem {
+    if (!this.data.leads) this.data.leads = [...DEFAULT_VIP_LEADS];
+    const cleanPhone = (leadData.phone || '').trim().replace(/[^0-9]/g, '');
+    const leadId = leadData.id || (cleanPhone ? `lead_${cleanPhone}` : `lead_${Date.now()}`);
+
+    const existingIndex = this.data.leads.findIndex(l =>
+      l.id === leadId ||
+      (cleanPhone && l.phone && l.phone.replace(/[^0-9]/g, '') === cleanPhone) ||
+      (leadData.userId && l.userId === leadData.userId)
+    );
+
+    const fullLead: VipLeadItem = {
+      id: leadId,
+      userId: leadData.userId || `vip_${cleanPhone || Date.now().toString().slice(-6)}`,
+      name: leadData.name || 'VIP Member',
+      phone: leadData.phone || '',
+      email: leadData.email || '',
+      photoUrl: leadData.photoUrl || leadData.profilePicUrl || '',
+      status: leadData.status || 'active',
+      vipStatus: leadData.vipStatus || 'active',
+      tier: leadData.tier || 'Gold VIP',
+      unlockedCount: leadData.unlockedCount ?? (leadData.contentId ? 1 : 0),
+      totalSpent: leadData.totalSpent ?? (leadData.amount ?? 0),
+      notes: leadData.notes || '',
+      createdAt: leadData.createdAt || new Date().toISOString(),
+      source: leadData.source || 'web_unlock_prompt',
+      ...leadData
+    };
+
+    if (existingIndex >= 0) {
+      const prev = this.data.leads[existingIndex];
+      this.data.leads[existingIndex] = {
+        ...prev,
+        ...fullLead,
+        unlockedCount: Math.max(prev.unlockedCount || 0, fullLead.unlockedCount || 0),
+        totalSpent: Math.max(prev.totalSpent || 0, fullLead.totalSpent || 0)
+      };
+    } else {
+      this.data.leads.unshift(fullLead);
+    }
+
+    this.data.leadsVersion = Date.now();
+    this.saveData();
+    return fullLead;
+  }
+
+  public deleteLead(leadId: string): boolean {
+    if (!this.data.leads) return false;
+    const initialLen = this.data.leads.length;
+    this.data.leads = this.data.leads.filter(l => l.id !== leadId && l.userId !== leadId);
+    if (this.data.leads.length !== initialLen) {
+      this.data.leadsVersion = Date.now();
       this.saveData();
       return true;
     }

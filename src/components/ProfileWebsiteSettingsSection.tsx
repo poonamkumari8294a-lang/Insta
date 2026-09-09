@@ -206,8 +206,8 @@ export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSecti
       const payload: Partial<SiteSettings> = {
         ...formData,
         postsCount: Number(formData.postsCount) || 0,
-        followersCount: formData.followersCount !== undefined && formData.followersCount !== '' ? formData.followersCount : '303K',
-        viewsCount: formData.viewsCount !== undefined && formData.viewsCount !== '' ? String(formData.viewsCount).trim() : '1.2M',
+        followersCount: formData.followersCount !== undefined && formData.followersCount !== '' ? formData.followersCount : '6500',
+        viewsCount: formData.viewsCount !== undefined && formData.viewsCount !== '' ? String(formData.viewsCount).trim() : '1.9M',
         updatedAt: new Date().toISOString()
       };
 
@@ -425,7 +425,7 @@ export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSecti
 
                 <div className="px-3 py-1.5 rounded-xl bg-purple-50 border border-purple-100 text-center">
                   <span className="font-mono font-black text-xs text-purple-950 block">
-                    {formData.followersCount ?? '303K'}
+                    {formData.followersCount ?? '6500'}
                   </span>
                   <span className="text-[10px] text-purple-900/60 font-bold">Followers</span>
                 </div>
@@ -678,7 +678,7 @@ export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSecti
               </span>
             </div>
             <p className="text-[11px] text-purple-900/70 font-medium">
-              आप फॉलोअर्स (उदा: <strong>303K</strong>) और मंथली व्यूज (उदा: <strong>1.2M</strong>) मैन्युअल टेक्स्ट या संख्या के रूप में सेट कर सकते हैं।
+              आप फॉलोअर्स (उदा: <strong>6500</strong>) और मंथली व्यूज (उदा: <strong>1.9M</strong>) मैन्युअल टेक्स्ट या संख्या के रूप में सेट कर सकते हैं।
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
@@ -690,7 +690,7 @@ export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSecti
                   type="text"
                   value={formData.followersCount !== undefined ? formData.followersCount : (settings.followersCount || '')}
                   onChange={(e) => handleChange('followersCount', e.target.value)}
-                  placeholder="e.g. 303K or 6000"
+                  placeholder="e.g. 6500 or 150K+"
                   className="w-full bg-white border border-purple-200 rounded-2xl px-3.5 py-2 text-xs font-bold text-purple-950 shadow-xs"
                 />
               </div>
@@ -703,7 +703,7 @@ export const ProfileWebsiteSettingsSection: React.FC<ProfileWebsiteSettingsSecti
                   type="text"
                   value={formData.viewsCount !== undefined ? formData.viewsCount : (settings.viewsCount || '')}
                   onChange={(e) => handleChange('viewsCount', e.target.value)}
-                  placeholder="e.g. 1.2M or 346.0K"
+                  placeholder="e.g. 1.9M or 500K"
                   className="w-full bg-white border border-purple-200 rounded-2xl px-3.5 py-2 text-xs font-bold text-pink-700 shadow-xs"
                 />
               </div>
