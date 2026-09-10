@@ -231,7 +231,17 @@ export const Header: React.FC<HeaderProps> = ({
                 <BadgeCheck className="w-4 h-4 text-blue-500" />
               </div>
               <div className="text-xs text-purple-900/70">
-                {settings.viewsCount} monthly views • {typeof settings.followersCount === 'number' ? settings.followersCount.toLocaleString() : (settings.followersCount || '0')} followers
+                {settings.viewsCount || '10.3M'} monthly views • {(() => {
+                  const val = settings.followersCount;
+                  if (val === undefined || val === null || val === '') return '6,714';
+                  if (typeof val === 'number') return val.toLocaleString();
+                  const clean = String(val).trim();
+                  const num = Number(clean.replace(/,/g, ''));
+                  if (!isNaN(num) && num > 0 && !clean.toLowerCase().includes('k') && !clean.toLowerCase().includes('m')) {
+                    return num.toLocaleString();
+                  }
+                  return clean;
+                })()} followers
               </div>
             </div>
           </div>

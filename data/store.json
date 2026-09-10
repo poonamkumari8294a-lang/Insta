@@ -11,8 +11,8 @@
     "badgeText": "VIP Creator",
     "upiId": "rima11q@ptyes",
     "postsCount": 37,
-    "followersCount": "6500",
-    "viewsCount": "1.9M",
+    "followersCount": "6,714",
+    "viewsCount": "10.3M",
     "announcement": "✨ New VIP Backstage Reel is LIVE! Get 50% off this week only with instant UPI scan!",
     "announcementEnabled": true,
     "supportEmail": "contact.rumakumari@gmail.com",
@@ -1267,6 +1267,50 @@
       "expiresAt": "2026-08-20T08:11:39.530Z"
     }
   ],
+  "leads": [
+    {
+      "id": "lead_9876543210_01",
+      "userId": "vip_9876543210",
+      "name": "Rahul Sharma",
+      "phone": "9876543210",
+      "email": "rahul.s@gmail.com",
+      "status": "active",
+      "vipStatus": "active",
+      "tier": "Gold VIP",
+      "unlockedCount": 5,
+      "totalSpent": 495,
+      "createdAt": "2026-08-15T10:30:00.000Z",
+      "source": "web_unlock_prompt"
+    },
+    {
+      "id": "lead_9123456780_02",
+      "userId": "vip_9123456780",
+      "name": "Amit Verma",
+      "phone": "9123456780",
+      "email": "amit.v@outlook.com",
+      "status": "active",
+      "vipStatus": "active",
+      "tier": "Platinum VIP",
+      "unlockedCount": 8,
+      "totalSpent": 792,
+      "createdAt": "2026-08-20T14:15:00.000Z",
+      "source": "web_unlock_prompt"
+    },
+    {
+      "id": "lead_9988776655_03",
+      "userId": "vip_9988776655",
+      "name": "Vikram Singh",
+      "phone": "9988776655",
+      "email": "vikram.singh@gmail.com",
+      "status": "active",
+      "vipStatus": "active",
+      "tier": "Gold VIP",
+      "unlockedCount": 3,
+      "totalSpent": 297,
+      "createdAt": "2026-08-25T18:45:00.000Z",
+      "source": "web_unlock_prompt"
+    }
+  ],
   "tokens": [
     {
       "token": "fe2dcca2cc752c6a12f5a31b6d94a887b7294cbdffb2a8af893b77b585747409",
@@ -1283,8 +1327,11 @@
     "audit-test-content-id",
     "test123",
     "test_content_123",
-    "probe-test-405"
+    "probe-test-405",
+    "test-verify-pipeline"
   ],
-  "contentVersion": 1788866571853,
-  "settingsVersion": 1788868786327
+  "contentVersion": 1789013792639,
+  "settingsVersion": 1789012848531,
+  "ordersVersion": 1789012844111,
+  "leadsVersion": 1789012844111
 }

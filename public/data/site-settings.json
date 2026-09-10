@@ -1,0 +1,136 @@
+{
+  "creatorName": "Ruma Kumari",
+  "username": null,
+  "bio": "Pretty mood always 💋 | Fitness, Lifestyle & Exclusive VIP Content",
+  "tagline": "Unlock my private, uncut HD photos, backstage reels & VIP stories instantly.",
+  "profilePicUrl": "https://res.cloudinary.com/mnbjgtqu/image/upload/v1788385961/website-media/izxcajoa6ne2frpzc4k3.jpg",
+  "bannerUrl": "https://res.cloudinary.com/mnbjgtqu/image/upload/v1788385963/website-media/fgert13s6x9yowurdapb.jpg",
+  "instagramUrl": "https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3",
+  "instagramHandle": "@ruma__cutegirl",
+  "badgeText": "VIP Creator",
+  "upiId": "rima11q@ptyes",
+  "postsCount": 37,
+  "followersCount": "6,714",
+  "viewsCount": "10.3M",
+  "announcement": "✨ New VIP Backstage Reel is LIVE! Get 50% off this week only with instant UPI scan!",
+  "announcementEnabled": true,
+  "supportEmail": "contact.rumakumari@gmail.com",
+  "supportTelegram": "https://t.me/rumakumari_vip",
+  "supportWhatsApp": "",
+  "paymentVerificationMode": "instant_utr",
+  "pushNotificationsEnabled": true,
+  "notifyOnNewPost": true,
+  "homepageConfig": {
+    "profile": {
+      "enabled": true,
+      "showStats": true,
+      "showBadge": true,
+      "showInstagramBtn": true
+    },
+    "storyHighlights": {
+      "enabled": true,
+      "title": "Story Highlights & Teasers"
+    },
+    "vipPacks": {
+      "enabled": true,
+      "title": "Exclusive VIP All-Access Bundles",
+      "subtitle": "Unlock complete photo sets and full-length video archives at 60% discount."
+    },
+    "latestVideos": {
+      "enabled": true,
+      "title": "Latest Video Reels & Backstage",
+      "limit": 4
+    },
+    "freeSamples": {
+      "enabled": true,
+      "title": "Free Lifestyle & Workout Samples",
+      "subtitle": "Enjoy these complimentary photos and clips before unlocking VIP sets."
+    },
+    "howItWorks": {
+      "enabled": true,
+      "title": "How It Works"
+    },
+    "faq": {
+      "enabled": true,
+      "title": "Frequently Asked Questions"
+    },
+    "footer": {
+      "enabled": true,
+      "customCopyright": "© 2026 Ruma Kumari Official VIP. All rights reserved.",
+      "showDisclaimer": true
+    },
+    "sectionOrder": [
+      "hero",
+      "featured",
+      "vipPacks",
+      "latestVideos",
+      "latestPhotos",
+      "freeSamples",
+      "howItWorks",
+      "faq"
+    ],
+    "hero": {
+      "enabled": true,
+      "title": "Ruma Kumari",
+      "description": "Unlock my private, uncut HD photos, backstage reels & VIP stories instantly.",
+      "ctaText": "View Premium Feed",
+      "customCoverUrl": ""
+    },
+    "featured": {
+      "enabled": true,
+      "title": "Featured VIP Releases",
+      "subtitle": "Trending high-resolution sets and uncut master videos.",
+      "limit": 10
+    },
+    "latestPhotos": {
+      "enabled": true,
+      "title": "Latest HD Photo Drops",
+      "limit": 4
+    }
+  },
+  "storyHighlights": [],
+  "supportInstagram": "https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3",
+  "vipPlans": [
+    {
+      "id": "plan-monthly",
+      "title": "1-Month VIP All-Access Pass",
+      "subtitle": "30 Days Instant Access to All VIP Photos & Reels",
+      "price": 199,
+      "originalPrice": 499,
+      "durationDays": 30,
+      "durationLabel": "30 Days Access",
+      "badge": "POPULAR 🔥",
+      "popular": true,
+      "enabled": true,
+      "perks": [
+        "All HD Photo Sets & Uncensored Albums",
+        "Exclusive Video Reels & Backstage Clips",
+        "Daily Reward Wheel Access",
+        "Direct Instagram DM Support (@ruma__cutegirl)"
+      ]
+    },
+    {
+      "id": "plan-6months",
+      "title": "6-Month VIP Mega Pass",
+      "subtitle": "180 Days of Complete VIP Content + Future Drops",
+      "price": 499,
+      "originalPrice": 1299,
+      "durationDays": 180,
+      "durationLabel": "6 Months Access",
+      "badge": "BEST VALUE ⚡",
+      "popular": false,
+      "enabled": true,
+      "perks": [
+        "Unlimited Access to All VIP Media",
+        "All Future Backstage Drops Included",
+        "4K Ultra-HD Downloads Enabled",
+        "Priority Instagram DM Support (@ruma__cutegirl)",
+        "3 Bonus Daily Wheel Spins"
+      ]
+    }
+  ],
+  "adminPasscode": "Ashok#8899",
+  "updatedAt": "2026-09-08T12:00:00.000Z",
+  "demoPurged": true,
+  "vapidKey": ""
+}

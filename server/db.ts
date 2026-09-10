@@ -69,8 +69,8 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   badgeText: 'VIP Creator',
   upiId: process.env.CREATOR_UPI_ID || 'rima11q@ptyes',
   postsCount: 37,
-  followersCount: 6500,
-  viewsCount: '1.9M',
+  followersCount: '6,714',
+  viewsCount: '10.3M',
   announcement: '✨ New VIP Backstage Reel is LIVE! Get 50% off this week only with instant UPI scan!',
   announcementEnabled: true,
   supportEmail: 'contact.rumakumari@gmail.com',
@@ -415,6 +415,15 @@ class Database {
   public saveData() {
     try {
       fs.writeFileSync(DATA_FILE, JSON.stringify(this.data, null, 2), 'utf-8');
+      try {
+        const publicDir = path.join(process.cwd(), 'public', 'data');
+        if (!fs.existsSync(publicDir)) {
+          fs.mkdirSync(publicDir, { recursive: true });
+        }
+        fs.writeFileSync(path.join(publicDir, 'site-settings.json'), JSON.stringify(this.data.settings, null, 2), 'utf-8');
+        fs.writeFileSync(path.join(publicDir, 'content.json'), JSON.stringify(this.getAllContent(true), null, 2), 'utf-8');
+        fs.writeFileSync(path.join(publicDir, 'deleted-ids.json'), JSON.stringify({ deletedIds: this.getDeletedIds() }, null, 2), 'utf-8');
+      } catch (_) {}
     } catch (err) {
       console.error('Error saving data file:', err);
     }

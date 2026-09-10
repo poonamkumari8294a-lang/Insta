@@ -1,1 +1,4 @@
-/*    /index.html   200
+/api/site/settings       /data/site-settings.json   200
+/api/content/deleted-ids /data/deleted-ids.json     200
+/api/content             /data/content.json         200
+/*                       /index.html                200

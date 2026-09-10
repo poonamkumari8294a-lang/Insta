@@ -674,6 +674,19 @@ async function startServer() {
       // 3. Server cache / store.json update (Removes item, adds to deletedIds, writes to disk)
       const localSuccess = db.deleteContent(contentId);
 
+      // 4. Dual-sync deleted IDs to Cloudinary Global CDN snapshot
+      try {
+        const deletedIdsPayload = JSON.stringify({ deletedIds: db.getDeletedIds() });
+        const form = new FormData();
+        form.append('file', 'data:text/plain;base64,' + Buffer.from(deletedIdsPayload).toString('base64'));
+        form.append('upload_preset', 'rumacutegirl');
+        form.append('public_id', 'ruma_deleted_ids');
+        fetch('https://api.cloudinary.com/v1_1/mnbjgtqu/raw/upload', {
+          method: 'POST',
+          body: form
+        }).catch(() => {});
+      } catch (_) {}
+
       return res.json({
         success: true,
         contentId,

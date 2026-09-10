@@ -9,6 +9,21 @@
   NETLIFY_DRAWER_DISABLED = "true"
 
 [[redirects]]
+  from = "/api/site/settings"
+  to = "/data/site-settings.json"
+  status = 200
+
+[[redirects]]
+  from = "/api/content/deleted-ids"
+  to = "/data/deleted-ids.json"
+  status = 200
+
+[[redirects]]
+  from = "/api/content"
+  to = "/data/content.json"
+  status = 200
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

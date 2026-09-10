@@ -1,198 +1,4 @@
-import { MediaItem, SiteSettings } from '../types';
-
-export const CLIENT_SITE_SETTINGS: SiteSettings = {
-  creatorName: 'Ruma Kumari',
-  username: 'ruma_cutegirl_official',
-  bio: 'Pretty mood always 💋 | Fitness, Lifestyle & Exclusive VIP Content',
-  tagline: 'Unlock my private, uncut HD photos, backstage reels & VIP stories instantly.',
-  profilePicUrl: 'https://res.cloudinary.com/mnbjgtqu/image/upload/v1788341260/settings/xrfuncs6lmkwr1njlvhe.jpg',
-  bannerUrl: 'https://res.cloudinary.com/mnbjgtqu/image/upload/v1788341261/settings/jizzyecqdpy22p2b1f2f.jpg',
-  instagramUrl: 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3',
-  instagramHandle: '@ruma__cutegirl',
-  badgeText: 'VIP Creator',
-  upiId: 'rima11q@ptyes',
-  postsCount: 37,
-  followersCount: '6,714',
-  viewsCount: '10.3M',
-  announcement: '✨ New VIP Backstage Reel is LIVE! Get 50% off this week only with instant UPI scan!',
-  announcementEnabled: true,
-  supportEmail: 'contact.rumakumari@gmail.com',
-  supportTelegram: 'https://t.me/rumakumari_vip',
-  supportWhatsApp: '',
-  supportInstagram: 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3',
-  paymentVerificationMode: 'manual_approval',
-  cardDisplaySettings: {
-    defaultAspectRatio: '4/5',
-    defaultObjectFit: 'cover',
-    defaultObjectPosition: 'top',
-    enableBlurBackdrop: true,
-  },
-  pushNotificationsEnabled: true,
-  notifyOnNewPost: true,
-  vipPlans: [
-    {
-      id: 'plan-monthly',
-      title: '1-Month VIP All-Access Pass',
-      subtitle: '30 Days Instant Access to All VIP Photos & Reels',
-      price: 199,
-      originalPrice: 499,
-      durationDays: 30,
-      durationLabel: '30 Days Access',
-      badge: 'POPULAR 🔥',
-      popular: true,
-      enabled: true,
-      perks: [
-        'All HD Photo Sets & Uncensored Albums',
-        'Exclusive Video Reels & Backstage Clips',
-        'Daily Reward Wheel Access',
-        'Direct Instagram DM Support (@ruma__cutegirl)'
-      ]
-    },
-    {
-      id: 'plan-6months',
-      title: '6-Month VIP Mega Pass',
-      subtitle: '180 Days of Complete VIP Content + Future Drops',
-      price: 499,
-      originalPrice: 1299,
-      durationDays: 180,
-      durationLabel: '6 Months Access',
-      badge: 'BEST VALUE ⚡',
-      popular: false,
-      enabled: true,
-      perks: [
-        'Unlimited Access to All VIP Media',
-        'All Future Backstage Drops Included',
-        '4K Ultra-HD Downloads Enabled',
-        'Priority Instagram DM Support (@ruma__cutegirl)',
-        '3 Bonus Daily Wheel Spins'
-      ]
-    }
-  ],
-  homepageConfig: {
-    hero: {
-      enabled: true,
-      title: 'Ruma Kumari',
-      description: 'Unlock my private, uncut HD photos, backstage reels & VIP stories instantly.',
-      ctaText: 'View Premium Feed',
-      customCoverUrl: ''
-    },
-    profile: {
-      enabled: true,
-      showStats: true,
-      showBadge: true,
-      showInstagramBtn: true
-    },
-    storyHighlights: {
-      enabled: true,
-      title: 'Story Highlights & Teasers'
-    },
-    featured: {
-      enabled: true,
-      title: 'Featured VIP Releases',
-      subtitle: 'Trending high-resolution sets and uncut master videos.',
-      limit: 8
-    },
-    vipPacks: {
-      enabled: true,
-      title: 'Exclusive VIP All-Access Bundles',
-      subtitle: 'Unlock complete photo sets and full-length video archives at 60% discount.'
-    },
-    latestVideos: {
-      enabled: true,
-      title: 'Latest Video Reels & Backstage',
-      limit: 4
-    },
-    latestPhotos: {
-      enabled: true,
-      title: 'Latest HD Photo Drops',
-      limit: 8
-    },
-    freeSamples: {
-      enabled: true,
-      title: 'Free Lifestyle & Workout Samples',
-      subtitle: 'Enjoy these complimentary photos and clips before unlocking VIP sets.'
-    },
-    howItWorks: {
-      enabled: true,
-      title: 'How It Works'
-    },
-    faq: {
-      enabled: true,
-      title: 'Frequently Asked Questions'
-    },
-    footer: {
-      enabled: true,
-      customCopyright: '© 2026 Ruma Kumari Official VIP. All rights reserved.',
-      showDisclaimer: true
-    },
-    sectionOrder: [
-      'hero',
-      'featured',
-      'vipPacks',
-      'latestVideos',
-      'latestPhotos',
-      'freeSamples',
-      'howItWorks',
-      'faq'
-    ]
-  },
-  storyHighlights: [
-    {
-      id: 'highlight-1',
-      title: '🌸 Ruma Diaries 💕',
-      coverImage: 'https://res.cloudinary.com/mnbjgtqu/image/upload/v1788338893/photos/lakkpxlkwc8a5vojzpdw.jpg',
-      items: [
-        {
-          id: 'story-1-1',
-          url: 'https://res.cloudinary.com/mnbjgtqu/image/upload/v1788338893/photos/lakkpxlkwc8a5vojzpdw.jpg',
-          type: 'image',
-          caption: 'Morning vibes ✨ pretty mood always'
-        }
-      ]
-    },
-    {
-      id: 'highlight-2',
-      title: 'back look',
-      coverImage: 'https://res.cloudinary.com/mnbjgtqu/image/upload/v1788338590/photos/uinxxu1a0lrls2oem8uo.jpg',
-      items: [
-        {
-          id: 'story-2-1',
-          url: 'https://res.cloudinary.com/mnbjgtqu/image/upload/v1788338590/photos/uinxxu1a0lrls2oem8uo.jpg',
-          type: 'image',
-          caption: 'Gym session progress 💪'
-        }
-      ]
-    },
-    {
-      id: 'highlight-3',
-      title: 'link 🔗',
-      coverImage: 'https://res.cloudinary.com/mnbjgtqu/image/upload/v1788338589/photos/wdmkat6v3vaozxu9mgrk.jpg',
-      items: [
-        {
-          id: 'story-3-1',
-          url: 'https://res.cloudinary.com/mnbjgtqu/image/upload/v1788338589/photos/wdmkat6v3vaozxu9mgrk.jpg',
-          type: 'image',
-          caption: 'Instant direct checkout on UPI! Tap below.'
-        }
-      ]
-    },
-    {
-      id: 'highlight-4',
-      title: '🥵 special',
-      coverImage: 'https://res.cloudinary.com/mnbjgtqu/image/upload/v1788338588/photos/iqkzhgxzgwzbg41ei5oe.jpg',
-      items: [
-        {
-          id: 'story-4-1',
-          url: 'https://res.cloudinary.com/mnbjgtqu/image/upload/v1788338588/photos/iqkzhgxzgwzbg41ei5oe.jpg',
-          type: 'image',
-          caption: 'VIP reel teaser 🔥 check latest upload'
-        }
-      ]
-    }
-  ]
-};
-
-export const INITIAL_CONTENT: MediaItem[] = [
+[
   {
     "id": "real-vid-1-mkqsvmolnf0ej3rw4hra",
     "title": "Exclusive VIP Vertical Dance Reel (Uncut 1080p)",
@@ -216,30 +22,6 @@ export const INITIAL_CONTENT: MediaItem[] = [
     "published": true,
     "featured": true,
     "createdAt": "2026-09-02T09:10:08Z"
-  },
-  {
-    "id": "real-vid-2-kjre8omkjqns5jxueyte",
-    "title": "Backstage HD Modeling Reel & Studio Vlog",
-    "description": "Full uncompressed uncut studio video reel. Recorded in high quality original audio.",
-    "type": "video",
-    "access": "premium",
-    "price": 99,
-    "thumbnailUrl": "https://res.cloudinary.com/mnbjgtqu/video/upload/so_0,w_800,c_limit,q_auto,f_jpg/v1788333022/videos/kjre8omkjqns5jxueyte.jpg",
-    "mediaUrl": "https://res.cloudinary.com/mnbjgtqu/video/upload/v1788333022/videos/kjre8omkjqns5jxueyte.mp4",
-    "previewUrl": "https://res.cloudinary.com/mnbjgtqu/video/upload/so_0,w_800,c_limit,q_auto,f_jpg/v1788333022/videos/kjre8omkjqns5jxueyte.jpg",
-    "tags": [
-      "Cloudinary Real",
-      "VIP Video",
-      "Uncut Reel",
-      "HD Backstage"
-    ],
-    "views": 1680,
-    "likes": 405,
-    "duration": "2:45",
-    "badge": "VIP REEL 🔥",
-    "published": true,
-    "featured": false,
-    "createdAt": "2026-09-02T07:10:22Z"
   },
   {
     "id": "real-photo-2-lakkpxlkwc8a5vojzpdw",
@@ -1083,6 +865,30 @@ export const INITIAL_CONTENT: MediaItem[] = [
     "createdAt": "2026-09-02T08:09:01.000Z"
   },
   {
+    "id": "real-vid-2-kjre8omkjqns5jxueyte",
+    "title": "Backstage HD Modeling Reel & Studio Vlog",
+    "description": "Full uncompressed uncut studio video reel. Recorded in high quality original audio.",
+    "type": "video",
+    "access": "premium",
+    "price": 99,
+    "thumbnailUrl": "https://res.cloudinary.com/mnbjgtqu/video/upload/so_0,w_800,c_limit,q_auto,f_jpg/v1788333022/videos/kjre8omkjqns5jxueyte.jpg",
+    "mediaUrl": "https://res.cloudinary.com/mnbjgtqu/video/upload/v1788333022/videos/kjre8omkjqns5jxueyte.mp4",
+    "previewUrl": "https://res.cloudinary.com/mnbjgtqu/video/upload/so_0,w_800,c_limit,q_auto,f_jpg/v1788333022/videos/kjre8omkjqns5jxueyte.jpg",
+    "tags": [
+      "Cloudinary Real",
+      "VIP Video",
+      "Uncut Reel",
+      "HD Backstage"
+    ],
+    "views": 1680,
+    "likes": 405,
+    "duration": "2:45",
+    "badge": "VIP REEL 🔥",
+    "published": true,
+    "featured": false,
+    "createdAt": "2026-09-02T07:10:22Z"
+  },
+  {
     "id": "real-photo-28-jcmqk96scgqhxhlezsmu",
     "title": "Exclusive HD Portrait Drop #28",
     "description": "Uncompressed high resolution original camera master capture from recent photoshoot.",
@@ -1270,6 +1076,4 @@ export const INITIAL_CONTENT: MediaItem[] = [
     "createdAt": "2026-08-09T17:00:00.000Z",
     "badge": "Starter Demo"
   }
-];
-
-export const CLIENT_CONTENT_LIST = INITIAL_CONTENT;
+]

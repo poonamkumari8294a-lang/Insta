@@ -197,7 +197,8 @@ export default function App() {
       }
     );
 
-    // 3. Authoritative fresh sync from server (ensures all devices & phones get the exact same content and settings)
+    // 3. Authoritative fresh sync from server & CDN (ensures all devices & phones get the exact same content, settings, and deleted list)
+    syncDeletedIdsFromServer().catch(() => {});
     syncAppStateFromServer(true).catch(() => {});
 
     // 4. Instant resync when tab or device becomes active / visible (throttled to once every 2 seconds)
@@ -213,12 +214,12 @@ export default function App() {
     window.addEventListener('visibilitychange', handleVisibilityOrFocus);
     window.addEventListener('focus', handleVisibilityOrFocus);
 
-    // 4.1 Periodic background sync every 4 seconds for all phones and devices
+    // 4.1 Periodic background sync every 30 seconds for all phones and devices
     const periodicSync = setInterval(() => {
       if (document.visibilityState === 'visible') {
         syncAppStateFromServer(false).catch(() => {});
       }
-    }, 4000);
+    }, 30000);
 
     // 5. Listen for hash & URL changes
     const handleUrlChange = () => {

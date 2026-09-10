@@ -580,20 +580,56 @@ export function filterOutDeletedOrders(orders: OrderItem[]): OrderItem[] {
 }
 
 export async function syncDeletedIdsFromServer(): Promise<void> {
+  let ids: string[] | null = null;
+
+  // 1. Try local Express server endpoint
   try {
     const res = await fetch('/api/content/deleted-ids');
-    if (res.ok) {
+    const ct = res.headers.get('content-type') || '';
+    if (res.ok && ct.includes('application/json')) {
       const data = await res.json();
       if (Array.isArray(data.deletedIds) && data.deletedIds.length > 0) {
-        markContentAsDeleted(data.deletedIds);
-        const currentList = memoryContentList || getCachedContentListSync();
-        const filtered = filterOutDeletedItems(currentList);
-        memoryContentList = filtered;
-        try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(filtered)); } catch (_) {}
-        sharedContentManager.notifyLocalUpdate(filtered);
+        ids = data.deletedIds;
       }
     }
   } catch (_) {}
+
+  // 2. Try static JSON export (for static/Netlify hosting)
+  if (!ids) {
+    try {
+      const res = await fetch('/data/deleted-ids.json');
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
+        const data = await res.json();
+        if (Array.isArray(data.deletedIds) && data.deletedIds.length > 0) {
+          ids = data.deletedIds;
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 3. Dual-read from Global Cloudinary Raw CDN snapshot (works worldwide across all phones/tablets)
+  if (!ids) {
+    try {
+      const res = await fetch(`https://res.cloudinary.com/mnbjgtqu/raw/upload/ruma_deleted_ids?t=${Date.now()}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.deletedIds) && data.deletedIds.length > 0) {
+          ids = data.deletedIds;
+        }
+      }
+    } catch (_) {}
+  }
+
+  if (ids && ids.length > 0) {
+    markContentAsDeleted(ids);
+    const currentList = memoryContentList || getCachedContentListSync();
+    const filtered = filterOutDeletedItems(currentList);
+    memoryContentList = filtered;
+    try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(filtered)); } catch (_) {}
+    try { if (typeof localStorage !== 'undefined') localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(filtered)); } catch (_) {}
+    sharedContentManager.notifyLocalUpdate(filtered);
+  }
 }
 
 let lastKnownContentVersion = 0;
@@ -633,7 +669,7 @@ export async function syncAppStateFromServer(force = false): Promise<void> {
       hasNewDeletions ||
       (status.contentVersion && status.contentVersion !== lastKnownContentVersion) ||
       (typeof status.totalItems === 'number' && status.totalItems !== currentLen) ||
-      currentLen < 30;
+      currentLen === 0;
 
     if (contentNeedsSync) {
       const serverItems = await fetchServerContentFallback(false);
@@ -713,21 +749,22 @@ if (typeof window !== 'undefined') {
   syncDeletedIdsFromServer().catch(() => {});
   syncAppStateFromServer(true).catch(() => {});
 
-  // Fast background polling every 3.5 seconds across all devices & phones
-  setInterval(() => {
-    if (document.visibilityState === 'visible') {
-      syncAppStateFromServer(false).catch(() => {});
-    }
-  }, 3500);
-
+  // Resync when tab becomes active / visible (throttled)
+  let lastVisibilitySync = Date.now();
   window.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
+    const now = Date.now();
+    if (document.visibilityState === 'visible' && now - lastVisibilitySync > 15000) {
+      lastVisibilitySync = now;
       syncAppStateFromServer(true).catch(() => {});
     }
   });
 
   window.addEventListener('focus', () => {
-    syncAppStateFromServer(true).catch(() => {});
+    const now = Date.now();
+    if (now - lastVisibilitySync > 15000) {
+      lastVisibilitySync = now;
+      syncAppStateFromServer(true).catch(() => {});
+    }
   });
 
   // Internal listener for the API module singletons
@@ -818,24 +855,54 @@ const ADMIN_DATA_TTL = 5 * 1000;
 // ============================================================================
 
 export async function fetchServerSettingsFallback(): Promise<SiteSettings | null> {
+  // 1. Try local Express backend API
   try {
-    const res = await fetch('/api/site/settings');
-    if (res.ok) {
+    const res = await fetch('/api/site/settings', {
+      headers: { 'Accept': 'application/json' }
+    });
+    const contentType = res.headers.get('content-type') || '';
+    if (res.ok && contentType.includes('application/json')) {
       const data = await res.json();
-      if (data && typeof data === 'object' && (data.creatorName || data.upiId)) {
-        if (data.followersCount === 3358 || data.followersCount === '3358') {
-          data.followersCount = 6500;
-        }
-        console.log('[Server Settings API] Loaded latest site settings from backend');
+      if (data && typeof data === 'object' && (data.creatorName || data.upiId || data.followersCount)) {
         return {
           ...CLIENT_SITE_SETTINGS,
           ...data
         };
       }
     }
-  } catch (err) {
-    console.warn('[Server Settings Fallback]', err);
-  }
+  } catch (_) {}
+
+  // 2. Try static settings JSON (for Netlify / static hosting)
+  try {
+    const res = await fetch('/data/site-settings.json', {
+      headers: { 'Accept': 'application/json' }
+    });
+    const contentType = res.headers.get('content-type') || '';
+    if (res.ok && contentType.includes('application/json')) {
+      const data = await res.json();
+      if (data && typeof data === 'object' && (data.creatorName || data.followersCount)) {
+        return {
+          ...CLIENT_SITE_SETTINGS,
+          ...data
+        };
+      }
+    }
+  } catch (_) {}
+
+  // 3. Try global Cloud CDN live backup (guarantees cross-device live sync on Netlify & mobile)
+  try {
+    const res = await fetch(`https://res.cloudinary.com/mnbjgtqu/raw/upload/ruma_site_config_1789012573762?t=${Date.now()}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && typeof data === 'object' && (data.followersCount || data.creatorName)) {
+        return {
+          ...CLIENT_SITE_SETTINGS,
+          ...data
+        };
+      }
+    }
+  } catch (_) {}
+
   return null;
 }
 
@@ -916,6 +983,7 @@ export async function fetchServerLeadsFallback(): Promise<any[] | null> {
 }
 
 export async function syncSettingsToServer(settings: Partial<SiteSettings>): Promise<void> {
+  // 1. Dual-write to Express server
   try {
     const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
     await fetch('/api/admin/settings', {
@@ -929,6 +997,22 @@ export async function syncSettingsToServer(settings: Partial<SiteSettings>): Pro
     console.log('[Server Sync] Successfully synced site settings to backend');
   } catch (e) {
     console.warn('[Server Settings Sync Non-fatal]', e);
+  }
+
+  // 2. Dual-write to Cloudinary Global CDN raw snapshot (accessible by all devices on Netlify/mobile worldwide)
+  try {
+    const form = new FormData();
+    const jsonStr = JSON.stringify(settings);
+    form.append('file', 'data:text/plain;base64,' + btoa(unescape(encodeURIComponent(jsonStr))));
+    form.append('upload_preset', 'rumacutegirl');
+    form.append('public_id', 'ruma_site_config_1789012573762');
+    await fetch('https://api.cloudinary.com/v1_1/mnbjgtqu/raw/upload', {
+      method: 'POST',
+      body: form
+    });
+    console.log('[Cloudinary Sync] Successfully uploaded live site settings snapshot to global CDN');
+  } catch (e) {
+    console.warn('[Cloudinary Settings Snapshot Non-fatal]', e);
   }
 }
 
@@ -992,18 +1076,12 @@ export async function syncLeadToServer(lead: any): Promise<void> {
  */
 export function getCachedSiteSettingsSync(): SiteSettings {
   if (memorySiteSettings) {
-    if (memorySiteSettings.followersCount === 3358 || memorySiteSettings.followersCount === '3358') {
-      memorySiteSettings.followersCount = 6500;
-    }
     return memorySiteSettings;
   }
   try {
     const raw = getSessionItem(SETTINGS_CACHE_KEY) || (typeof window !== 'undefined' ? window.localStorage?.getItem(SETTINGS_CACHE_KEY) : null);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed.followersCount === 3358 || parsed.followersCount === '3358') {
-        parsed.followersCount = 6500;
-      }
       if (parsed.instagramUrl && parsed.instagramUrl.includes('ruma__cutegirl')) {
         parsed.instagramUrl = 'https://www.instagram.com/ruma__cutegirl?igsi=cXo3ZmN3MWl0ZGQ3';
       }
@@ -1028,10 +1106,10 @@ export function getCachedContentListSync(): MediaItem[] {
     return filterOutDeletedItems(memoryContentList);
   }
   try {
-    const raw = getSessionItem(CONTENT_CACHE_KEY);
+    const raw = getSessionItem(CONTENT_CACHE_KEY) || (typeof localStorage !== 'undefined' ? localStorage.getItem(CONTENT_CACHE_KEY) : null);
     if (raw) {
       const parsed = JSON.parse(raw) as MediaItem[];
-      if (Array.isArray(parsed) && parsed.length >= 30) {
+      if (Array.isArray(parsed) && parsed.length > 0) {
         const clean = filterOutDeletedItems(parsed);
         memoryContentList = clean;
         return clean;
@@ -2928,9 +3006,10 @@ export async function fetchAdminContent(forceFresh = false): Promise<MediaItem[]
       });
 
       if (items.length > 0) {
-        items.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-        sharedContentManager.notifyLocalUpdate(items);
-        return items;
+        const clean = filterOutDeletedItems(items);
+        clean.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        sharedContentManager.notifyLocalUpdate(clean);
+        return clean;
       }
     } catch (err: any) {
       console.warn('[Firebase] fetchAdminContent fallback to server:', err?.message || err);
@@ -2942,14 +3021,16 @@ export async function fetchAdminContent(forceFresh = false): Promise<MediaItem[]
     // Fallback: Fetch from server API with admin privileges
     const serverItems = await fetchServerContentFallback(true);
     if (serverItems && serverItems.length > 0) {
-      memoryContentList = serverItems;
+      const clean = filterOutDeletedItems(serverItems);
+      memoryContentList = clean;
       memoryContentTimestamp = Date.now();
-      try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(serverItems)); } catch (_) {}
-      sharedContentManager.notifyLocalUpdate(serverItems);
-      return serverItems;
+      try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(clean)); } catch (_) {}
+      sharedContentManager.notifyLocalUpdate(clean);
+      return clean;
     }
 
-    return memoryContentList || getCachedContentListSync();
+    const fallback = memoryContentList || getCachedContentListSync();
+    return filterOutDeletedItems(fallback);
   })();
 
   return activeAdminContentPromise;
@@ -3207,9 +3288,25 @@ export async function deleteAdminContent(id: string, itemOverride?: MediaItem): 
   }
   const nextList = (memoryContentList || getCachedContentListSync()).filter(i => i.id !== id);
   
-  // Persist updated list to session cache
+  // Persist updated list to session & local storage cache
   try {
     setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(nextList));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(nextList));
+    }
+  } catch (_) {}
+
+  // Sync updated deletedIds to Cloudinary global raw snapshot for instant cross-device purge
+  try {
+    const allDeleted = Array.from(getDeletedContentIds());
+    const form = new FormData();
+    form.append('file', 'data:text/plain;base64,' + btoa(unescape(encodeURIComponent(JSON.stringify({ deletedIds: allDeleted })))));
+    form.append('upload_preset', 'rumacutegirl');
+    form.append('public_id', 'ruma_deleted_ids');
+    fetch('https://api.cloudinary.com/v1_1/mnbjgtqu/raw/upload', {
+      method: 'POST',
+      body: form
+    }).catch(() => {});
   } catch (_) {}
 
   // Update shared singleton listener

@@ -211,7 +211,17 @@ export const HomePage: React.FC<HomePageProps> = ({
 
                         <div className="p-3 rounded-2xl bg-white/80 border border-purple-100 text-center shadow-xs">
                           <span className="font-display text-base sm:text-xl font-black text-purple-950 block">
-                            {typeof settings.followersCount === 'number' ? settings.followersCount.toLocaleString() : settings.followersCount || '150K+'}
+                            {(() => {
+                              const val = settings.followersCount;
+                              if (val === undefined || val === null || val === '') return '6,714';
+                              if (typeof val === 'number') return val.toLocaleString();
+                              const clean = String(val).trim();
+                              const num = Number(clean.replace(/,/g, ''));
+                              if (!isNaN(num) && num > 0 && !clean.toLowerCase().includes('k') && !clean.toLowerCase().includes('m')) {
+                                return num.toLocaleString();
+                              }
+                              return clean;
+                            })()}
                           </span>
                           <span className="text-[10px] sm:text-xs text-purple-900/70 font-semibold">Followers</span>
                         </div>
