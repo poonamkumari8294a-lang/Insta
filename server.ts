@@ -558,6 +558,24 @@ async function startServer() {
     }
   });
 
+  const syncContentFeedToCloudinaryCDN = async () => {
+    try {
+      const allContent = db.getAllContent(true);
+      const jsonStr = JSON.stringify(allContent);
+      const form = new FormData();
+      form.append('file', 'data:text/plain;base64,' + Buffer.from(jsonStr).toString('base64'));
+      form.append('upload_preset', 'rumacutegirl');
+      form.append('public_id', 'ruma_content_feed');
+      await fetch('https://api.cloudinary.com/v1_1/mnbjgtqu/raw/upload', {
+        method: 'POST',
+        body: form
+      });
+      console.log(`[Cloudinary Feed Sync] Successfully synced ${allContent.length} items to ruma_content_feed`);
+    } catch (err) {
+      console.warn('[Cloudinary Feed Sync Warning]', err);
+    }
+  };
+
   // Admin Create / Upsert Content
   app.post('/api/admin/content', requireAdmin, (req: Request, res: Response) => {
     try {
@@ -595,6 +613,7 @@ async function startServer() {
       };
 
       const saved = db.upsertContent(item);
+      syncContentFeedToCloudinaryCDN().catch(() => {});
       res.status(201).json(saved);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -622,6 +641,7 @@ async function startServer() {
       if (!updated) {
         updated = db.upsertContent({ ...req.body, id: contentId });
       }
+      syncContentFeedToCloudinaryCDN().catch(() => {});
       res.json(updated);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -673,6 +693,7 @@ async function startServer() {
 
       // 3. Server cache / store.json update (Removes item, adds to deletedIds, writes to disk)
       const localSuccess = db.deleteContent(contentId);
+      syncContentFeedToCloudinaryCDN().catch(() => {});
 
       // 4. Dual-sync deleted IDs to Cloudinary Global CDN snapshot
       try {
@@ -849,6 +870,7 @@ async function startServer() {
   app.post('/api/admin/content/purge-demo', requireAdmin, (req: Request, res: Response) => {
     try {
       const result = db.purgeDemoContent();
+      syncContentFeedToCloudinaryCDN().catch(() => {});
       res.json({
         success: true,
         deletedCount: result.deletedCount,

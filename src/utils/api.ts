@@ -642,16 +642,20 @@ export async function syncAppStateFromServer(force = false): Promise<void> {
   if (isSyncingFromServer && !force) return;
   isSyncingFromServer = true;
   try {
-    const res = await fetch('/api/sync/status', {
-      headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
-    });
-    if (!res.ok) return;
-    const status = await res.json();
-    if (!status || typeof status !== 'object') return;
+    let status: any = null;
+    try {
+      const res = await fetch('/api/sync/status', {
+        headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
+      });
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
+        status = await res.json();
+      }
+    } catch (_) {}
 
     // 1. Process deletions
     let hasNewDeletions = false;
-    if (Array.isArray(status.deletedIds) && status.deletedIds.length > 0) {
+    if (status && Array.isArray(status.deletedIds) && status.deletedIds.length > 0) {
       status.deletedIds.forEach((id: string) => {
         if (!inMemoryDeletedIds.has(id)) {
           inMemoryDeletedIds.add(id);
@@ -666,6 +670,7 @@ export async function syncAppStateFromServer(force = false): Promise<void> {
     // 2. Determine if content needs synchronization
     const currentLen = memoryContentList ? memoryContentList.length : 0;
     const contentNeedsSync = force ||
+      !status ||
       hasNewDeletions ||
       (status.contentVersion && status.contentVersion !== lastKnownContentVersion) ||
       (typeof status.totalItems === 'number' && status.totalItems !== currentLen) ||
@@ -674,25 +679,28 @@ export async function syncAppStateFromServer(force = false): Promise<void> {
     if (contentNeedsSync) {
       const serverItems = await fetchServerContentFallback(false);
       if (serverItems && serverItems.length > 0) {
-        lastKnownContentVersion = status.contentVersion || Date.now();
+        lastKnownContentVersion = (status && status.contentVersion) || Date.now();
         memoryContentList = serverItems;
         memoryContentTimestamp = Date.now();
         try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(serverItems)); } catch (_) {}
+        try { if (typeof localStorage !== 'undefined') localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(serverItems)); } catch (_) {}
         sharedContentManager.notifyLocalUpdate(serverItems);
       }
     }
 
     // 3. Determine if settings need synchronization
     const settingsNeedsSync = force ||
+      !status ||
       (status.settingsVersion && status.settingsVersion !== lastKnownSettingsVersion);
 
     if (settingsNeedsSync) {
       const serverSettings = await fetchServerSettingsFallback();
       if (serverSettings) {
-        lastKnownSettingsVersion = status.settingsVersion || Date.now();
+        lastKnownSettingsVersion = (status && status.settingsVersion) || Date.now();
         memorySiteSettings = serverSettings;
         memorySettingsTimestamp = Date.now();
         try { setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(serverSettings)); } catch (_) {}
+        try { if (typeof localStorage !== 'undefined') localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(serverSettings)); } catch (_) {}
         sharedSettingsManager.notifyLocalUpdate(serverSettings);
       }
     }
@@ -907,6 +915,7 @@ export async function fetchServerSettingsFallback(): Promise<SiteSettings | null
 }
 
 export async function fetchServerContentFallback(forAdmin = false): Promise<MediaItem[] | null> {
+  // 1. Direct Server API call
   try {
     let url = '/api/content';
     const headers: Record<string, string> = {};
@@ -916,18 +925,20 @@ export async function fetchServerContentFallback(forAdmin = false): Promise<Medi
       headers['Authorization'] = `Bearer ${adminToken}`;
     }
     const res = await fetch(url, { headers });
-    if (res.ok) {
+    const ct = res.headers.get('content-type') || '';
+    if (res.ok && ct.includes('application/json')) {
       const data = await res.json();
-      if (Array.isArray(data)) {
+      if (Array.isArray(data) && data.length > 0) {
         const cleaned = filterOutDeletedItems(data.map(item => reconnectCloudinaryMetadata(item)));
         cleaned.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
         return cleaned;
       }
     } else if (forAdmin) {
       const resPub = await fetch('/api/content');
-      if (resPub.ok) {
+      const ctPub = resPub.headers.get('content-type') || '';
+      if (resPub.ok && ctPub.includes('application/json')) {
         const dataPub = await resPub.json();
-        if (Array.isArray(dataPub)) {
+        if (Array.isArray(dataPub) && dataPub.length > 0) {
           const cleaned = filterOutDeletedItems(dataPub.map(item => reconnectCloudinaryMetadata(item)));
           cleaned.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
           return cleaned;
@@ -937,6 +948,36 @@ export async function fetchServerContentFallback(forAdmin = false): Promise<Medi
   } catch (err) {
     console.warn('[Server Content Fallback]', err);
   }
+
+  // 2. Static JSON fallback (for static hosting or Cloud Run shared static build)
+  try {
+    const res = await fetch(`/data/content.json?t=${Date.now()}`, {
+      headers: { 'Accept': 'application/json' }
+    });
+    const ct = res.headers.get('content-type') || '';
+    if (res.ok && ct.includes('application/json')) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        const cleaned = filterOutDeletedItems(data.map(item => reconnectCloudinaryMetadata(item)));
+        cleaned.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        return cleaned;
+      }
+    }
+  } catch (_) {}
+
+  // 3. Global Cloudinary Raw CDN Snapshot (High availability worldwide, survives Firebase quota exhaustion & server 404s)
+  try {
+    const res = await fetch(`https://res.cloudinary.com/mnbjgtqu/raw/upload/ruma_content_feed?t=${Date.now()}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        const cleaned = filterOutDeletedItems(data.map(item => reconnectCloudinaryMetadata(item)));
+        cleaned.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        return cleaned;
+      }
+    }
+  } catch (_) {}
+
   return null;
 }
 
@@ -1032,6 +1073,26 @@ export async function syncContentToServer(item: MediaItem, isUpdate = false): Pr
     console.log(`[Server Sync] Successfully synced content "${item.id}" (${method}) to backend`);
   } catch (e) {
     console.warn('[Server Content Sync Non-fatal]', e);
+  }
+}
+
+export async function syncContentFeedToCloudinaryCDN(items?: MediaItem[]): Promise<void> {
+  try {
+    const targetItems = items || memoryContentList || getCachedContentListSync();
+    if (!Array.isArray(targetItems) || targetItems.length === 0) return;
+    const cleanItems = filterOutDeletedItems(targetItems);
+    const jsonStr = JSON.stringify(cleanItems);
+    const form = new FormData();
+    form.append('file', 'data:text/plain;base64,' + btoa(unescape(encodeURIComponent(jsonStr))));
+    form.append('upload_preset', 'rumacutegirl');
+    form.append('public_id', 'ruma_content_feed');
+    await fetch('https://api.cloudinary.com/v1_1/mnbjgtqu/raw/upload', {
+      method: 'POST',
+      body: form
+    });
+    console.log(`[Cloudinary Sync] Successfully uploaded live content feed snapshot (${cleanItems.length} items) to global CDN`);
+  } catch (e) {
+    console.warn('[Cloudinary Content Snapshot Non-fatal]', e);
   }
 }
 
@@ -3106,7 +3167,14 @@ export async function createAdminContent(itemData: Partial<MediaItem>): Promise<
   // 3. Write-through update to local memory & cache (Zero subsequent getDocs needed!)
   const currentList = memoryContentList || getCachedContentListSync();
   const nextList = [cleanItem, ...currentList.filter(i => i.id !== newId)];
+  memoryContentList = nextList;
+  memoryContentTimestamp = Date.now();
+  try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(nextList)); } catch (_) {}
+  try { if (typeof localStorage !== 'undefined') localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(nextList)); } catch (_) {}
   sharedContentManager.notifyLocalUpdate(nextList);
+
+  // 3.5. Dual-upload to Cloudinary Raw CDN so every device on planet earth sees it immediately
+  syncContentFeedToCloudinaryCDN(nextList).catch(() => {});
 
   // 4. Instant cross-tab broadcast (0ms sync to all open tabs)
   broadcastCrossTabEvent({ type: 'CONTENT_CREATED', content: cleanItem });
@@ -3159,7 +3227,14 @@ export async function updateAdminContent(id: string, updates: Partial<MediaItem>
   await syncContentToServer(updatedItem, true);
 
   // 3. Write-through update to memory & local cache
+  memoryContentList = nextList;
+  memoryContentTimestamp = Date.now();
+  try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(nextList)); } catch (_) {}
+  try { if (typeof localStorage !== 'undefined') localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(nextList)); } catch (_) {}
   sharedContentManager.notifyLocalUpdate(nextList);
+
+  // 3.5. Dual-upload to Cloudinary Raw CDN so every device worldwide sees the updated post immediately
+  syncContentFeedToCloudinaryCDN(nextList).catch(() => {});
 
   // 4. Instant cross-tab broadcast (0ms sync to all open tabs)
   broadcastCrossTabEvent({ type: 'CONTENT_UPDATED', content: updatedItem });
@@ -3308,6 +3383,9 @@ export async function deleteAdminContent(id: string, itemOverride?: MediaItem): 
       body: form
     }).catch(() => {});
   } catch (_) {}
+
+  // Sync updated content feed to Cloudinary global raw snapshot so deleted items disappear across all devices
+  syncContentFeedToCloudinaryCDN(nextList).catch(() => {});
 
   // Update shared singleton listener
   sharedContentManager.notifyLocalUpdate(nextList);

@@ -420,9 +420,23 @@ class Database {
         if (!fs.existsSync(publicDir)) {
           fs.mkdirSync(publicDir, { recursive: true });
         }
-        fs.writeFileSync(path.join(publicDir, 'site-settings.json'), JSON.stringify(this.data.settings, null, 2), 'utf-8');
-        fs.writeFileSync(path.join(publicDir, 'content.json'), JSON.stringify(this.getAllContent(true), null, 2), 'utf-8');
-        fs.writeFileSync(path.join(publicDir, 'deleted-ids.json'), JSON.stringify({ deletedIds: this.getDeletedIds() }, null, 2), 'utf-8');
+        const siteSettingsJson = JSON.stringify(this.data.settings, null, 2);
+        const contentJson = JSON.stringify(this.getAllContent(true), null, 2);
+        const deletedIdsJson = JSON.stringify({ deletedIds: this.getDeletedIds() }, null, 2);
+
+        fs.writeFileSync(path.join(publicDir, 'site-settings.json'), siteSettingsJson, 'utf-8');
+        fs.writeFileSync(path.join(publicDir, 'content.json'), contentJson, 'utf-8');
+        fs.writeFileSync(path.join(publicDir, 'deleted-ids.json'), deletedIdsJson, 'utf-8');
+
+        const distDir = path.join(process.cwd(), 'dist', 'data');
+        if (fs.existsSync(path.join(process.cwd(), 'dist'))) {
+          if (!fs.existsSync(distDir)) {
+            fs.mkdirSync(distDir, { recursive: true });
+          }
+          fs.writeFileSync(path.join(distDir, 'site-settings.json'), siteSettingsJson, 'utf-8');
+          fs.writeFileSync(path.join(distDir, 'content.json'), contentJson, 'utf-8');
+          fs.writeFileSync(path.join(distDir, 'deleted-ids.json'), deletedIdsJson, 'utf-8');
+        }
       } catch (_) {}
     } catch (err) {
       console.error('Error saving data file:', err);
