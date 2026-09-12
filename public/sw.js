@@ -41,11 +41,13 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
 
-  // Skip Firestore API and Google Auth endpoints from service worker interception
+  // Skip Firestore API, Google Auth, API routes, data endpoints, and JSON files from service worker caching
   if (
     url.hostname.includes('firestore.googleapis.com') ||
     url.hostname.includes('identitytoolkit.googleapis.com') ||
-    url.pathname.startsWith('/api/')
+    url.pathname.startsWith('/api/') ||
+    url.pathname.startsWith('/data/') ||
+    url.pathname.endsWith('.json')
   ) {
     return;
   }

@@ -3,31 +3,46 @@
 [build]
   publish = "dist"
   command = "npm run build"
+  functions = "netlify/functions"
 
 [build.environment]
   DISABLE_NETLIFY_DRAWER = "true"
   NETLIFY_DRAWER_DISABLED = "true"
 
+# Forward all API requests directly to Netlify Functions (backed by live Firestore)
 [[redirects]]
-  from = "/api/site/settings"
-  to = "/data/site-settings.json"
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
   status = 200
 
-[[redirects]]
-  from = "/api/content/deleted-ids"
-  to = "/data/deleted-ids.json"
-  status = 200
-
-[[redirects]]
-  from = "/api/content"
-  to = "/data/content.json"
-  status = 200
-
+# Fallback for SPA routing
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
 
+# Prevent caching of dynamic entrypoints and data
+[[headers]]
+  for = "/"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/data/*"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/api/*"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+# Immutable caching for hashed static assets
 [[headers]]
   for = "/assets/*"
   [headers.values]

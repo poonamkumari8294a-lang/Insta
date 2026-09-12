@@ -677,14 +677,25 @@ export async function syncAppStateFromServer(force = false): Promise<void> {
       currentLen === 0;
 
     if (contentNeedsSync) {
-      const serverItems = await fetchServerContentFallback(false);
-      if (serverItems && serverItems.length > 0) {
+      let freshItems: MediaItem[] | null = null;
+      if (!isCloudQuotaExhausted()) {
+        try {
+          freshItems = await fetchContentList(true);
+        } catch (_) {}
+      }
+
+      if (!freshItems || freshItems.length === 0) {
+        freshItems = await fetchServerContentFallback(false);
+        if (freshItems && freshItems.length > 0) {
+          lastKnownContentVersion = (status && status.contentVersion) || Date.now();
+          memoryContentList = freshItems;
+          memoryContentTimestamp = Date.now();
+          try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(freshItems)); } catch (_) {}
+          try { if (typeof localStorage !== 'undefined') localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(freshItems)); } catch (_) {}
+          sharedContentManager.notifyLocalUpdate(freshItems);
+        }
+      } else {
         lastKnownContentVersion = (status && status.contentVersion) || Date.now();
-        memoryContentList = serverItems;
-        memoryContentTimestamp = Date.now();
-        try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(serverItems)); } catch (_) {}
-        try { if (typeof localStorage !== 'undefined') localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(serverItems)); } catch (_) {}
-        sharedContentManager.notifyLocalUpdate(serverItems);
       }
     }
 
@@ -694,15 +705,13 @@ export async function syncAppStateFromServer(force = false): Promise<void> {
       (status.settingsVersion && status.settingsVersion !== lastKnownSettingsVersion);
 
     if (settingsNeedsSync) {
-      const serverSettings = await fetchServerSettingsFallback();
-      if (serverSettings) {
-        lastKnownSettingsVersion = (status && status.settingsVersion) || Date.now();
-        memorySiteSettings = serverSettings;
-        memorySettingsTimestamp = Date.now();
-        try { setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(serverSettings)); } catch (_) {}
-        try { if (typeof localStorage !== 'undefined') localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(serverSettings)); } catch (_) {}
-        sharedSettingsManager.notifyLocalUpdate(serverSettings);
-      }
+      try {
+        const freshSettings = await fetchSiteSettings(true);
+        if (freshSettings) {
+          lastKnownSettingsVersion = (status && status.settingsVersion) || Date.now();
+          sharedSettingsManager.notifyLocalUpdate(freshSettings);
+        }
+      } catch (_) {}
     }
 
     // 4. Determine if orders need synchronization (if authenticated as admin)
@@ -914,37 +923,113 @@ export async function fetchServerSettingsFallback(): Promise<SiteSettings | null
   return null;
 }
 
+/**
+ * Normalizes a media URL by stripping query parameters and lowercase scheme/host.
+ */
+export function normalizeMediaAssetUrl(url?: string): string {
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+  try {
+    const qIndex = trimmed.indexOf('?');
+    const base = qIndex !== -1 ? trimmed.substring(0, qIndex) : trimmed;
+    return base.toLowerCase();
+  } catch (_) {
+    return trimmed.split('?')[0].toLowerCase();
+  }
+}
+
+/**
+ * Deduplicates an array of MediaItems by:
+ * 1. Canonical item.id
+ * 2. item.cloudinaryPublicId
+ * 3. Normalized mediaUrl
+ * 4. Normalized thumbnailUrl (matching item type)
+ *
+ * Merges fields when duplicates are detected, preserving richer metadata,
+ * latest createdAt timestamp, and authoritative IDs.
+ */
+export function deduplicateMediaItems(items: MediaItem[]): MediaItem[] {
+  if (!Array.isArray(items) || items.length === 0) return [];
+
+  const seenIds = new Set<string>();
+  const seenMediaUrls = new Map<string, MediaItem>();
+  const seenPublicIds = new Map<string, MediaItem>();
+  const seenThumbUrls = new Map<string, MediaItem>();
+  const result: MediaItem[] = [];
+
+  for (const rawItem of items) {
+    if (!rawItem || !rawItem.id) continue;
+    const item = reconnectCloudinaryMetadata(rawItem);
+
+    if (seenIds.has(item.id)) {
+      continue;
+    }
+
+    const normMedia = normalizeMediaAssetUrl(item.mediaUrl);
+    const normThumb = normalizeMediaAssetUrl(item.thumbnailUrl);
+    const pubId = (item.cloudinaryPublicId || '').trim().toLowerCase();
+
+    // Check if we have already encountered this exact media asset
+    let match: MediaItem | undefined;
+    if (pubId && seenPublicIds.has(pubId)) {
+      match = seenPublicIds.get(pubId);
+    } else if (normMedia && seenMediaUrls.has(normMedia)) {
+      match = seenMediaUrls.get(normMedia);
+    } else if (normThumb && seenThumbUrls.has(normThumb) && item.type === seenThumbUrls.get(normThumb)?.type) {
+      match = seenThumbUrls.get(normThumb);
+    }
+
+    if (match) {
+      // Merge properties into match, prioritizing richer metadata
+      const isNewer = new Date(item.createdAt || 0).getTime() > new Date(match.createdAt || 0).getTime();
+      const hasBetterTitle = Boolean(item.title && item.title.length > (match.title?.length || 0));
+
+      // Keep primary ID: prefer rk- or custom ID over generic placeholders
+      const preferMatchId = match.id.startsWith('rk-') || !item.id.startsWith('rk-');
+      const chosenId = preferMatchId ? match.id : item.id;
+
+      Object.assign(match, {
+        ...item,
+        ...match,
+        id: chosenId,
+        title: hasBetterTitle ? item.title : match.title,
+        createdAt: isNewer ? item.createdAt : match.createdAt,
+        views: Math.max(Number(match.views || 0), Number(item.views || 0)),
+        likes: Math.max(Number(match.likes || 0), Number(item.likes || 0)),
+        price: match.price !== undefined ? match.price : item.price,
+        published: match.published !== false && item.published !== false,
+      });
+
+      seenIds.add(item.id);
+      continue;
+    }
+
+    seenIds.add(item.id);
+    if (pubId) seenPublicIds.set(pubId, item);
+    if (normMedia) seenMediaUrls.set(normMedia, item);
+    if (normThumb) seenThumbUrls.set(normThumb, item);
+    result.push(item);
+  }
+
+  return result;
+}
+
 export function mergeMediaItemLists(...lists: (MediaItem[] | null | undefined)[]): MediaItem[] {
-  const map = new Map<string, MediaItem>();
+  const allItems: MediaItem[] = [];
   for (const list of lists) {
-    if (!Array.isArray(list)) continue;
-    for (const item of list) {
-      if (!item || !item.id) continue;
-      const existing = map.get(item.id);
-      if (!existing) {
-        map.set(item.id, item);
-      } else {
-        // Keep the version with more complete metadata or newer createdAt
-        map.set(item.id, { ...existing, ...item });
-      }
+    if (Array.isArray(list)) {
+      allItems.push(...list);
     }
   }
-  const merged = Array.from(map.values());
-  const cleaned = filterOutDeletedItems(merged.map(item => reconnectCloudinaryMetadata(item)));
+  const deduped = deduplicateMediaItems(allItems);
+  const cleaned = filterOutDeletedItems(deduped);
   cleaned.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
   return cleaned;
 }
 
 export async function fetchServerContentFallback(forAdmin = false): Promise<MediaItem[] | null> {
   const sources: (MediaItem[] | null)[] = [];
-
-  // Source 0: Check locally cached items from memory or localStorage
-  try {
-    const localCached = memoryContentList || getCachedContentListSync();
-    if (Array.isArray(localCached) && localCached.length > 0) {
-      sources.push(localCached);
-    }
-  } catch (_) {}
 
   // Source 1: Direct Server API call
   const serverPromise = (async (): Promise<MediaItem[] | null> => {
@@ -1017,6 +1102,15 @@ export async function fetchServerContentFallback(forAdmin = false): Promise<Medi
   if (merged.length > 0) {
     return merged;
   }
+
+  // Emergency offline-only fallback: only use local cache if all remote sources are unavailable
+  try {
+    const localCached = memoryContentList || getCachedContentListSync();
+    if (Array.isArray(localCached) && localCached.length > 0) {
+      return filterOutDeletedItems(localCached);
+    }
+  } catch (_) {}
+
   return null;
 }
 
@@ -1305,8 +1399,20 @@ export async function fetchSiteSettings(forceFresh = false): Promise<SiteSetting
       return null;
     })();
 
+    // 1. First check Firestore with a responsive timeout (Firestore is authoritative live cloud database)
     try {
-      // Prioritize instant server API response (Contains admin's true settings from store.json)
+      const fsResult = await firestorePromise;
+      if (fsResult) {
+        memorySiteSettings = fsResult;
+        memorySettingsTimestamp = Date.now();
+        try { setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(fsResult)); } catch (_) {}
+        try { if (typeof localStorage !== 'undefined') localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(fsResult)); } catch (_) {}
+        return fsResult;
+      }
+    } catch (_) {}
+
+    // 2. Server API fallback if Firestore was unreachable or timed out
+    try {
       const serverResult = await serverPromise;
       if (serverResult) {
         memorySiteSettings = serverResult;
@@ -1315,15 +1421,6 @@ export async function fetchSiteSettings(forceFresh = false): Promise<SiteSetting
         return serverResult;
       }
     } catch (_) {}
-
-    // If server was unreachable, await firestore result as fallback
-    const fsResult = await firestorePromise;
-    if (fsResult) {
-      memorySiteSettings = fsResult;
-      memorySettingsTimestamp = Date.now();
-      try { setSessionItem(SETTINGS_CACHE_KEY, JSON.stringify(fsResult)); } catch (_) {}
-      return fsResult;
-    }
 
     return memorySiteSettings || getCachedSiteSettingsSync();
   })().finally(() => {
@@ -1363,10 +1460,10 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
   }
 
   activeContentPromise = (async () => {
-    // 1. Concurrently fetch instant local server endpoint (~4ms, has all Cloudinary items)
+    // 1. Kick off server fallback promise concurrently
     const serverPromise = fetchServerContentFallback(false).catch(() => null);
 
-    // 2. Also query Firestore with a tight 1200ms timeout
+    // 2. Query Firestore with reliable single-field order (NO composite index needed!)
     const firestorePromise = (async () => {
       try {
         const contentRef = collection(firestore, 'content');
@@ -1374,31 +1471,32 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
         try {
           const q = query(
             contentRef,
-            where('published', '==', true),
             orderBy('createdAt', 'desc'),
-            firestoreLimit(100)
+            firestoreLimit(250)
           );
           trackFirestoreRead('getDocs', 'content:published-feed', 1);
-          snap = await withTimeout(getDocs(q), 1200);
+          snap = await withTimeout(getDocs(q), 1800);
         } catch (_queryErr) {
-          const qSimple = query(contentRef, where('published', '==', true), firestoreLimit(100));
+          const qSimple = query(contentRef, firestoreLimit(250));
           trackFirestoreRead('getDocs', 'content:published-fallback', 1);
-          snap = await withTimeout(getDocs(qSimple), 1000);
+          snap = await withTimeout(getDocs(qSimple), 1200);
         }
 
-        const items: MediaItem[] = [];
+        const rawItems: MediaItem[] = [];
         snap.forEach(docSnap => {
           const item = reconnectCloudinaryMetadata({ ...docSnap.data(), id: docSnap.id } as MediaItem);
-          items.push(item);
+          rawItems.push(item);
         });
 
-        if (items.length > 0) {
-          items.sort((a, b) => {
+        if (rawItems.length > 0) {
+          const deduped = deduplicateMediaItems(rawItems);
+          const clean = filterOutDeletedItems(deduped);
+          clean.sort((a, b) => {
             const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
             const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
             return timeB - timeA;
           });
-          return items;
+          return clean;
         }
       } catch (err: any) {
         handleFirestoreError('fetchContentList', err);
@@ -1406,11 +1504,25 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
       return null;
     })();
 
+    // Priority 1: Firestore live database result
     try {
-      // Prioritize instant server API response (returns in ~4ms and respects all deletions!)
+      const fsItems = await firestorePromise;
+      if (fsItems !== null && Array.isArray(fsItems) && fsItems.length > 0) {
+        memoryContentList = fsItems;
+        memoryContentTimestamp = Date.now();
+        try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(fsItems)); } catch (_) {}
+        try { if (typeof localStorage !== 'undefined') localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(fsItems)); } catch (_) {}
+        sharedContentManager.notifyLocalUpdate(fsItems);
+        return applyUserAccessTokens(fsItems);
+      }
+    } catch (_) {}
+
+    // Priority 2: Server API fallback (if Firestore was unreachable or empty)
+    try {
       const serverResult = await serverPromise;
-      if (serverResult !== null) {
-        const clean = filterOutDeletedItems(serverResult);
+      if (serverResult !== null && Array.isArray(serverResult) && serverResult.length > 0) {
+        const deduped = deduplicateMediaItems(serverResult);
+        const clean = filterOutDeletedItems(deduped);
         memoryContentList = clean;
         memoryContentTimestamp = Date.now();
         try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(clean)); } catch (_) {}
@@ -1419,17 +1531,6 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
         return applyUserAccessTokens(clean);
       }
     } catch (_) {}
-
-    // If server was unreachable, await firestore result
-    const fsItems = await firestorePromise;
-    if (fsItems !== null && Array.isArray(fsItems)) {
-      const clean = filterOutDeletedItems(fsItems);
-      memoryContentList = clean;
-      memoryContentTimestamp = Date.now();
-      try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(clean)); } catch (_) {}
-      sharedContentManager.notifyLocalUpdate(clean);
-      return applyUserAccessTokens(clean);
-    }
 
     const fallbackList = memoryContentList || getCachedContentListSync();
     return applyUserAccessTokens(fallbackList);
@@ -1466,12 +1567,14 @@ class ContentSubscriptionManager {
       onUpdate(applyUserAccessTokens(initialList));
     }
 
-    // ALWAYS fetch from backend server API in background immediately so user phone gets all real items
-    fetchServerContentFallback(false).then(serverItems => {
-      if (serverItems && serverItems.length > 0) {
-        this.notifyLocalUpdate(serverItems);
-      }
-    }).catch(() => {});
+    // If Firestore quota is exhausted or initial list is empty, fetch fallback in background
+    if (isCloudQuotaExhausted() || !initialList || initialList.length === 0) {
+      fetchServerContentFallback(false).then(serverItems => {
+        if (serverItems && serverItems.length > 0) {
+          this.notifyLocalUpdate(serverItems);
+        }
+      }).catch(() => {});
+    }
 
     // Attach single Firestore listener or start server polling if first subscriber
     if (this.subscribers.size === 1) {
@@ -1545,40 +1648,41 @@ class ContentSubscriptionManager {
       try {
         const contentRef = collection(firestore, 'content');
         const q = useSimpleQuery
-          ? query(contentRef, firestoreLimit(60))
+          ? query(contentRef, firestoreLimit(250))
           : query(
               contentRef,
-              where('published', '==', true),
               orderBy('createdAt', 'desc'),
-              firestoreLimit(40)
+              firestoreLimit(250)
             );
 
-        console.log(`[FIRESTORE LISTENER] Initializing shared singleton onSnapshot listener (mode: ${useSimpleQuery ? 'simple' : 'compound'})...`);
+        console.log(`[FIRESTORE LISTENER] Initializing shared singleton onSnapshot listener (mode: ${useSimpleQuery ? 'simple' : 'ordered'})...`);
         this.unsubscribeFirestore = onSnapshot(
           q,
           (snap) => {
             this.isConnecting = false;
             trackFirestoreRead('snapshot', 'shared-content-listener', snap.docChanges().length || 1);
             
-            const items: MediaItem[] = [];
+            const rawItems: MediaItem[] = [];
             snap.forEach(docSnap => {
               const item = reconnectCloudinaryMetadata({ ...docSnap.data(), id: docSnap.id } as MediaItem);
               if (item.published !== false) {
-                items.push(item);
+                rawItems.push(item);
               }
             });
 
-            items.sort((a, b) => {
+            const deduped = deduplicateMediaItems(rawItems);
+            const clean = filterOutDeletedItems(deduped);
+            clean.sort((a, b) => {
               const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
               const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
               return timeB - timeA;
             });
 
-            this.notifyLocalUpdate(items);
+            this.notifyLocalUpdate(clean);
           },
           (error) => {
             this.isConnecting = false;
-            console.warn(`[Firebase Shared Listener Error (${useSimpleQuery ? 'simple' : 'compound'})]`, error?.message || error);
+            console.warn(`[Firebase Shared Listener Error (${useSimpleQuery ? 'simple' : 'ordered'})]`, error?.message || error);
             
             if (!useSimpleQuery) {
               // Automatically retry with index-free simple query fallback
@@ -3438,6 +3542,12 @@ export async function deleteAdminContent(id: string, itemOverride?: MediaItem): 
     await deleteDoc(docRef);
     clientFsDeleted = true;
     console.log('[Firebase Cloud] Confirmed direct deleteDoc on Firestore for post:', id);
+
+    // Record deletion marker in Firestore 'deletedContent' collection so all devices recognize deletion
+    try {
+      const delDocRef = doc(firestore, 'deletedContent', id);
+      await setDoc(delDocRef, { id, deletedAt: new Date().toISOString() });
+    } catch (_) {}
   } catch (clientFsErr) {
     console.warn('[Firebase Cloud direct delete non-fatal]', clientFsErr);
   }

@@ -2866,7 +2866,23 @@ class Database {
     const deletedSet = new Set<string>(this.data.deletedIds || []);
     const liveContent = this.data.content.filter(c => !deletedSet.has(c.id));
     const list = includeUnpublished ? liveContent : liveContent.filter(c => c.published);
-    return [...list].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+    
+    // Deduplicate items on server by ID and media asset URL
+    const seenIds = new Set<string>();
+    const seenMedia = new Set<string>();
+    const deduped: MediaItem[] = [];
+
+    for (const item of list) {
+      if (!item || !item.id || seenIds.has(item.id)) continue;
+      const key = (item.mediaUrl || item.thumbnailUrl || '').split('?')[0].trim().toLowerCase();
+      if (key && seenMedia.has(key)) continue;
+
+      seenIds.add(item.id);
+      if (key) seenMedia.add(key);
+      deduped.push(item);
+    }
+
+    return deduped.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
   }
 
   public getDeletedIds(): string[] {
