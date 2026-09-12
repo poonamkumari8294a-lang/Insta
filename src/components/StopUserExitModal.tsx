@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Flame, Sparkles, Zap, Gift, X, Lock, CheckCircle2, ShieldCheck, HeartHandshake } from 'lucide-react';
 import { MediaItem } from '../types';
 import { formatINR } from '../utils/api';
-import confetti from 'canvas-confetti';
+import confetti from '../utils/confetti';
 
 interface StopUserExitModalProps {
   isOpen: boolean;

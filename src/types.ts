@@ -1,6 +1,6 @@
 export type ContentType = 'photo' | 'video' | 'pack';
 export type ContentAccess = 'free' | 'premium';
-export type OrderStatus = 'pending' | 'waiting_verification' | 'paid' | 'failed' | 'expired';
+export type OrderStatus = 'pending' | 'waiting_verification' | 'manual_review' | 'processing' | 'paid' | 'failed' | 'expired' | 'cancelled' | 'refunded';
 
 export interface MediaItem {
   id: string;
@@ -54,6 +54,12 @@ export interface OrderItem {
   createdAt: string;
   paidAt?: string;
   expiresAt: string;
+  autoVerified?: boolean;
+  aiExtractedUtr?: string;
+  aiExtractedAmount?: number;
+  aiExtractedDate?: string;
+  aiVerificationNotes?: string;
+  rejectionReason?: string;
 }
 
 export interface VipUserProfile {

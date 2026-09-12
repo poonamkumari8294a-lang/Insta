@@ -914,70 +914,109 @@ export async function fetchServerSettingsFallback(): Promise<SiteSettings | null
   return null;
 }
 
-export async function fetchServerContentFallback(forAdmin = false): Promise<MediaItem[] | null> {
-  // 1. Direct Server API call
-  try {
-    let url = '/api/content';
-    const headers: Record<string, string> = {};
-    if (forAdmin) {
-      const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
-      url = '/api/admin/content';
-      headers['Authorization'] = `Bearer ${adminToken}`;
-    }
-    const res = await fetch(url, { headers });
-    const ct = res.headers.get('content-type') || '';
-    if (res.ok && ct.includes('application/json')) {
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        const cleaned = filterOutDeletedItems(data.map(item => reconnectCloudinaryMetadata(item)));
-        cleaned.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-        return cleaned;
+export function mergeMediaItemLists(...lists: (MediaItem[] | null | undefined)[]): MediaItem[] {
+  const map = new Map<string, MediaItem>();
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (!item || !item.id) continue;
+      const existing = map.get(item.id);
+      if (!existing) {
+        map.set(item.id, item);
+      } else {
+        // Keep the version with more complete metadata or newer createdAt
+        map.set(item.id, { ...existing, ...item });
       }
-    } else if (forAdmin) {
-      const resPub = await fetch('/api/content');
-      const ctPub = resPub.headers.get('content-type') || '';
-      if (resPub.ok && ctPub.includes('application/json')) {
-        const dataPub = await resPub.json();
-        if (Array.isArray(dataPub) && dataPub.length > 0) {
-          const cleaned = filterOutDeletedItems(dataPub.map(item => reconnectCloudinaryMetadata(item)));
-          cleaned.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-          return cleaned;
+    }
+  }
+  const merged = Array.from(map.values());
+  const cleaned = filterOutDeletedItems(merged.map(item => reconnectCloudinaryMetadata(item)));
+  cleaned.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  return cleaned;
+}
+
+export async function fetchServerContentFallback(forAdmin = false): Promise<MediaItem[] | null> {
+  const sources: (MediaItem[] | null)[] = [];
+
+  // Source 0: Check locally cached items from memory or localStorage
+  try {
+    const localCached = memoryContentList || getCachedContentListSync();
+    if (Array.isArray(localCached) && localCached.length > 0) {
+      sources.push(localCached);
+    }
+  } catch (_) {}
+
+  // Source 1: Direct Server API call
+  const serverPromise = (async (): Promise<MediaItem[] | null> => {
+    try {
+      let url = '/api/content';
+      const headers: Record<string, string> = {};
+      if (forAdmin) {
+        const adminToken = getAdminToken() || 'adm_Ashok#8899_token';
+        url = '/api/admin/content';
+        headers['Authorization'] = `Bearer ${adminToken}`;
+      }
+      const res = await fetch(url, { headers });
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) return data;
+      } else if (forAdmin) {
+        const resPub = await fetch('/api/content');
+        const ctPub = resPub.headers.get('content-type') || '';
+        if (resPub.ok && ctPub.includes('application/json')) {
+          const dataPub = await resPub.json();
+          if (Array.isArray(dataPub) && dataPub.length > 0) return dataPub;
         }
       }
+    } catch (err) {
+      console.warn('[Server Content API Non-fatal]', err);
     }
-  } catch (err) {
-    console.warn('[Server Content Fallback]', err);
+    return null;
+  })();
+
+  // Source 2: Global Cloudinary Raw CDN Snapshot (Universal 100% reliable edge copy)
+  const cdnPromise = (async (): Promise<MediaItem[] | null> => {
+    try {
+      const res = await fetch(`https://res.cloudinary.com/mnbjgtqu/raw/upload/ruma_content_feed?t=${Date.now()}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) return data;
+      }
+    } catch (_) {}
+    return null;
+  })();
+
+  // Source 3: Static JSON fallback
+  const staticPromise = (async (): Promise<MediaItem[] | null> => {
+    try {
+      const res = await fetch(`/data/content.json?t=${Date.now()}`, {
+        headers: { 'Accept': 'application/json' }
+      });
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) return data;
+      }
+    } catch (_) {}
+    return null;
+  })();
+
+  // Await all sources concurrently
+  const [serverData, cdnData, staticData] = await Promise.all([
+    serverPromise,
+    cdnPromise,
+    staticPromise
+  ]);
+
+  if (serverData) sources.push(serverData);
+  if (cdnData) sources.push(cdnData);
+  if (staticData) sources.push(staticData);
+
+  const merged = mergeMediaItemLists(...sources);
+  if (merged.length > 0) {
+    return merged;
   }
-
-  // 2. Static JSON fallback (for static hosting or Cloud Run shared static build)
-  try {
-    const res = await fetch(`/data/content.json?t=${Date.now()}`, {
-      headers: { 'Accept': 'application/json' }
-    });
-    const ct = res.headers.get('content-type') || '';
-    if (res.ok && ct.includes('application/json')) {
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        const cleaned = filterOutDeletedItems(data.map(item => reconnectCloudinaryMetadata(item)));
-        cleaned.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-        return cleaned;
-      }
-    }
-  } catch (_) {}
-
-  // 3. Global Cloudinary Raw CDN Snapshot (High availability worldwide, survives Firebase quota exhaustion & server 404s)
-  try {
-    const res = await fetch(`https://res.cloudinary.com/mnbjgtqu/raw/upload/ruma_content_feed?t=${Date.now()}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        const cleaned = filterOutDeletedItems(data.map(item => reconnectCloudinaryMetadata(item)));
-        cleaned.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-        return cleaned;
-      }
-    }
-  } catch (_) {}
-
   return null;
 }
 
@@ -1375,6 +1414,7 @@ export async function fetchContentList(forceFresh = false): Promise<MediaItem[]>
         memoryContentList = clean;
         memoryContentTimestamp = Date.now();
         try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(clean)); } catch (_) {}
+        try { if (typeof localStorage !== 'undefined') localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(clean)); } catch (_) {}
         sharedContentManager.notifyLocalUpdate(clean);
         return applyUserAccessTokens(clean);
       }
@@ -1950,7 +1990,8 @@ export async function createOrder(
     }
   }
 
-  const orderId = `ORD_${Date.now()}_${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+  const randHex = Array.from({ length: 6 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join('').toUpperCase();
+  const orderId = `VVV-${randHex}`;
   const amount = Number(item?.price) || 49;
   const upiId = (settings?.upiId || 'rima11q@ptyes').trim();
   const payeeName = (settings?.creatorName || 'Ruma Kumari').trim();
@@ -2075,6 +2116,7 @@ export async function checkOrderStatus(orderId: string): Promise<{
   paidAt?: string;
   accessToken?: string;
   transactionRef?: string;
+  rejectionReason?: string;
 }> {
   if (!isCloudQuotaExhausted()) {
     try {
@@ -2095,7 +2137,8 @@ export async function checkOrderStatus(orderId: string): Promise<{
           contentTitle: order.contentTitle,
           paidAt: order.paidAt,
           accessToken: order.accessToken,
-          transactionRef: order.transactionRef
+          transactionRef: order.transactionRef,
+          rejectionReason: order.rejectionReason
         };
       }
     } catch (err) {
@@ -2965,6 +3008,61 @@ export async function submitPaymentUtr(
   };
 }
 
+export async function submitPaymentProofApi(
+  orderId: string,
+  screenshotUrl: string,
+  utr?: string
+): Promise<{
+  success: boolean;
+  status?: OrderItem['status'];
+  message?: string;
+  error?: string;
+  autoVerified?: boolean;
+  accessToken?: string;
+  details?: any;
+}> {
+  try {
+    const res = await fetch('/api/payment/proof', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderId, screenshot: screenshotUrl, utr })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Failed to submit proof');
+    }
+    const finalStatus: OrderItem['status'] = data.status || 'manual_review';
+
+    // Also update cloud firestore if available
+    try {
+      const orderRef = doc(firestore, 'orders', orderId);
+      await setDoc(
+        orderRef,
+        {
+          status: finalStatus,
+          screenshotUrl,
+          transactionRef: utr || data.details?.extractedUtr || '',
+          autoVerified: !!data.auto_verified,
+          paidAt: finalStatus === 'paid' ? new Date().toISOString() : undefined,
+        },
+        { merge: true }
+      );
+    } catch (_) {}
+
+    return {
+      success: true,
+      status: finalStatus,
+      message: data.message,
+      autoVerified: data.auto_verified,
+      accessToken: data.accessToken,
+      details: data.details,
+    };
+  } catch (err: any) {
+    console.error('submitPaymentProofApi error:', err);
+    return { success: false, error: err.message };
+  }
+}
+
 export async function devSimulatePayment(orderId: string): Promise<{ success: boolean; order: OrderItem }> {
   return verifyUserPayment(orderId, `SIM_${Date.now()}`);
 }
@@ -2979,6 +3077,7 @@ export async function adminApproveOrder(orderId: string, transactionRef?: string
 }
 
 export async function adminRejectOrder(orderId: string, _reason?: string): Promise<{ success: boolean; order?: OrderItem; error?: string }> {
+  const reasonText = _reason || 'Payment proof verification failed / Invalid UTR';
   if (!isCloudQuotaExhausted()) {
     try {
       const orderRef = doc(firestore, 'orders', orderId);
@@ -2988,7 +3087,8 @@ export async function adminRejectOrder(orderId: string, _reason?: string): Promi
       const current = snap.data() as OrderItem;
       const updated: OrderItem = {
         ...current,
-        status: 'failed'
+        status: 'failed',
+        rejectionReason: reasonText
       };
 
       await setDoc(orderRef, updated, { merge: true });
@@ -3011,7 +3111,8 @@ export async function adminRejectOrder(orderId: string, _reason?: string): Promi
       headers: {
         'Authorization': `Bearer ${adminToken}`,
         'Content-Type': 'application/json'
-      }
+      },
+      body: JSON.stringify({ reason: reasonText })
     });
     if (serverRes.ok) {
       const sOrder = await serverRes.json();
@@ -3086,6 +3187,7 @@ export async function fetchAdminContent(forceFresh = false): Promise<MediaItem[]
       memoryContentList = clean;
       memoryContentTimestamp = Date.now();
       try { setSessionItem(CONTENT_CACHE_KEY, JSON.stringify(clean)); } catch (_) {}
+      try { if (typeof localStorage !== 'undefined') localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(clean)); } catch (_) {}
       sharedContentManager.notifyLocalUpdate(clean);
       return clean;
     }

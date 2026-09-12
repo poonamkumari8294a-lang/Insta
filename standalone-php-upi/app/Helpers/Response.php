@@ -1,0 +1,28 @@
+<?php
+declare(strict_types=1);
+
+namespace App\Helpers;
+
+class Response {
+    public static function json(array $data, int $status = 200): void {
+        http_response_code($status);
+        header('Content-Type: application/json; charset=utf-8');
+        header('X-Content-Type-Options: nosniff');
+        header('X-Frame-Options: SAMEORIGIN');
+        echo json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    public static function error(string $message, int $status = 400, array $extra = []): void {
+        self::json(array_merge([
+            'success' => false,
+            'error' => $message
+        ], $extra), $status);
+    }
+
+    public static function success(array $data = [], int $status = 200): void {
+        self::json(array_merge([
+            'success' => true
+        ], $data), $status);
+    }
+}

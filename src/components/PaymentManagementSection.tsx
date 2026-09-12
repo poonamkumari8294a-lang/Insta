@@ -99,6 +99,9 @@ export const PaymentManagementSection: React.FC<PaymentManagementSectionProps> =
     if (!matchesSearch) return false;
 
     if (orderStatusFilter === 'all') return true;
+    if (orderStatusFilter === 'waiting_verification' || orderStatusFilter === 'manual_review') {
+      return o.status === 'waiting_verification' || o.status === 'manual_review';
+    }
     return o.status === orderStatusFilter;
   });
 
@@ -276,7 +279,7 @@ export const PaymentManagementSection: React.FC<PaymentManagementSectionProps> =
     showToast('📊 Orders exported to CSV!');
   };
 
-  const pendingVerificationCount = ordersList.filter((o) => o.status === 'waiting_verification').length;
+  const pendingVerificationCount = ordersList.filter((o) => o.status === 'waiting_verification' || o.status === 'manual_review').length;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
@@ -386,8 +389,8 @@ export const PaymentManagementSection: React.FC<PaymentManagementSectionProps> =
                 className="bg-white border border-purple-200 rounded-2xl px-3.5 py-2 text-xs text-purple-950 font-bold shadow-xs cursor-pointer"
               >
                 <option value="all">All Statuses ({ordersList.length})</option>
-                <option value="waiting_verification">
-                  ⏳ Review UTR ({ordersList.filter((o) => o.status === 'waiting_verification').length})
+                <option value="manual_review">
+                  🔍 Manual Review ({ordersList.filter((o) => o.status === 'manual_review' || o.status === 'waiting_verification').length})
                 </option>
                 <option value="paid">✅ Paid ({ordersList.filter((o) => o.status === 'paid').length})</option>
                 <option value="pending">🕒 Pending ({ordersList.filter((o) => o.status === 'pending').length})</option>

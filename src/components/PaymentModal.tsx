@@ -1,49 +1,44 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MediaItem, OrderItem } from '../types';
+import { MediaItem, OrderItem, SiteSettings } from '../types';
 import {
   createOrder,
   checkOrderStatus,
-  submitPaymentUtr,
-  devSimulatePayment,
+  submitPaymentProofApi,
   formatINR,
   saveAccessToken,
   getStoredUserProfile,
   saveStoredUserProfile,
   saveVipLeadToCloud,
-  updateOrderCustomer
+  updateOrderCustomer,
+  fetchSiteSettings,
+  getCachedSiteSettingsSync
 } from '../utils/api';
 import { compressImageFile } from '../utils/mediaUpload';
-import confetti from 'canvas-confetti';
+import confetti from '../utils/confetti';
 import {
   X,
   QrCode,
   Copy,
   Check,
-  Clock,
-  ShieldCheck,
+  Download,
   AlertCircle,
-  Sparkles,
   Lock,
   ArrowRight,
+  ArrowUp,
   CheckCircle2,
   RefreshCw,
-  Smartphone,
-  HelpCircle,
-  FileCheck,
-  Zap,
-  Download,
+  Clock,
+  Sparkles,
+  ChevronRight,
+  ShieldCheck,
   Upload,
-  Camera,
-  Trash2,
-  User,
-  Phone,
-  Edit3,
-  MessageCircle,
+  FileImage,
   ExternalLink,
-  ChevronDown,
-  ChevronUp,
-  BadgeCheck,
-  CreditCard
+  Zap,
+  MessageCircle,
+  Phone,
+  RotateCcw,
+  XCircle
 } from 'lucide-react';
 
 interface PaymentModalProps {
@@ -53,12 +48,15 @@ interface PaymentModalProps {
   onSuccess: (item: MediaItem) => void;
 }
 
+type CheckoutPage = 'checkout' | 'qr' | 'proof' | 'manual_review' | 'rejected' | 'success';
+
 export const PaymentModal: React.FC<PaymentModalProps> = ({
   item,
   isOpen = true,
   onClose,
   onSuccess,
 }) => {
+  const [currentPage, setCurrentPage] = useState<CheckoutPage>('checkout');
   const [orderData, setOrderData] = useState<{
     order: OrderItem;
     qrDataUrl: string;
@@ -76,26 +74,38 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [copiedUpi, setCopiedUpi] = useState(false);
   const [copiedOrderId, setCopiedOrderId] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState<OrderItem['status']>('pending');
-  const [timeLeft, setTimeLeft] = useState(10 * 60); // 10 mins countdown
-  const [isSimulating, setIsSimulating] = useState(false);
-  const [isSubmittingUtr, setIsSubmittingUtr] = useState(false);
-  const [utrNumber, setUtrNumber] = useState('');
-  const [utrError, setUtrError] = useState<string | null>(null);
-  const [showUtrHelp, setShowUtrHelp] = useState(false);
-  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
-  const [screenshotName, setScreenshotName] = useState<string | null>(null);
-  const [isProcessingScreenshot, setIsProcessingScreenshot] = useState(false);
-  const screenshotInputRef = useRef<HTMLInputElement>(null);
+  const [timeLeft, setTimeLeft] = useState(29 * 60 + 29); // 29:29 as in screenshot
+
+  // Helpline and settings state
+  const [siteSettings, setSiteSettings] = useState<SiteSettings | null>(() => getCachedSiteSettingsSync());
+  const [reviewReason, setReviewReason] = useState<string | null>(null);
+  const [rejectionNote, setRejectionNote] = useState<string | null>(null);
+  const [copiedHelpline, setCopiedHelpline] = useState(false);
+
+  // Screenshot Upload States
+  const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
+  const [screenshotPreview, setScreenshotPreview] = useState<string | null>(null);
+  const [userUtr, setUserUtr] = useState('');
+  const [isAutoVerified, setIsAutoVerified] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Polling ref
   const pollingRef = useRef<any>(null);
 
-  // Customer Personal Details (Name & 10-digit WhatsApp Phone)
+  // Customer Personal Details
   const [userName, setUserName] = useState('');
   const [userPhone, setUserPhone] = useState('');
-  const [showEditDetails, setShowEditDetails] = useState(false);
-  const [detailsError, setDetailsError] = useState<string | null>(null);
+
+  // Fetch Site Settings for helpline
+  useEffect(() => {
+    fetchSiteSettings().then((st) => {
+      if (st) setSiteSettings(st);
+    }).catch(() => {});
+  }, []);
 
   // Load existing profile if available
   useEffect(() => {
@@ -106,43 +116,14 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     }
   }, []);
 
-  const handleScreenshotSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsProcessingScreenshot(true);
-    try {
-      const compressedDataUrl = await compressImageFile(file, 1280, 1280, 0.82);
-      setScreenshotUrl(compressedDataUrl);
-      setScreenshotName(file.name);
-    } catch (err: any) {
-      console.error('Screenshot compression error:', err);
-      const reader = new FileReader();
-      reader.onload = () => {
-        setScreenshotUrl(reader.result as string);
-        setScreenshotName(file.name);
-      };
-      reader.readAsDataURL(file);
-    } finally {
-      setIsProcessingScreenshot(false);
-    }
-  };
-
-  const handleRemoveScreenshot = () => {
-    setScreenshotUrl(null);
-    setScreenshotName(null);
-    if (screenshotInputRef.current) {
-      screenshotInputRef.current.value = '';
-    }
-  };
-
-  // Initialize Order Instantly
+  // Initialize Order
   useEffect(() => {
     if (!item) return;
 
     let isMounted = true;
     setError(null);
     setLoading(true);
+    setCurrentPage('checkout');
 
     const savedUser = getStoredUserProfile();
     const initName = savedUser?.name || '';
@@ -153,6 +134,13 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         if (isMounted) {
           setOrderData(res);
           setPaymentStatus(res.order.status);
+          if (res.order.status === 'manual_review') {
+            setCurrentPage('manual_review');
+            if (res.order.rejectionReason) setReviewReason(res.order.rejectionReason);
+          } else if (res.order.status === 'failed') {
+            setCurrentPage('rejected');
+            if (res.order.rejectionReason) setRejectionNote(res.order.rejectionReason);
+          }
           setLoading(false);
         }
       })
@@ -169,7 +157,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     };
   }, [item]);
 
-  // Polling for automated payment confirmation
+  // Polling for automated payment confirmation or admin manual approval
   useEffect(() => {
     if (!orderData || paymentStatus === 'paid' || paymentStatus === 'failed' || paymentStatus === 'expired') {
       if (pollingRef.current) clearInterval(pollingRef.current);
@@ -181,34 +169,48 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         const statusRes = await checkOrderStatus(orderData.order.orderId);
         if (statusRes.status === 'paid') {
           setPaymentStatus('paid');
+          setCurrentPage('success');
           if (item) {
             const validTok = statusRes.accessToken || `tok_paid_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
             saveAccessToken(item.id, validTok);
           }
           confetti({
-            particleCount: 150,
+            particleCount: 160,
             spread: 90,
             origin: { y: 0.55 },
             colors: ['#10b981', '#6366f1', '#ec4899', '#f59e0b']
           });
           clearInterval(pollingRef.current);
-        } else if (statusRes.status === 'expired' || statusRes.status === 'failed') {
+        } else if (statusRes.status === 'manual_review' || statusRes.status === 'waiting_verification') {
+          setPaymentStatus('manual_review');
+          if (statusRes.rejectionReason) {
+            setReviewReason(statusRes.rejectionReason);
+          }
+          if (currentPage === 'proof') {
+            setCurrentPage('manual_review');
+          }
+        } else if (statusRes.status === 'failed') {
+          setPaymentStatus('failed');
+          setCurrentPage('rejected');
+          if (statusRes.rejectionReason) {
+            setRejectionNote(statusRes.rejectionReason);
+          }
+          clearInterval(pollingRef.current);
+        } else if (statusRes.status === 'expired') {
           setPaymentStatus(statusRes.status);
           clearInterval(pollingRef.current);
-        } else if (statusRes.status === 'waiting_verification') {
-          setPaymentStatus('waiting_verification');
         }
       } catch (err) {
-        console.error('Polling check error', err);
+        console.warn('Polling check error', err);
       }
     }, 2500);
 
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
-  }, [orderData, paymentStatus, item]);
+  }, [orderData, paymentStatus, item, currentPage]);
 
-  // Countdown timer
+  // Countdown timer (Starts at 29:29)
   useEffect(() => {
     if (paymentStatus === 'paid' || timeLeft <= 0) return;
 
@@ -234,13 +236,6 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  const handleCopyUpi = () => {
-    if (!orderData?.order.upiId) return;
-    navigator.clipboard.writeText(orderData.order.upiId);
-    setCopiedUpi(true);
-    setTimeout(() => setCopiedUpi(false), 2000);
-  };
-
   const handleCopyOrderId = () => {
     if (!orderData?.order.orderId) return;
     navigator.clipboard.writeText(orderData.order.orderId);
@@ -252,735 +247,917 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     if (!orderData?.qrDataUrl) return;
     const link = document.createElement('a');
     link.href = orderData.qrDataUrl;
-    link.download = `UPI-QR-${item.id}.png`;
+    link.download = `QR-${orderData.order.orderId}.png`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  // UTR Submission with validation & Personal Lead capture
-  const handleSubmitUtr = async (e?: React.FormEvent) => {
+  // Launch UPI App Intent
+  const handleLaunchApp = (appName: 'phonepe' | 'paytm' | 'qr') => {
+    if (appName === 'qr') {
+      setCurrentPage('qr');
+      return;
+    }
+
+    if (!orderData) return;
+
+    // Create server-side payment intent
+    fetch('/api/payment/intent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderId: orderData.order.orderId, appName })
+    }).catch(() => {});
+
+    const targetUrl = appName === 'phonepe'
+      ? (orderData.appUrls?.phonepe || orderData.upiIntentUrl)
+      : (orderData.appUrls?.paytm || orderData.upiIntentUrl);
+
+    // Try opening deep link on mobile
+    window.location.href = targetUrl;
+
+    // Also transition to QR page after attempting deep link so desktop/fallback has immediate visual feedback
+    setTimeout(() => {
+      setCurrentPage('qr');
+    }, 1200);
+  };
+
+  // Handle Screenshot File Selection
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    setUploadError(null);
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate size (5MB max)
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError('फ़ाइल 5 MB से बड़ी नहीं होनी चाहिए। (Max size 5 MB)');
+      return;
+    }
+
+    // Validate type (JPG, PNG, WEBP)
+    const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+    if (!validTypes.includes(file.type.toLowerCase())) {
+      setUploadError('कृपया केवल JPG, PNG या WebP फ़ाइल अपलोड करें।');
+      return;
+    }
+
+    setScreenshotFile(file);
+    try {
+      const compressed = await compressImageFile(file, 1280, 1280, 0.82);
+      setScreenshotPreview(compressed);
+    } catch (_) {
+      const reader = new FileReader();
+      reader.onload = () => setScreenshotPreview(reader.result as string);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Submit Screenshot Proof with AI Vision Auto-Verification
+  const handleSubmitProof = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!orderData || isSubmittingUtr) return;
+    if (!orderData) return;
 
-    setDetailsError(null);
-    setUtrError(null);
-
-    // Validate Name & 10-digit Phone
-    const cleanName = userName.trim();
-    const cleanPhone = userPhone.trim().replace(/[^0-9]/g, '');
-
-    if (!cleanName || cleanName.length < 2) {
-      setDetailsError('कृपया अपना नाम दर्ज करें (Please enter your full name).');
-      setShowEditDetails(true);
+    if (!screenshotPreview) {
+      setUploadError('कृपया पेमेंट स्क्रीनशॉट फ़ाइल चुनें। (Screenshot is required)');
       return;
     }
 
-    if (!cleanPhone || cleanPhone.length !== 10) {
-      setDetailsError('कृपया सही 10-अंकों का व्हाट्सएप मोबाइल नंबर दर्ज करें।');
-      setShowEditDetails(true);
-      return;
-    }
-
-    const cleanUtr = utrNumber.trim().replace(/[^0-9]/g, '');
-
-    if (cleanUtr.length !== 12) {
-      setUtrError('कृपया सही 12-अंकों का UPI UTR / Transaction No. डालें (Exact 12 digits required).');
-      return;
-    }
-
-    if (/^(\d)\1{11}$/.test(cleanUtr)) {
-      setUtrError('अमान्य UTR नंबर: सभी 12 अंक एक जैसे नहीं हो सकते।');
-      return;
-    }
-
-    setIsSubmittingUtr(true);
-
-    // Save profile locally & to lead cloud
-    saveStoredUserProfile({ name: cleanName, phone: cleanPhone });
-    saveVipLeadToCloud({
-      name: cleanName,
-      phone: cleanPhone,
-      contentId: item.id,
-      contentTitle: item.title,
-      amount: item.price
-    });
-    updateOrderCustomer(orderData.order.orderId, cleanName, cleanPhone);
+    setIsUploading(true);
+    setUploadError(null);
 
     try {
-      const res = await submitPaymentUtr(
-        orderData.order.orderId,
-        cleanUtr,
-        undefined,
-        screenshotUrl || undefined,
-        cleanName,
-        cleanPhone
-      );
-
+      const res = await submitPaymentProofApi(orderData.order.orderId, screenshotPreview, userUtr.trim());
       if (res.success) {
         if (res.status === 'paid') {
+          // Automatic Verification: UTR, amount, date & time matched!
+          setIsAutoVerified(true);
           setPaymentStatus('paid');
+          setCurrentPage('success');
           if (item) {
-            const validTok = res.order?.accessToken || `tok_paid_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            const validTok = res.accessToken || `tok_paid_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
             saveAccessToken(item.id, validTok);
           }
           confetti({
-            particleCount: 160,
-            spread: 90,
-            origin: { y: 0.55 },
-            colors: ['#10b981', '#3b82f6', '#ec4899', '#f59e0b']
+            particleCount: 180,
+            spread: 100,
+            origin: { y: 0.5 },
+            colors: ['#10b981', '#6366f1', '#ec4899', '#f59e0b', '#06b6d4']
           });
+          if (pollingRef.current) clearInterval(pollingRef.current);
+        } else if (res.status === 'failed') {
+          setPaymentStatus('failed');
+          setCurrentPage('rejected');
+          if (res.message) setRejectionNote(res.message);
         } else {
-          setPaymentStatus('waiting_verification');
+          setPaymentStatus('manual_review');
+          setCurrentPage('manual_review');
+          if (res.message) setReviewReason(res.message);
         }
       } else {
-        setUtrError(res.error || 'सत्यापन विफल रहा। कृपया सही UTR नंबर डालें।');
+        setUploadError(res.error || 'स्क्रीनशॉट अपलोड करने में समस्या हुई। कृपया पुनः प्रयास करें।');
       }
     } catch (err: any) {
-      setUtrError(err.message || 'सत्यापन विफल रहा');
+      setUploadError(err.message || 'अपलोड विफल रहा');
     } finally {
-      setIsSubmittingUtr(false);
+      setIsUploading(false);
     }
   };
 
-  // Safe Sandbox Testing Trigger
-  const handleTestSimulate = async () => {
-    if (!orderData) return;
-    setIsSimulating(true);
-    try {
-      const res = await devSimulatePayment(orderData.order.orderId);
-      if (res.success) {
-        setPaymentStatus('paid');
-        if (item) {
-          const validTok = res.order?.accessToken || `tok_paid_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-          saveAccessToken(item.id, validTok);
-        }
-        confetti({
-          particleCount: 120,
-          spread: 80,
-          origin: { y: 0.6 }
-        });
-      }
-    } catch (err: any) {
-      alert(err.message || 'Simulation error');
-    } finally {
-      setIsSimulating(false);
-    }
+  const amountDisplay = item ? formatINR(item.price) : '₹0';
+
+  /* Official Helpline & WhatsApp Support configuration */
+  const helplineNumber = (siteSettings?.supportWhatsApp || siteSettings?.whatsappNumber || '+63 9465507887').trim();
+  const cleanHelpline = helplineNumber.replace(/[^0-9]/g, '');
+
+  const handleOpenWhatsAppHelpline = (reasonMsg?: string) => {
+    const orderId = orderData?.order.orderId || 'VVV-ORDER';
+    const amt = amountDisplay || (item ? `₹${item.price}` : '');
+    const userTxt = userName ? ` (${userName})` : '';
+    const extra = reasonMsg ? `\n\nसमस्या / स्थिति: ${reasonMsg}` : '';
+    const text = `नमस्ते! मेरा Order ID: ${orderId}${userTxt} है।\nराशि: ${amt}${extra}\n\nमेरा पेमेंट स्क्रीनशॉट यह रहा। कृपया इसे चेक करके मेरा VIP कंटेंट तुरंत अनलॉक कर दीजिए।`;
+    const url = `https://wa.me/${cleanHelpline}?text=${encodeURIComponent(text)}`;
+    window.open(url, '_blank');
   };
 
-  const originalPrice = Math.max(item.price * 3, item.price + 150);
-  const hasSavedDetails = userName.trim().length >= 2 && userPhone.trim().replace(/[^0-9]/g, '').length === 10;
+  const handleCopyHelpline = () => {
+    navigator.clipboard.writeText(helplineNumber);
+    setCopiedHelpline(true);
+    setTimeout(() => setCopiedHelpline(false), 2000);
+  };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 md:p-6 overflow-y-auto animate-in fade-in duration-200">
-      
-      {/* Main Checkout Container */}
-      <div className="relative w-full max-w-lg bg-white rounded-3xl border border-slate-200/80 overflow-hidden shadow-2xl my-auto animate-in zoom-in-95 duration-200">
-        
-        {/* Professional Header */}
-        <div className="bg-slate-900 text-white px-5 py-4 flex items-center justify-between border-b border-slate-800">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 flex items-center justify-center shadow-md shadow-emerald-500/20">
-              <div className="w-full h-full bg-slate-900 rounded-[14px] flex items-center justify-center">
-                <ShieldCheck className="w-5 h-5 text-emerald-400" />
-              </div>
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm sm:text-base font-black tracking-tight text-white">
-                  सुरक्षित UPI पेमेंट (Secure Checkout)
-                </h3>
-                <span className="hidden sm:inline-flex text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                  256-Bit SSL
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
-                <span>100% सुरक्षित व गोपनीय</span>
-                <span>•</span>
-                <span>तुरंत VIP अनलॉक</span>
+    <div
+      id="upi-payment-modal-overlay"
+      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200"
+    >
+      {/* Centered Modal Container matching reference screenshot styling */}
+      <div
+        id="upi-payment-modal-card"
+        className="w-full max-w-[480px] bg-[#0b101b] border border-[#1e293b] rounded-[28px] shadow-2xl shadow-black/80 overflow-hidden relative flex flex-col text-slate-100 max-h-[94vh]"
+      >
+        {/* Top Header Close button */}
+        <button
+          id="upi-modal-close-btn"
+          onClick={onClose}
+          className="absolute top-4 right-4 p-2 rounded-full bg-slate-800/80 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors z-20 cursor-pointer"
+          aria-label="Close"
+        >
+          <X className="w-5 h-5" />
+        </button>
+
+        {/* ======================================================== */}
+        {/* PAGE 1: UPI PAYMENT CHECKOUT (Exact match to Screenshot 1) */}
+        {/* ======================================================== */}
+        {currentPage === 'checkout' && (
+          <div className="p-5 sm:p-7 flex flex-col justify-between overflow-y-auto">
+            {/* Top Heading */}
+            <div className="text-center pt-2 pb-5">
+              <h2 className="text-2xl sm:text-[28px] font-black tracking-tight text-white">
+                Pay {amountDisplay} with UPI
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-400 mt-1 font-medium">
+                Select an app to pay {amountDisplay} securely.
               </p>
             </div>
-          </div>
 
-          <button
-            id="payment-modal-close-btn"
-            onClick={onClose}
-            className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors cursor-pointer"
-            title="बंद करें"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+            {/* UPI APPS Section */}
+            <div className="space-y-3">
+              <div className="text-[11px] font-bold tracking-wider text-slate-400 uppercase px-1">
+                UPI APPS
+              </div>
 
-        {/* Modal Body */}
-        <div className="p-4 sm:p-6 max-h-[85vh] overflow-y-auto space-y-4">
-          
-          {error ? (
-            <div className="py-10 flex flex-col items-center justify-center text-center">
-              <AlertCircle className="w-12 h-12 text-rose-500 mb-3" />
-              <h4 className="text-base font-bold text-slate-900">भुगतान आरंभ करने में समस्या हुई</h4>
-              <p className="text-xs text-slate-600 max-w-xs mt-1">{error}</p>
+              {/* 1. PhonePe Card */}
               <button
-                onClick={() => {
-                  setError(null);
-                  createOrder(item.id, item, userName, userPhone).then((res) => setOrderData(res));
-                }}
-                className="mt-4 px-5 py-2.5 rounded-2xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-500 transition-colors shadow-md cursor-pointer"
+                id="btn-pay-phonepe"
+                onClick={() => handleLaunchApp('phonepe')}
+                className="w-full flex items-center justify-between p-3.5 sm:p-4 rounded-2xl bg-[#0f172a] hover:bg-[#15213b] border border-[#223354] transition-all duration-150 group text-left cursor-pointer active:scale-[0.99]"
               >
-                पुनः प्रयास करें (Try Again)
+                <div className="flex items-center gap-3.5">
+                  {/* PhonePe Custom Icon */}
+                  <div className="w-12 h-12 rounded-2xl bg-[#5f259f] flex items-center justify-center text-white font-black text-xl shadow-md border border-[#7a3cb8] shrink-0">
+                    <span className="font-serif leading-none">पे</span>
+                  </div>
+                  <div>
+                    <div className="text-base font-bold text-white group-hover:text-purple-300 transition-colors">
+                      PhonePe
+                    </div>
+                    <div className="text-xs text-slate-400 font-medium">
+                      Recommended · Fastest
+                    </div>
+                  </div>
+                </div>
+                <div className="w-9 h-9 rounded-full bg-white text-slate-900 flex items-center justify-center shrink-0 shadow-sm group-hover:translate-x-0.5 transition-transform">
+                  <ChevronRight className="w-5 h-5 stroke-[2.5]" />
+                </div>
+              </button>
+
+              {/* 2. Paytm Card */}
+              <button
+                id="btn-pay-paytm"
+                onClick={() => handleLaunchApp('paytm')}
+                className="w-full flex items-center justify-between p-3.5 sm:p-4 rounded-2xl bg-[#0f172a] hover:bg-[#15213b] border border-[#223354] transition-all duration-150 group text-left cursor-pointer active:scale-[0.99]"
+              >
+                <div className="flex items-center gap-3.5">
+                  {/* Paytm Custom Icon */}
+                  <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center shadow-md border border-slate-300 shrink-0 p-1.5">
+                    <span className="text-[#002e6e] font-black text-xs tracking-tighter">
+                      pay<span className="text-[#00b9f5]">tm</span>
+                    </span>
+                  </div>
+                  <div>
+                    <div className="text-base font-bold text-white group-hover:text-sky-300 transition-colors">
+                      Paytm
+                    </div>
+                    <div className="text-xs text-slate-400 font-medium">
+                      One tap pay
+                    </div>
+                  </div>
+                </div>
+                <div className="w-9 h-9 rounded-full bg-white text-slate-900 flex items-center justify-center shrink-0 shadow-sm group-hover:translate-x-0.5 transition-transform">
+                  <ChevronRight className="w-5 h-5 stroke-[2.5]" />
+                </div>
+              </button>
+
+              {/* 3. QR Code Card */}
+              <button
+                id="btn-pay-qr"
+                onClick={() => setCurrentPage('qr')}
+                className="w-full flex items-center justify-between p-3.5 sm:p-4 rounded-2xl bg-[#0f172a] hover:bg-[#15213b] border border-[#223354] transition-all duration-150 group text-left cursor-pointer active:scale-[0.99]"
+              >
+                <div className="flex items-center gap-3.5">
+                  {/* QR Code Icon Box */}
+                  <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center shadow-md border border-slate-300 shrink-0 text-slate-900">
+                    <QrCode className="w-6 h-6 stroke-[2.2]" />
+                  </div>
+                  <div>
+                    <div className="text-base font-bold text-white group-hover:text-emerald-300 transition-colors">
+                      QR Code
+                    </div>
+                    <div className="text-xs text-slate-400 font-medium">
+                      Scan in any UPI app
+                    </div>
+                  </div>
+                </div>
+                <div className="w-9 h-9 rounded-full bg-white text-slate-900 flex items-center justify-center shrink-0 shadow-sm group-hover:translate-x-0.5 transition-transform">
+                  <ChevronRight className="w-5 h-5 stroke-[2.5]" />
+                </div>
               </button>
             </div>
 
-          ) : paymentStatus === 'waiting_verification' ? (
-
-            /* WAITING VERIFICATION STATE */
-            <div className="py-6 flex flex-col items-center justify-center text-center space-y-4">
-              <div className="relative">
-                <div className="w-20 h-20 rounded-full bg-amber-50 border-2 border-amber-400 text-amber-600 flex items-center justify-center shadow-lg shadow-amber-500/10">
-                  <FileCheck className="w-10 h-10 text-amber-600 animate-pulse" />
+            {/* Bottom Submit Screenshot Button (Screenshot 1 green button) */}
+            <div className="pt-6">
+              <button
+                id="btn-goto-proof-page"
+                onClick={() => setCurrentPage('proof')}
+                className="w-full py-4 px-4 rounded-2xl bg-[#00c26f] hover:bg-[#00ad63] active:scale-[0.99] text-white font-bold transition-all shadow-lg shadow-[#00c26f]/25 flex items-center justify-between cursor-pointer"
+              >
+                <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                  <ArrowUp className="w-5 h-5 text-white stroke-[2.5]" />
                 </div>
-                <span className="absolute -top-1 -right-1 flex h-4 w-4">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-4 w-4 bg-amber-500"></span>
-                </span>
+
+                <div className="text-center">
+                  <div className="text-base font-extrabold tracking-wide leading-tight">
+                    Submit Screenshot
+                  </div>
+                  <div className="text-[11px] font-semibold text-emerald-100/90 leading-tight">
+                    After Payment
+                  </div>
+                </div>
+
+                <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                  <ArrowRight className="w-5 h-5 text-white stroke-[2.5]" />
+                </div>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ======================================================== */}
+        {/* PAGE 2: QR PAYMENT (Exact match to Screenshot 3) */}
+        {/* ======================================================== */}
+        {currentPage === 'qr' && (
+          <div className="p-5 sm:p-6 flex flex-col justify-between overflow-y-auto">
+            {/* Top Navigation */}
+            <div className="flex items-center justify-between pb-3">
+              <button
+                onClick={() => setCurrentPage('checkout')}
+                className="text-xs font-semibold text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
+              >
+                ← Back to UPI Apps
+              </button>
+            </div>
+
+            {/* Inner White QR Card (Matching reference screenshot exactly) */}
+            <div className="bg-white rounded-3xl p-5 text-center shadow-xl text-slate-900 my-2">
+              <div className="text-base font-bold text-[#6d28d9] mb-0.5">
+                Scan & Pay
+              </div>
+              <div className="text-sm font-bold text-slate-900">
+                Amount: {amountDisplay}
+              </div>
+              <div className="text-xs font-bold text-[#e11d48] mt-0.5 mb-3">
+                Expires in: {formatTimer(timeLeft)}
               </div>
 
-              <div>
-                <h4 className="text-lg font-black text-slate-900">
-                  पेमेंट वेरिफिकेशन प्रगति पर है ⏳
-                </h4>
-                <p className="text-xs text-slate-600 mt-1 max-w-sm font-medium">
-                  आपका UTR <span className="font-mono font-bold text-emerald-700">#{utrNumber}</span> प्राप्त हो गया है।
-                </p>
-                {userName && (
-                  <p className="text-xs text-slate-700 font-bold mt-1">
-                    👤 VIP सदस्य: {userName} (+91 {userPhone})
-                  </p>
+              {/* Dynamic QR Display */}
+              <div className="flex justify-center my-2">
+                {orderData?.qrDataUrl ? (
+                  <div className="p-2.5 bg-white border border-slate-200 rounded-2xl shadow-inner">
+                    <img
+                      src={orderData.qrDataUrl}
+                      alt="UPI QR Code"
+                      className="w-48 h-48 sm:w-52 sm:h-52 object-contain"
+                    />
+                  </div>
+                ) : (
+                  <div className="w-48 h-48 rounded-2xl bg-slate-100 flex items-center justify-center">
+                    <RefreshCw className="w-8 h-8 text-slate-400 animate-spin" />
+                  </div>
                 )}
               </div>
 
-              <div className="w-full p-4 rounded-2xl bg-amber-50/70 border border-amber-200 text-left space-y-2 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="text-amber-900/70 font-semibold">ऑर्डर आईडी:</span>
-                  <span className="font-mono font-bold text-amber-950">{orderData?.order.orderId}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-amber-900/70 font-semibold">भुगतान राशि:</span>
-                  <span className="font-bold text-amber-950">{formatINR(item.price)}</span>
-                </div>
-              </div>
-
-              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-700 text-center font-medium space-y-2.5 w-full">
-                <div>⚡ <strong>कृपया 1-2 मिनट प्रतीक्षा करें।</strong> कन्फर्म होते ही स्क्रीन पर फुल फोटो अपने आप खुल जाएगी।</div>
-                
-                <a
-                  href={`https://wa.me/639465507887?text=${encodeURIComponent(`Hello Ruma! Maine Payment kar diya hai.\n\n📦 Order ID: ${orderData?.order.orderId || ''}\n💰 Amount: ₹${item.price}\n🔑 UTR: ${utrNumber}\n👤 Name: ${userName || ''} (+91 ${userPhone || ''})\n\nKripya turant approve karein!`)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm transition-transform active:scale-95"
-                >
-                  <MessageCircle className="w-4 h-4" />
-                  <span>व्हाट्सएप पर स्क्रीनशॉट भेजकर तुरंत अनलॉक करवाएं</span>
-                </a>
-              </div>
-
+              {/* Save QR Button */}
               <button
-                onClick={() => setPaymentStatus('pending')}
-                className="text-xs text-slate-600 hover:text-emerald-700 font-bold underline cursor-pointer"
+                id="btn-save-qr"
+                onClick={handleDownloadQr}
+                className="mt-2.5 inline-flex items-center justify-center gap-1.5 px-4 py-1.5 rounded-full border border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100 text-xs font-bold transition-colors cursor-pointer"
               >
-                ← UTR नंबर बदलें या दोबारा प्रयास करें
+                <Download className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span>Save QR</span>
               </button>
+
+              {/* Supported UPI Apps Subtext */}
+              <div className="text-[11px] font-medium text-slate-600 mt-4 flex items-center justify-center gap-1 flex-wrap">
+                <span>Scan & pay with</span>
+                <span className="font-bold text-blue-600">G Pay</span>
+                <span>|</span>
+                <span className="font-bold text-[#5f259f]">PhonePe</span>
+                <span>|</span>
+                <span className="font-bold text-[#00b9f5]">Paytm</span>
+                <span>or any UPI app</span>
+              </div>
+
+              {/* Subtle Loading Spinner & Status */}
+              <div className="mt-3.5 flex flex-col items-center justify-center gap-1 text-[#6d28d9]">
+                <div className="w-4 h-4 border-2 border-[#6d28d9] border-t-transparent rounded-full animate-spin" />
+                <div className="text-xs font-bold mt-1">
+                  Waiting for payment... submit your proof to confirm
+                </div>
+              </div>
             </div>
 
-          ) : paymentStatus === 'paid' ? (
-            
-            /* SUCCESS STATE WITH CLEAR UNBLURRED PHOTO */
-            <div className="py-4 sm:py-6 flex flex-col items-center justify-center text-center animate-in zoom-in-95 duration-300">
-              <div className="relative mb-3">
-                <div className="absolute -inset-3 rounded-full bg-emerald-400 opacity-40 blur-lg animate-pulse" />
-                <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-emerald-100 border-2 border-emerald-500 text-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-                  <CheckCircle2 className="w-10 h-10 sm:w-12 sm:h-12" />
+            {/* Bottom Submit Screenshot Button */}
+            <div className="pt-4">
+              <button
+                id="btn-qr-submit-proof"
+                onClick={() => setCurrentPage('proof')}
+                className="w-full py-4 px-4 rounded-2xl bg-[#00c26f] hover:bg-[#00ad63] active:scale-[0.99] text-white font-bold transition-all shadow-lg shadow-[#00c26f]/25 flex items-center justify-between cursor-pointer"
+              >
+                <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                  <ArrowUp className="w-5 h-5 text-white stroke-[2.5]" />
                 </div>
+
+                <div className="text-center">
+                  <div className="text-base font-extrabold tracking-wide leading-tight">
+                    Submit Screenshot
+                  </div>
+                  <div className="text-[11px] font-semibold text-emerald-100/90 leading-tight">
+                    After Payment
+                  </div>
+                </div>
+
+                <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                  <ArrowRight className="w-5 h-5 text-white stroke-[2.5]" />
+                </div>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ======================================================== */}
+        {/* PAGE 3: SCREENSHOT UPLOAD (Exact match to Screenshot 2) */}
+        {/* ======================================================== */}
+        {currentPage === 'proof' && (
+          <div className="p-5 sm:p-7 flex flex-col justify-between overflow-y-auto">
+            <div>
+              {/* Back to QR link */}
+              <button
+                onClick={() => setCurrentPage('qr')}
+                className="text-xs font-semibold text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer transition-colors pb-3"
+              >
+                ← Back to QR
+              </button>
+
+              {/* Payment Confirmation Small Orange Label */}
+              <div className="text-[11px] font-extrabold tracking-widest text-[#f97316] uppercase mt-2">
+                PAYMENT CONFIRMATION
               </div>
-              <h3 className="text-xl sm:text-2xl font-black text-slate-900">
-                🎉 भुगतान सफल रहा! (VIP Unlocked)
-              </h3>
-              <p className="text-xs sm:text-sm text-slate-600 mt-1 max-w-sm font-medium">
-                नमस्ते <strong className="text-slate-900">{userName || 'VIP Member'}</strong>, आपका पेमेंट <strong className="text-emerald-600 font-bold">{formatINR(item.price)}</strong> सत्यापित हो चुका है।
+
+              {/* Main Heading */}
+              <h2 className="text-2xl sm:text-[28px] font-black text-white mt-1">
+                Screenshot Upload करें
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-400 mt-1 font-medium">
+                Payment ke baad Screenshot Upload करो.
               </p>
 
-              {/* Unblurred Clear Photo Showcase */}
-              <div className="relative my-4 w-44 h-44 sm:w-52 sm:h-52 rounded-2xl overflow-hidden border-2 border-emerald-500 shadow-xl shadow-emerald-500/20 bg-slate-950 flex items-center justify-center">
-                <img
-                  src={item.mediaUrl || item.thumbnailUrl}
-                  alt={item.title}
-                  className="w-full h-full object-cover animate-in fade-in zoom-in-95 duration-300 select-none"
-                  referrerPolicy="no-referrer"
-                />
-                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-2 text-center">
-                  <span className="text-[10px] font-black uppercase text-emerald-300 bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-400/40 inline-flex items-center gap-1 shadow-sm">
-                    <Sparkles className="w-3 h-3 text-emerald-400" />
-                    100% UNBLURRED ULTRA HD
+              {/* Upload Field */}
+              <div className="mt-6 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-bold text-white">
+                    Screenshot Upload करें
+                  </label>
+                  <span className="text-xs text-slate-400 font-medium">
+                    (required)
                   </span>
+                </div>
+
+                {/* Custom File Input Container */}
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full p-3 rounded-xl bg-[#080d1a] border border-[#1e293b] hover:border-slate-500 transition-colors flex items-center justify-between cursor-pointer group"
+                >
+                  <div className="flex items-center gap-3 overflow-hidden">
+                    <button
+                      type="button"
+                      className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-200 text-xs font-bold border border-slate-700 group-hover:bg-slate-700 transition-colors shrink-0"
+                    >
+                      Choose File
+                    </button>
+                    <span className="text-xs text-slate-300 truncate">
+                      {screenshotFile ? screenshotFile.name : 'No file chosen'}
+                    </span>
+                  </div>
+                  {screenshotPreview && (
+                    <img
+                      src={screenshotPreview}
+                      alt="Thumbnail preview"
+                      className="w-8 h-8 rounded object-cover border border-slate-600 shrink-0"
+                    />
+                  )}
+                </div>
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+
+                <div className="text-[11px] text-slate-400 font-medium">
+                  JPG, PNG or WebP, up to 5 MB.
+                </div>
+
+                {/* Optional Manual UTR entry to assist AI verification */}
+                <div className="pt-2">
+                  <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
+                    <span>12-Digit UPI UTR / Ref No.</span>
+                    <span className="text-[10px] text-slate-400 font-normal">वैकल्पिक / Optional</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={userUtr}
+                    onChange={(e) => setUserUtr(e.target.value.replace(/[^0-9a-zA-Z]/g, ''))}
+                    maxLength={16}
+                    placeholder="उदा. 423456789012"
+                    className="mt-1.5 w-full px-3.5 py-2.5 rounded-xl bg-[#080d1a] border border-[#1e293b] text-white text-xs font-mono focus:border-amber-500 focus:outline-none placeholder:text-slate-600"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    स्क्रीनशॉट के साथ UTR देने पर AI 100% सटीकता से तुरंत अनलॉक करता है।
+                  </p>
+                </div>
+
+                {uploadError && (
+                  <div className="p-2.5 rounded-xl bg-rose-950/70 border border-rose-800 text-rose-300 text-xs flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{uploadError}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Button with AI Auto-Verify notice */}
+              <div className="mt-5">
+                <button
+                  id="btn-upload-screenshot-confirm"
+                  onClick={handleSubmitProof}
+                  disabled={isUploading || !screenshotPreview}
+                  className="w-full py-4 px-4 rounded-2xl bg-[#ff5500] hover:bg-[#e04b00] active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed text-white font-extrabold text-sm transition-all shadow-lg shadow-[#ff5500]/25 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {isUploading ? (
+                    <div className="flex items-center gap-2 text-center text-xs">
+                      <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
+                      <span>⚡ AI द्वारा UTR, नाम, तारीख और अमाउंट चेक किया जा रहा है...</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Zap className="w-4 h-4 text-amber-300" />
+                      <span>Screenshot Verify करें (Instant Auto-Check) →</span>
+                    </div>
+                  )}
+                </button>
+              </div>
+
+              {/* Warning Notice below button */}
+              <p className="text-[11px] leading-relaxed text-slate-400 text-center mt-3 max-w-sm mx-auto font-medium">
+                AI स्क्रीनशॉट का UTR, रिसीवर का नाम, तारीख और अमाउंट मैच करके तुरंत ऑटो-वेरीफाई करता है।
+              </p>
+
+              {/* Direct Helpline Assistant Bar */}
+              <div className="mt-3.5 p-3 rounded-2xl bg-emerald-950/30 border border-emerald-500/30 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2 text-emerald-300 font-medium text-[11px]">
+                  <MessageCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>स्क्रीनशॉट भेजने में कोई दिक्कत?</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleOpenWhatsAppHelpline('स्क्रीनशॉट अपलोड में समस्या')}
+                  className="px-2.5 py-1 rounded-lg bg-[#25D366] hover:bg-[#20ba59] text-white font-bold text-[11px] flex items-center gap-1 shadow-sm transition-all cursor-pointer"
+                >
+                  <span>व्हाट्सएप हेल्पलाइन</span>
+                  <ChevronRight className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ======================================================== */}
+        {/* PAGE 4: MANUAL REVIEW (Exact match to Screenshot 4 + Helpline) */}
+        {/* ======================================================== */}
+        {currentPage === 'manual_review' && (
+          <div className="p-5 sm:p-7 flex flex-col justify-between overflow-y-auto">
+            <div>
+              {/* Top Circular Badge with "V" */}
+              <div className="flex justify-center pt-2">
+                <div className="w-14 h-14 rounded-full bg-[#111c33] border border-[#2b3e66] flex items-center justify-center shadow-lg">
+                  <span className="text-xl font-black text-white font-serif">V</span>
                 </div>
               </div>
 
-              <button
-                id="btn-unlock-content-now"
-                onClick={() => {
-                  if (item) {
-                    const validTok = orderData?.order?.accessToken || `tok_paid_${Date.now()}`;
-                    saveAccessToken(item.id, validTok);
-                  }
-                  onSuccess(item);
-                }}
-                className="w-full mt-2 py-4 px-6 rounded-2xl text-sm sm:text-base font-black text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 flex items-center justify-center gap-2 shadow-xl shadow-emerald-600/30 cursor-pointer transition-transform active:scale-95"
-              >
-                <span>🔥 अभी फ़ोटो फुल स्क्रीन में देखें (View Full Photo)</span>
-                <ArrowRight className="w-5 h-5" />
-              </button>
-            </div>
+              {/* Title & Description */}
+              <div className="text-center mt-3">
+                <div className="text-[11px] font-extrabold tracking-widest text-[#f97316] uppercase">
+                  UPI PAYMENT CHECK
+                </div>
+                <h2 className="text-2xl font-black text-white mt-1">
+                  Manual review required
+                </h2>
+                <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">
+                  {reviewReason || 'Queued for manual review: could not clearly read successful payment status, a clear payment amount, receipt date and time.'}
+                </p>
+              </div>
 
-          ) : (
+              {/* Verification window progress card */}
+              <div className="mt-4 p-4 rounded-2xl bg-[#0e1628] border border-[#1e293b] space-y-2.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400 font-semibold">Verification window</span>
+                  <span className="text-xs font-bold text-[#f97316]">Manual Review</span>
+                </div>
 
-            /* PROFESSIONAL ACTIVE PAYMENT STATE */
-            <div className="space-y-4">
-              
-              {/* Clean Order Summary Card */}
-              <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50 border border-slate-200/90 flex items-center justify-between gap-3 shadow-xs">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="relative w-14 h-14 sm:w-16 sm:h-16 rounded-xl overflow-hidden border border-slate-300 shrink-0 bg-slate-900 shadow-xs">
-                    <img
-                      src={item.thumbnailUrl}
-                      alt={item.title}
-                      className="w-full h-full object-cover filter blur-[4px] scale-110"
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                      <Lock className="w-4 h-4 text-white" />
-                    </div>
+                {/* Shimmering Progress Bar */}
+                <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden relative">
+                  <div className="h-full bg-gradient-to-r from-purple-500 to-blue-500 w-3/5 rounded-full animate-pulse" />
+                </div>
+
+                <div className="text-[11px] text-slate-400">
+                  The latest verification state is shown below.
+                </div>
+              </div>
+
+              {/* Order Info Rows */}
+              <div className="mt-3.5 p-3.5 rounded-2xl bg-[#0e1628] border border-[#1e293b] space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Order</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono font-bold text-white">
+                      {orderData?.order.orderId || 'VVV-54DC1E9C9A1C'}
+                    </span>
+                    <button
+                      onClick={handleCopyOrderId}
+                      className="text-slate-400 hover:text-white p-0.5 cursor-pointer"
+                      title="Copy Order ID"
+                    >
+                      {copiedOrderId ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
                   </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
-                        {item.type === 'video' ? 'Full HD Video' : 'Ultra HD Photoset'}
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Amount</span>
+                  <span className="font-bold text-white">{amountDisplay}</span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Status</span>
+                  <span className="font-bold text-[#f97316]">Manual Review</span>
+                </div>
+              </div>
+
+              {/* Highlighted Queue Card with rotating circular icon */}
+              <div className="mt-3.5 p-3.5 rounded-2xl bg-[#0e1628] border border-[#233554] text-center space-y-2">
+                <div className="flex justify-center">
+                  <div className="w-9 h-9 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                    <RefreshCw className="w-4 h-4 animate-spin" style={{ animationDuration: '3s' }} />
+                  </div>
+                </div>
+
+                <h3 className="text-xs sm:text-sm font-bold text-white">
+                  Your payment proof is in the manual queue.
+                </h3>
+
+                <p className="text-[11px] text-slate-400 leading-relaxed max-w-sm mx-auto">
+                  {reviewReason || 'Queued for manual review: could not clearly read successful payment status, a clear payment amount, receipt date and time.'}
+                </p>
+              </div>
+
+              {/* ======================================================== */}
+              {/* HELPLINE & WHATSAPP CARD FOR SCREENSHOT SUBMISSION */}
+              {/* ======================================================== */}
+              <div className="mt-3.5 p-4 rounded-2xl bg-gradient-to-br from-[#062419] to-[#0c1a2e] border-2 border-emerald-500/40 space-y-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center shrink-0 text-emerald-400">
+                    <MessageCircle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs sm:text-sm font-extrabold text-white flex items-center gap-1.5">
+                      <span>आधिकारिक हेल्पलाइन सहायता</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold border border-emerald-500/30">
+                        24x7 Active
                       </span>
-                      <span className="text-[10px] font-bold text-slate-500 hidden sm:inline">
-                        • 0-सेकंड डिलीवरी
-                      </span>
-                    </div>
-                    <h4 className="text-xs sm:text-sm font-black text-slate-900 truncate mt-1">
-                      {item.title}
                     </h4>
-                    <p className="text-[11px] text-slate-500 font-medium">
-                      एक्सक्लूसिव अनसेंसर्ड VIP कंटेंट
+                    <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+                      अगर आप तुरंत अनलॉक चाहते हैं, तो नीचे दिए गए व्हाट्सएप हेल्पलाइन नंबर पर अपना पेमेंट स्क्रीनशॉट भेजें।
                     </p>
                   </div>
                 </div>
 
-                <div className="text-right shrink-0">
-                  <span className="text-[11px] text-slate-400 line-through block font-medium">
-                    ₹{originalPrice}
-                  </span>
-                  <span className="text-xl sm:text-2xl font-black text-slate-950 font-display block leading-none">
-                    {formatINR(item.price)}
-                  </span>
-                  <span className="inline-block mt-1 text-[9px] font-black uppercase bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">
-                    ऑफर लागू
-                  </span>
+                {/* Big WhatsApp Send Screenshot Button */}
+                <button
+                  id="btn-whatsapp-manual-review"
+                  onClick={() => handleOpenWhatsAppHelpline(reviewReason || undefined)}
+                  className="w-full py-3 px-4 rounded-xl bg-[#25D366] hover:bg-[#20ba59] active:scale-[0.99] text-white font-black text-xs sm:text-sm transition-all shadow-lg shadow-[#25D366]/25 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <MessageCircle className="w-4 h-4 fill-white text-white shrink-0" />
+                  <span>WhatsApp पर स्क्रीनशॉट भेजें (Send on WhatsApp)</span>
+                </button>
+
+                {/* Helpline Phone Number & Call / Copy buttons */}
+                <div className="flex items-center justify-between pt-1 text-[11px] border-t border-emerald-500/20">
+                  <div className="flex items-center gap-1.5 text-emerald-300 font-mono font-bold">
+                    <Phone className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>{helplineNumber}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleCopyHelpline}
+                      className="text-xs px-2.5 py-1 rounded-lg bg-emerald-950/80 border border-emerald-600/40 text-emerald-300 hover:text-white transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      {copiedHelpline ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedHelpline ? 'कॉपी हुआ' : 'कॉपी नंबर'}</span>
+                    </button>
+                    <a
+                      href={`tel:${cleanHelpline}`}
+                      className="text-xs px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 hover:text-white transition-colors flex items-center gap-1"
+                    >
+                      <Phone className="w-3 h-3" />
+                      <span>कॉल करें</span>
+                    </a>
+                  </div>
                 </div>
               </div>
 
-              {/* STEP 1: CUSTOMER DETAILS (NAME & 10-DIGIT WHATSAPP NUMBER) */}
-              <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-5 h-5 rounded-full bg-slate-900 text-white text-[11px] font-bold flex items-center justify-center">
-                      1
-                    </span>
-                    <h5 className="text-xs sm:text-sm font-bold text-slate-900">
-                      ग्राहक विवरण (Customer Details)
-                    </h5>
-                  </div>
-                  {hasSavedDetails && !showEditDetails && (
-                    <button
-                      type="button"
-                      onClick={() => setShowEditDetails(true)}
-                      className="text-[11px] text-emerald-700 hover:text-emerald-800 font-bold flex items-center gap-1 cursor-pointer"
-                    >
-                      <Edit3 className="w-3 h-3" />
-                      <span>बदलें (Edit)</span>
-                    </button>
-                  )}
-                </div>
-
-                {hasSavedDetails && !showEditDetails ? (
-                  <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs">
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-center gap-1.5 font-bold text-slate-900">
-                        <User className="w-3.5 h-3.5 text-slate-500" />
-                        <span>{userName}</span>
-                      </div>
-                      <span className="text-slate-300">•</span>
-                      <div className="flex items-center gap-1.5 font-mono font-semibold text-slate-700">
-                        <Phone className="w-3.5 h-3.5 text-slate-500" />
-                        <span>+91 {userPhone}</span>
-                      </div>
-                    </div>
-                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-                      सत्यापित ✓
-                    </span>
-                  </div>
-                ) : (
-                  <div className="space-y-2.5">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      <div>
-                        <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                          आपका नाम (Your Full Name) *
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          value={userName}
-                          onChange={(e) => {
-                            setUserName(e.target.value);
-                            if (detailsError) setDetailsError(null);
-                          }}
-                          placeholder="उदा. राहुल कुमार"
-                          className="w-full bg-slate-50 border border-slate-300 focus:border-emerald-600 focus:bg-white rounded-xl px-3 py-2 text-xs text-slate-900 placeholder-slate-400 font-medium outline-none transition-colors"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                          व्हाट्सएप नंबर (10 Digits) *
-                        </label>
-                        <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500 font-mono">
-                            +91
-                          </span>
-                          <input
-                            type="tel"
-                            required
-                            maxLength={10}
-                            value={userPhone}
-                            onChange={(e) => {
-                              const val = e.target.value.replace(/[^0-9]/g, '');
-                              setUserPhone(val);
-                              if (detailsError) setDetailsError(null);
-                            }}
-                            placeholder="9876543210"
-                            className="w-full bg-slate-50 border border-slate-300 focus:border-emerald-600 focus:bg-white rounded-xl pl-11 pr-3 py-2 text-xs font-mono font-medium text-slate-900 placeholder-slate-400 outline-none transition-colors"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {showEditDetails && hasSavedDetails && (
-                      <div className="flex justify-end">
-                        <button
-                          type="button"
-                          onClick={() => setShowEditDetails(false)}
-                          className="px-3 py-1 bg-slate-900 text-white rounded-lg text-xs font-bold shadow cursor-pointer hover:bg-slate-800"
-                        >
-                          सेव करें ✓
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {detailsError && (
-                  <div className="p-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-bold flex items-center gap-1.5">
-                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                    <span>{detailsError}</span>
-                  </div>
-                )}
+              {/* Re-upload Screenshot option */}
+              <div className="mt-3">
+                <button
+                  id="btn-reupload-from-manual"
+                  onClick={() => {
+                    setScreenshotPreview(null);
+                    setScreenshotFile(null);
+                    setUserUtr('');
+                    setUploadError(null);
+                    setCurrentPage('proof');
+                  }}
+                  className="w-full py-2.5 px-3 rounded-xl bg-[#131d33] hover:bg-[#1a2846] border border-[#233554] text-slate-300 hover:text-white text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                  <span>गलत स्क्रीनशॉट चला गया? दोबारा सही स्क्रीनशॉट चुनें</span>
+                </button>
               </div>
 
-              {/* STEP 2: SCAN QR CODE TO PAY */}
-              <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-5 h-5 rounded-full bg-slate-900 text-white text-[11px] font-bold flex items-center justify-center">
-                      2
-                    </span>
-                    <h5 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                      <QrCode className="w-4 h-4 text-emerald-600" />
-                      <span>QR कोड स्कैन करके भुगतान करें (Scan QR to Pay)</span>
-                    </h5>
-                  </div>
+              {/* Safe to close disclaimer */}
+              <p className="text-[11px] text-slate-500 text-center mt-3">
+                You can safely close this page. Duplicate confirmations are handled automatically.
+              </p>
+            </div>
+          </div>
+        )}
 
-                  <div className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-100 border border-slate-200 text-slate-700 text-[11px] font-bold">
-                    <Clock className="w-3 h-3 text-emerald-600" />
-                    <span className="font-mono">{formatTimer(timeLeft)}</span>
-                  </div>
+        {/* ======================================================== */}
+        {/* PAGE 5: REJECTED SCREEN (With Helpline & WhatsApp Proof) */}
+        {/* ======================================================== */}
+        {currentPage === 'rejected' && (
+          <div className="p-5 sm:p-7 flex flex-col justify-between overflow-y-auto">
+            <div>
+              {/* Top Circular Badge with Red X */}
+              <div className="flex justify-center pt-2">
+                <div className="w-14 h-14 rounded-full bg-rose-500/10 border-2 border-rose-500/40 flex items-center justify-center text-rose-400 shadow-xl shadow-rose-500/20">
+                  <XCircle className="w-8 h-8" />
                 </div>
+              </div>
 
-                {/* QR Code Presentation */}
-                <div className="flex flex-col items-center text-center space-y-3 pt-1">
-                  <div className="p-3 bg-white border-2 border-slate-900 rounded-2xl shadow-md inline-block relative">
-                    {orderData?.qrDataUrl ? (
-                      <div className="relative group">
-                        <img
-                          src={orderData.qrDataUrl}
-                          alt="UPI Dynamic QR Code"
-                          className="w-44 h-44 sm:w-48 sm:h-48 object-contain rounded-lg"
-                        />
-                        <div className="hot-scanner-line" />
-                      </div>
-                    ) : (
-                      <div className="w-44 h-44 flex items-center justify-center">
-                        <RefreshCw className="w-8 h-8 animate-spin text-slate-600" />
-                      </div>
-                    )}
-                  </div>
+              {/* Title & Subtitle */}
+              <div className="text-center mt-3">
+                <div className="text-[11px] font-extrabold tracking-widest text-rose-400 uppercase">
+                  PAYMENT UNVERIFIED / REJECTED
+                </div>
+                <h2 className="text-2xl font-black text-white mt-1">
+                  पेमेंट अस्वीकार (Payment Rejected)
+                </h2>
+                <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto leading-relaxed">
+                  आपका भेजा गया स्क्रीनशॉट या UTR बैंक से वेरिफाई नहीं हो सका।
+                </p>
+              </div>
 
-                  <p className="text-xs text-slate-600 font-medium max-w-xs">
-                    किसी भी ऐप <strong>(PhonePe, Google Pay, Paytm, BHIM)</strong> से यह QR कोड स्कैन करके <strong className="text-emerald-700 font-bold">{formatINR(item.price)}</strong> पे करें।
-                  </p>
+              {/* Rejection Reason Notice */}
+              <div className="mt-3.5 p-3.5 rounded-2xl bg-rose-950/40 border border-rose-800/60 text-xs space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-rose-300">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                  <span>अस्वीकार का कारण (Reason):</span>
+                </div>
+                <p className="text-rose-200/90 font-medium pl-5 text-[11px] leading-relaxed">
+                  {rejectionNote || reviewReason || 'स्क्रीनशॉट में सही UTR या सफल भुगतान नहीं मिला, अथवा अमाउंट बैंक खाते से मेल नहीं खाया।'}
+                </p>
+              </div>
 
-                  <div className="flex items-center gap-2 w-full max-w-xs">
+              {/* Order Info Rows */}
+              <div className="mt-3 p-3.5 rounded-2xl bg-[#0e1628] border border-[#1e293b] space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Order ID</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono font-bold text-white">
+                      {orderData?.order.orderId || 'VVV-ORDER'}
+                    </span>
                     <button
-                      type="button"
-                      onClick={handleDownloadQr}
-                      className="w-full py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs flex items-center justify-center gap-1.5 border border-slate-300 transition-colors cursor-pointer active:scale-95"
+                      onClick={handleCopyOrderId}
+                      className="text-slate-400 hover:text-white p-0.5 cursor-pointer"
+                      title="Copy Order ID"
                     >
-                      <Download className="w-3.5 h-3.5" />
-                      <span>QR कोड डाउनलोड करें (Save QR)</span>
-                    </button>
-                  </div>
-
-                  <div className="w-full p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs text-left">
-                    <div className="min-w-0">
-                      <span className="text-[10px] text-slate-500 font-bold block uppercase">
-                        Payee UPI ID
-                      </span>
-                      <p className="font-mono font-bold text-slate-900 text-xs truncate">
-                        {orderData?.order.upiId || 'rima11q@ptyes'}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleCopyUpi}
-                      className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-800 font-bold text-xs flex items-center gap-1 hover:bg-slate-100 cursor-pointer shadow-xs active:scale-95 shrink-0"
-                    >
-                      {copiedUpi ? (
-                        <>
-                          <Check className="w-3 h-3 text-emerald-600" />
-                          <span className="text-emerald-700">कॉपी हुआ!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3 h-3" />
-                          <span>Copy UPI</span>
-                        </>
-                      )}
+                      {copiedOrderId ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                     </button>
                   </div>
                 </div>
-              </div>
 
-              {/* STEP 3: 12-DIGIT UTR VERIFICATION & OPTIONAL SCREENSHOT */}
-              <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-5 h-5 rounded-full bg-slate-900 text-white text-[11px] font-bold flex items-center justify-center">
-                      3
-                    </span>
-                    <h5 className="text-xs sm:text-sm font-bold text-slate-900">
-                      पेमेंट कन्फर्म करें (Enter 12-Digit UTR No.)
-                    </h5>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowUtrHelp(!showUtrHelp)}
-                    className="text-[11px] text-emerald-700 font-bold hover:underline flex items-center gap-0.5 cursor-pointer"
-                  >
-                    <HelpCircle className="w-3.5 h-3.5" />
-                    <span>UTR कहाँ देखें?</span>
-                  </button>
+                  <span className="text-slate-400">Amount</span>
+                  <span className="font-bold text-white">{amountDisplay}</span>
                 </div>
 
-                {showUtrHelp && (
-                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-700 space-y-1.5 animate-in fade-in duration-150">
-                    <div className="font-bold text-slate-900">📱 UTR / UPI Transaction Reference No. खोजने का तरीका:</div>
-                    <ul className="list-disc list-inside space-y-1 pl-1">
-                      <li><strong>PhonePe:</strong> हिस्ट्री ➔ पेमेंट विवरण ➔ <strong>"UTR"</strong> (12 अंक)।</li>
-                      <li><strong>Google Pay:</strong> लेन-देन विवरण ➔ <strong>"UPI Transaction ID"</strong> (12 अंक)।</li>
-                      <li><strong>Paytm:</strong> पासबुक ➔ <strong>"UPI Ref No."</strong> (12 अंक)।</li>
-                    </ul>
-                  </div>
-                )}
-
-                <form onSubmit={handleSubmitUtr} className="space-y-3">
-                  <div className="relative">
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      maxLength={12}
-                      value={utrNumber}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/[^0-9]/g, '');
-                        setUtrNumber(val);
-                        if (utrError) setUtrError(null);
-                      }}
-                      placeholder="उदा. 423812345678 (12 अंक)"
-                      className="w-full bg-slate-50 border border-slate-300 focus:border-emerald-600 focus:bg-white rounded-xl px-3.5 py-3 text-sm font-mono font-bold text-slate-900 tracking-wider outline-none transition-colors"
-                    />
-                    <span className={`absolute right-3.5 top-3.5 text-[11px] font-bold ${utrNumber.length === 12 ? 'text-emerald-600' : 'text-slate-400'}`}>
-                      {utrNumber.length}/12 {utrNumber.length === 12 ? '✓' : 'अंक'}
-                    </span>
-                  </div>
-
-                  {/* Optional Screenshot Upload */}
-                  <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
-                        <Camera className="w-3.5 h-3.5 text-slate-500" />
-                        <span>पेमेंट रसीद / स्क्रीनशॉट (वैकल्पिक / Optional):</span>
-                      </label>
-                      <span className="text-[10px] font-semibold text-slate-500">
-                        फास्ट वेरिफिकेशन
-                      </span>
-                    </div>
-
-                    <input
-                      ref={screenshotInputRef}
-                      type="file"
-                      accept="image/png,image/jpeg,image/jpg,image/webp"
-                      onChange={handleScreenshotSelect}
-                      className="hidden"
-                    />
-
-                    {isProcessingScreenshot ? (
-                      <div className="py-2.5 px-3 rounded-lg bg-white border border-slate-200 text-xs font-bold text-slate-700 flex items-center justify-center gap-2">
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-600" />
-                        <span>स्क्रीनशॉट प्रोसेस हो रहा है...</span>
-                      </div>
-                    ) : screenshotUrl ? (
-                      <div className="flex items-center justify-between gap-2 p-1.5 bg-white rounded-lg border border-slate-200">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <img
-                            src={screenshotUrl}
-                            alt="Receipt"
-                            className="w-9 h-9 object-cover rounded-md border border-slate-200 shrink-0"
-                          />
-                          <span className="text-xs font-bold text-emerald-700 truncate">
-                            स्क्रीनशॉट संलग्न है ✓
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={handleRemoveScreenshot}
-                          className="p-1 rounded-md text-rose-600 hover:bg-rose-50 cursor-pointer"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => screenshotInputRef.current?.click()}
-                        className="w-full py-2 px-3 rounded-lg border border-dashed border-slate-300 hover:border-emerald-500 bg-white text-slate-700 transition-all flex items-center justify-center gap-1.5 cursor-pointer text-xs font-medium"
-                      >
-                        <Upload className="w-3.5 h-3.5 text-slate-500" />
-                        <span>स्क्रीनशॉट अपलोड करें (गैलरी से)</span>
-                      </button>
-                    )}
-                  </div>
-
-                  {utrError && (
-                    <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-1.5">
-                      <AlertCircle className="w-4 h-4 shrink-0" />
-                      <span>{utrError}</span>
-                    </div>
-                  )}
-
-                  {/* Primary CTA Button */}
-                  <button
-                    id="btn-verify-utr-submit"
-                    type="submit"
-                    disabled={isSubmittingUtr || utrNumber.length !== 12}
-                    className={`w-full py-3.5 px-4 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-md transition-all ${
-                      utrNumber.length === 12
-                        ? 'bg-slate-900 hover:bg-slate-800 text-white cursor-pointer active:scale-[0.99]'
-                        : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                    }`}
-                  >
-                    {isSubmittingUtr ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin text-white" />
-                        <span>सत्यापित किया जा रहा है...</span>
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                        <span>पेमेंट वेरिफाई करें & अनलॉक करें (Verify & Unlock)</span>
-                      </>
-                    )}
-                  </button>
-                </form>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Status</span>
+                  <span className="font-bold text-rose-400">अस्वीकार (Rejected)</span>
+                </div>
               </div>
 
-              {/* Dev Simulation Sandbox */}
-              {orderData?.mode === 'sandbox_simulator' && (
-                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between text-xs">
-                  <span className="font-bold text-amber-900">🛠️ Admin Sandbox Test Mode</span>
-                  <button
-                    onClick={handleTestSimulate}
-                    disabled={isSimulating}
-                    className="px-2.5 py-1 rounded-lg bg-amber-600 text-white font-bold text-[11px] cursor-pointer hover:bg-amber-700"
-                  >
-                    {isSimulating ? 'Testing...' : '⚡ Test Unlock'}
-                  </button>
-                </div>
-              )}
-
-              {/* WhatsApp Support Helper */}
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs gap-2">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-emerald-100 text-emerald-700 shrink-0">
-                    <MessageCircle className="w-4 h-4" />
+              {/* Primary Helpline & WhatsApp Section */}
+              <div className="mt-4 p-4 rounded-2xl bg-gradient-to-br from-[#062419] to-[#0c1a2e] border-2 border-emerald-500/50 space-y-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/50 flex items-center justify-center shrink-0 text-emerald-400">
+                    <MessageCircle className="w-5 h-5" />
                   </div>
                   <div>
-                    <h6 className="font-bold text-slate-900 text-xs leading-tight">भुगतान में कोई सहायता चाहिए?</h6>
-                    <p className="text-[10px] text-slate-500">व्हाट्सएप पर 24/7 तत्काल सहायता</p>
+                    <h4 className="text-xs sm:text-sm font-extrabold text-white flex items-center gap-1.5">
+                      <span>हेल्पलाइन पर स्क्रीनशॉट भेजें</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold border border-emerald-500/30">
+                        Help Desk
+                      </span>
+                    </h4>
+                    <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+                      यदि आपके खाते से पैसे कट गए हैं, तो कृपया स्क्रीनशॉट हमारे हेल्पलाइन नंबर पर भेजें। हमारी टीम तुरंत चेक करके आपका VIP अनलॉक कर देगी।
+                    </p>
                   </div>
                 </div>
 
-                <a
-                  href={`https://wa.me/639465507887?text=${encodeURIComponent(`Hello! Mujhe payment karne me help chahiye.\nItem: ${item.title} (₹${item.price})\nOrder ID: ${orderData?.order.orderId || ''}`)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] shadow-xs flex items-center gap-1 shrink-0 transition-transform active:scale-95"
+                {/* Big WhatsApp Send Screenshot Button */}
+                <button
+                  id="btn-whatsapp-rejected-page"
+                  onClick={() => handleOpenWhatsAppHelpline(rejectionNote || reviewReason || 'अस्वीकार हुआ')}
+                  className="w-full py-3.5 px-4 rounded-xl bg-[#25D366] hover:bg-[#20ba59] active:scale-[0.99] text-white font-black text-xs sm:text-sm transition-all shadow-lg shadow-[#25D366]/30 flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  <MessageCircle className="w-3.5 h-3.5" />
-                  <span>व्हाट्सएप चैट</span>
-                </a>
+                  <MessageCircle className="w-4 h-4 fill-white text-white shrink-0" />
+                  <span>WhatsApp पर स्क्रीनशॉट भेजें (Send on WhatsApp)</span>
+                </button>
+
+                {/* Helpline Phone Number */}
+                <div className="flex items-center justify-between pt-1 text-[11px] border-t border-emerald-500/20">
+                  <div className="flex items-center gap-1.5 text-emerald-300 font-mono font-bold">
+                    <Phone className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>{helplineNumber}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleCopyHelpline}
+                      className="text-xs px-2.5 py-1 rounded-lg bg-emerald-950/80 border border-emerald-600/40 text-emerald-300 hover:text-white transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      {copiedHelpline ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedHelpline ? 'कॉपी हुआ' : 'नंबर कॉपी करें'}</span>
+                    </button>
+                    <a
+                      href={`tel:${cleanHelpline}`}
+                      className="text-xs px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 hover:text-white transition-colors flex items-center gap-1"
+                    >
+                      <Phone className="w-3 h-3" />
+                      <span>कॉल करें</span>
+                    </a>
+                  </div>
+                </div>
               </div>
 
-              {/* Security & Privacy Badges */}
-              <div className="flex items-center justify-center gap-3 text-[10px] text-slate-500 pt-1 font-medium">
-                <span className="flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                  256-Bit SSL सुरक्षित
-                </span>
-                <span>•</span>
-                <span className="flex items-center gap-1">
-                  <BadgeCheck className="w-3.5 h-3.5 text-emerald-600" />
-                  NPCI UPI अनुकूल
-                </span>
-                <span>•</span>
-                <span>100% गोपनीय व तुरंत डिलीवरी</span>
-              </div>
+              {/* Action Buttons: Re-upload or Pay Again */}
+              <div className="mt-4 space-y-2">
+                <button
+                  id="btn-retry-upload-proof"
+                  onClick={() => {
+                    setScreenshotPreview(null);
+                    setScreenshotFile(null);
+                    setUserUtr('');
+                    setUploadError(null);
+                    setCurrentPage('proof');
+                  }}
+                  className="w-full py-3 px-4 rounded-xl bg-[#ff5500] hover:bg-[#e04b00] active:scale-[0.99] text-white font-bold text-xs sm:text-sm transition-all shadow-md shadow-[#ff5500]/20 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>नया सही स्क्रीनशॉट अपलोड करें (Upload New Screenshot)</span>
+                </button>
 
+                <button
+                  onClick={() => setCurrentPage('qr')}
+                  className="w-full py-2.5 px-3 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white text-xs font-semibold transition-all flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <span>← दोबारा QR कोड से भुगतान करें</span>
+                </button>
+              </div>
             </div>
-          )}
+          </div>
+        )}
 
-        </div>
+        {/* ======================================================== */}
+        {/* PAGE 5: PAYMENT SUCCESS (Unlocks VIP Content) */}
+        {/* ======================================================== */}
+        {currentPage === 'success' && (
+          <div className="p-6 sm:p-8 flex flex-col items-center justify-center text-center overflow-y-auto space-y-4">
+            <div className="relative">
+              <div className="w-20 h-20 rounded-full bg-emerald-500/10 border-2 border-emerald-400 flex items-center justify-center text-emerald-400 shadow-xl shadow-emerald-500/20">
+                <CheckCircle2 className="w-10 h-10" />
+              </div>
+            </div>
 
+            <div>
+              <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-emerald-400 tracking-wider uppercase">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>PAYMENT VERIFIED</span>
+              </div>
+              <h2 className="text-2xl font-black text-white mt-1">
+                Payment Successful
+              </h2>
+              <p className="text-xs text-slate-400 mt-1">
+                आपका पेमेंट सफलतापूर्वक वेरिफ़ाई हो गया है।
+              </p>
+              {isAutoVerified && (
+                <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold">
+                  <Zap className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>⚡ AI ऑटो-वेरिफाइड: UTR, नाम, तारीख और अमाउंट मैच हुआ!</span>
+                </div>
+              )}
+            </div>
+
+            <div className="w-full p-4 rounded-2xl bg-[#0e1628] border border-[#1e293b] text-left space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Order ID:</span>
+                <span className="font-mono font-bold text-white">{orderData?.order.orderId}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Amount:</span>
+                <span className="font-bold text-emerald-400">{amountDisplay}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Status:</span>
+                <span className="font-bold text-emerald-400">PAID & UNLOCKED</span>
+              </div>
+            </div>
+
+            <button
+              id="btn-access-unlocked-vip"
+              onClick={() => {
+                onSuccess(item);
+                onClose();
+              }}
+              className="w-full py-3.5 px-5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 active:scale-[0.99] text-white font-extrabold text-sm transition-all shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <span>VIP कंटेंट अभी देखें (View Content) →</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

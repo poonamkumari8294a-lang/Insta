@@ -38,6 +38,20 @@
     <!-- Netlify Drawer, Badge & Collaboration Toolbar Suppressor -->
     <script>
       (function() {
+        // Defensive polyfill for OffscreenCanvas / canvas.getBoundingClientRect
+        try {
+          if (typeof OffscreenCanvas !== 'undefined' && !OffscreenCanvas.prototype.getBoundingClientRect) {
+            OffscreenCanvas.prototype.getBoundingClientRect = function() {
+              var w = this.width || (typeof window !== 'undefined' ? window.innerWidth : 0) || 0;
+              var h = this.height || (typeof window !== 'undefined' ? window.innerHeight : 0) || 0;
+              return {
+                top: 0, left: 0, right: w, bottom: h,
+                width: w, height: h, x: 0, y: 0
+              };
+            };
+          }
+        } catch (_) {}
+
         try {
           window.NETLIFY_DRAWER_DISABLED = true;
           window.ntl_drawer_state = 'hidden';

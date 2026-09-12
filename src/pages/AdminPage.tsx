@@ -104,7 +104,8 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize2,
-  UserPlus
+  UserPlus,
+  Zap
 } from 'lucide-react';
 
 interface AdminPageProps {
@@ -207,6 +208,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     published: true,
     featured: true
   });
+  const [isSavingPost, setIsSavingPost] = useState(false);
+  const [postSaveError, setPostSaveError] = useState<string | null>(null);
 
   // Orders search & filter
   const [orderSearch, setOrderSearch] = useState('');
@@ -445,6 +448,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({
 
   const handleSaveContent = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSavingPost) return;
+    setPostSaveError(null);
+    setIsSavingPost(true);
     try {
       const payload: Partial<MediaItem> = { ...contentFormData };
       
@@ -472,12 +478,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         showToast('✅ पोस्ट सफलतापूर्वक अपडेट हो गई');
         await updateAdminContent(editingItem.id, payload);
       } else {
-        setShowContentModal(false);
         showToast('⏳ नई पोस्ट पब्लिश हो रही है...');
         const created = await createAdminContent(payload);
         const nextList = [created, ...contentList];
         setContentList(nextList);
         if (onContentUpdated) onContentUpdated(nextList);
+        setShowContentModal(false);
         showToast('✅ नई पोस्ट सफलतापूर्वक पब्लिश हो गई');
 
         // Trigger Push Notification automatically if published (Single notification per post / album)
@@ -493,7 +499,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         }
       }
     } catch (err: any) {
-      showToast(err.message || 'Failed to save content', 'error');
+      console.error('[Save Content Error]', err);
+      const errMsg = err.message || 'Failed to save content';
+      setPostSaveError(errMsg);
+      showToast(errMsg, 'error');
+    } finally {
+      setIsSavingPost(false);
     }
   };
 
@@ -2142,6 +2153,23 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               </button>
             </div>
 
+            {postSaveError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl flex items-center gap-2.5 text-rose-700 text-xs">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <div className="flex-1 min-w-0">
+                  <span className="font-bold">पोस्ट सेव करने में त्रुटि: </span>
+                  <span>{postSaveError}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPostSaveError(null)}
+                  className="p-1 text-rose-500 hover:text-rose-800"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
             <form onSubmit={handleSaveContent} className="space-y-4 text-xs">
               <div>
                 <label className="font-bold text-purple-950 block mb-1">Title</label>
@@ -2424,16 +2452,25 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-purple-100">
                 <button
                   type="button"
+                  disabled={isSavingPost}
                   onClick={() => setShowContentModal(false)}
-                  className="px-4 py-2 rounded-2xl bg-white hover:bg-pink-50 text-purple-900 font-bold border border-purple-100 shadow-sm"
+                  className="px-4 py-2 rounded-2xl bg-white hover:bg-pink-50 text-purple-900 font-bold border border-purple-100 shadow-sm disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="glow-pink-btn px-6 py-2 rounded-2xl text-white font-black shadow-md shadow-pink-500/20"
+                  disabled={isSavingPost}
+                  className="glow-pink-btn px-6 py-2 rounded-2xl text-white font-black shadow-md shadow-pink-500/20 disabled:opacity-60 flex items-center gap-2 cursor-pointer"
                 >
-                  Save Item
+                  {isSavingPost ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Saving & Uploading...</span>
+                    </>
+                  ) : (
+                    <span>Save Item</span>
+                  )}
                 </button>
               </div>
             </form>
@@ -2551,6 +2588,43 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 <span className="font-bold uppercase text-[10px] text-pink-700">{viewingReceiptOrder.status}</span>
               </div>
             </div>
+
+            {/* AI Automated Verification Audit Details */}
+            {(viewingReceiptOrder.aiVerificationNotes || viewingReceiptOrder.autoVerified !== undefined) && (
+              <div className="p-3 rounded-2xl bg-indigo-50/90 border border-indigo-200 text-xs shrink-0 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold flex items-center gap-1.5 text-indigo-950 text-xs">
+                    <Zap className="w-3.5 h-3.5 text-indigo-600" />
+                    AI Vision Analysis & Auto-Check
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      viewingReceiptOrder.autoVerified
+                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                        : 'bg-amber-100 text-amber-800 border border-amber-300'
+                    }`}
+                  >
+                    {viewingReceiptOrder.autoVerified ? '✓ AI Auto-Verified' : 'Manual Review Needed'}
+                  </span>
+                </div>
+                {viewingReceiptOrder.aiVerificationNotes && (
+                  <p className="text-[11px] text-indigo-900 font-medium">
+                    {viewingReceiptOrder.aiVerificationNotes}
+                  </p>
+                )}
+                <div className="flex flex-wrap items-center gap-3 text-[10px] text-indigo-800 pt-0.5">
+                  {viewingReceiptOrder.aiExtractedUtr && (
+                    <span>Extracted UTR: <strong className="font-mono">{viewingReceiptOrder.aiExtractedUtr}</strong></span>
+                  )}
+                  {viewingReceiptOrder.aiExtractedAmount !== undefined && (
+                    <span>Extracted Amount: <strong>₹{viewingReceiptOrder.aiExtractedAmount}</strong></span>
+                  )}
+                  {viewingReceiptOrder.aiExtractedDate && (
+                    <span>Receipt Date: <strong>{viewingReceiptOrder.aiExtractedDate}</strong></span>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Action Buttons in Receipt Modal */}
             <div className="flex items-center justify-between gap-3 pt-2 border-t border-purple-100 shrink-0">

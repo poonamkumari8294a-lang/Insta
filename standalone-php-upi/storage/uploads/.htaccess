@@ -1,0 +1,7 @@
+# Prevent PHP and script execution in upload directory
+php_flag engine off
+RemoveHandler .phtml .php .php3 .php4 .php5 .php7 .php8 .phps .cgi .pl .asp .aspx
+<FilesMatch "\.(?i:php|phtml|php3|php4|php5|php7|php8|phps|cgi|pl|asp|aspx|sh|bash|py)$">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>

@@ -1,4 +1,5 @@
 import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
+export { cloudinary };
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';

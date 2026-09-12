@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import confetti from 'canvas-confetti';
+import confetti from '../utils/confetti';
 import {
   X,
   Sparkles,

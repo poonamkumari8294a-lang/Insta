@@ -60,15 +60,26 @@ export class PaymentProvider {
 
     // SERVER DETERMINES PRICE (Never trust client)
     const exactAmount = Number(content.price);
-    const orderId = `ORD_${Date.now()}_${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+    // Standard VVV-XXXXXXXXXXXX format matching reference screenshots
+    const randomHex = crypto.randomBytes(6).toString('hex').toUpperCase();
+    const orderId = `VVV-${randomHex}`;
     const settings = db.getSettings();
     const upiId = settings.upiId || this.config.upiId;
     const payeeName = settings.creatorName || this.config.merchantName;
 
     // Clean, universal NPCI UPI URI Scheme compliant with P2P and Merchant handles
-    // Omitting non-standard 'tr' on personal VPA to prevent PhonePe fraud engine from flagging unverified web intents
-    const cleanNote = `Order ${orderId.slice(-6)}`;
-    const upiIntentUrl = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(payeeName)}&am=${exactAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(cleanNote)}`;
+    const cleanNote = `Order ${orderId}`;
+    const upiQuery = `pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(payeeName)}&am=${exactAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(cleanNote)}`;
+    const upiIntentUrl = `upi://pay?${upiQuery}`;
+
+    // App-specific intent URLs
+    const appUrls = {
+      phonepe: `phonepe://pay?${upiQuery}`,
+      paytm: `paytmmp://pay?${upiQuery}`,
+      gpay: `tez://upi/pay?${upiQuery}`,
+      bhim: `bhim://pay?${upiQuery}`,
+      generic: upiIntentUrl
+    };
 
     // Generate Dynamic QR Code image data URL
     const qrDataUrl = await QRCode.toDataURL(upiIntentUrl, {
@@ -81,7 +92,7 @@ export class PaymentProvider {
       }
     });
 
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 min expiry
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 min expiry
 
     const order: OrderItem = {
       orderId,
@@ -101,7 +112,7 @@ export class PaymentProvider {
     };
 
     const savedOrder = db.createOrder(order);
-    return { order: savedOrder, qrDataUrl, upiIntentUrl };
+    return { order: savedOrder, qrDataUrl, upiIntentUrl, appUrls } as any;
   }
 
   /**

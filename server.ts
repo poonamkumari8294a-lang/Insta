@@ -8,6 +8,7 @@ import { db } from './server/db';
 import { MediaItem } from './src/types';
 import { paymentProvider } from './server/paymentProvider';
 import {
+  cloudinary,
   deleteItemCloudinaryMedia,
   deleteCloudinaryAsset,
   extractAllMediaItemAssets,
@@ -21,6 +22,7 @@ import {
   deleteServerFirestoreDoc,
   getServerFirestoreDoc
 } from './server/firebase';
+import { verifyPaymentProof } from './server/screenshotVerifier';
 
 dotenv.config();
 
@@ -332,7 +334,7 @@ async function startServer() {
   });
 
   // 8. Direct UPI Payment UTR Submission with Strict Verification & Screenshot Proof
-  app.post('/api/payments/submit-utr', (req: Request, res: Response) => {
+  app.post('/api/payments/submit-utr', async (req: Request, res: Response) => {
     try {
       const { orderId, utr, screenshotUrl } = req.body;
       if (!orderId) {
@@ -340,6 +342,23 @@ async function startServer() {
       }
       if (!utr) {
         return res.status(400).json({ success: false, error: 'कृपया सही 12-अंकों का UPI UTR / Transaction No. दर्ज करें।' });
+      }
+
+      // If screenshot is also provided, run automated AI verification
+      if (screenshotUrl) {
+        const order = db.getOrder(orderId);
+        if (order) {
+          const verification = await verifyPaymentProof(order, screenshotUrl, utr);
+          if (verification.verified && verification.status === 'paid') {
+            const updated = db.updateOrderStatus(orderId, 'paid', utr);
+            return res.json({
+              success: true,
+              status: 'paid',
+              order: updated || order,
+              message: 'पेमेंट सफलतापूर्वक ऑटोमेटिक सत्यापित हो गया है! कंटेंट अनलॉक हो गया है।'
+            });
+          }
+        }
       }
 
       const result = db.validateAndProcessUtr(orderId, utr, screenshotUrl);
@@ -354,6 +373,130 @@ async function startServer() {
         message: result.status === 'paid'
           ? 'पेमेंट सफलतापूर्वक सत्यापित हो गया है! कंटेंट अनलॉक हो गया है।'
           : 'UTR सफलतापूर्वक सबमिट हो गया है। बैंक सत्यापन के बाद कंटेंट अपने आप खुल जाएगा।'
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Dedicated /api/payment/proof endpoint with AI Automatic Verification
+  app.post('/api/payment/proof', async (req: Request, res: Response) => {
+    try {
+      const { orderId, screenshot, screenshotUrl, utr } = req.body;
+      if (!orderId) {
+        return res.status(400).json({ success: false, error: 'order_id is required' });
+      }
+      const proofUrl = screenshot || screenshotUrl;
+      if (!proofUrl) {
+        return res.status(400).json({ success: false, error: 'Screenshot file is required' });
+      }
+
+      // Check size if base64 data url
+      if (typeof proofUrl === 'string' && proofUrl.startsWith('data:') && proofUrl.length > 7 * 1024 * 1024) {
+        return res.status(400).json({ success: false, error: 'File size exceeds 5MB limit' });
+      }
+
+      const order = db.getOrder(orderId);
+      if (!order) {
+        return res.status(404).json({ success: false, error: 'Order not found' });
+      }
+
+      // 1. Run Automated AI Verification on screenshot (checks UTR ID, Payee Name, Date/Time, and Amount)
+      const verification = await verifyPaymentProof(order, proofUrl, utr);
+
+      const aiData = {
+        autoVerified: verification.verified,
+        aiExtractedUtr: verification.details.extractedUtr || verification.details.extracted.utr,
+        aiExtractedAmount: verification.details.extractedAmount || verification.details.extracted.amount,
+        aiExtractedDate: verification.details.extracted.transactionDate,
+        aiVerificationNotes: verification.reason,
+      };
+
+      // 2. Save screenshot and initial audit log to database
+      db.submitPaymentProof(orderId, proofUrl, utr || aiData.aiExtractedUtr, aiData);
+
+      // 3. If AI matched all criteria (UTR, Amount, Date/Time, and Success status):
+      if (verification.verified && verification.status === 'paid') {
+        const verifiedUtr = aiData.aiExtractedUtr || utr || `AI_UTR_${Date.now()}`;
+        const updatedOrder = db.updateOrderStatus(orderId, 'paid', verifiedUtr);
+
+        console.log(`[AutoVerify] Order ${orderId} AUTOMATICALLY VERIFIED and UNLOCKED! (UTR: ${verifiedUtr}, Amount: ₹${order.amount})`);
+
+        return res.json({
+          success: true,
+          order_id: orderId,
+          status: 'paid',
+          auto_verified: true,
+          message: 'पेमेंट सफलतापूर्वक ऑटोमेटिक सत्यापित हो गया है! कंटेंट अनलॉक हो गया है।',
+          accessToken: updatedOrder?.accessToken,
+          details: verification.details
+        });
+      }
+
+      // 4. If any detail did not match clearly, route to manual review queue
+      console.log(`[AutoVerify] Order ${orderId} queued for manual review. Reason: ${verification.reason}`);
+      res.json({
+        success: true,
+        order_id: orderId,
+        status: 'manual_review',
+        auto_verified: false,
+        message: verification.reason || 'Screenshot uploaded successfully. Queued for manual review.',
+        details: verification.details
+      });
+    } catch (err: any) {
+      console.error('/api/payment/proof error:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Dedicated /api/payment/status endpoint matching polling spec
+  app.get('/api/payment/status', (req: Request, res: Response) => {
+    try {
+      const orderId = (req.query.order || req.query.orderId) as string;
+      if (!orderId) {
+        return res.status(400).json({ success: false, error: 'order parameter is required' });
+      }
+
+      const order = db.getOrder(orderId);
+      if (!order) {
+        return res.status(404).json({ success: false, error: 'Order not found' });
+      }
+
+      // Check expiry
+      if (order.status === 'pending' && new Date(order.expiresAt).getTime() < Date.now()) {
+        db.updateOrderStatus(order.orderId, 'expired');
+        order.status = 'expired';
+      }
+
+      res.json({
+        success: true,
+        order_id: order.orderId,
+        status: order.status,
+        amount: order.amount,
+        currency: order.currency || 'INR',
+        transaction_id: order.transactionRef || null,
+        paid_at: order.paidAt || null,
+        accessToken: order.accessToken || null
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Dedicated /api/payment/intent endpoint
+  app.post('/api/payment/intent', (req: Request, res: Response) => {
+    try {
+      const { orderId, appName } = req.body;
+      const order = db.getOrder(orderId);
+      if (!order) {
+        return res.status(404).json({ success: false, error: 'Order not found' });
+      }
+      res.json({
+        success: true,
+        order_id: orderId,
+        app: appName,
+        intent_created: true,
+        timestamp: new Date().toISOString()
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -562,14 +705,26 @@ async function startServer() {
     try {
       const allContent = db.getAllContent(true);
       const jsonStr = JSON.stringify(allContent);
-      const form = new FormData();
-      form.append('file', 'data:text/plain;base64,' + Buffer.from(jsonStr).toString('base64'));
-      form.append('upload_preset', 'rumacutegirl');
-      form.append('public_id', 'ruma_content_feed');
-      await fetch('https://api.cloudinary.com/v1_1/mnbjgtqu/raw/upload', {
-        method: 'POST',
-        body: form
-      });
+      const base64 = 'data:text/plain;base64,' + Buffer.from(jsonStr).toString('base64');
+      
+      try {
+        await cloudinary.uploader.upload(base64, {
+          resource_type: 'raw',
+          public_id: 'ruma_content_feed',
+          overwrite: true,
+          invalidate: true
+        });
+      } catch (authErr) {
+        // Fallback to unsigned preset
+        const form = new FormData();
+        form.append('file', base64);
+        form.append('upload_preset', 'rumacutegirl');
+        form.append('public_id', 'ruma_content_feed');
+        await fetch('https://api.cloudinary.com/v1_1/mnbjgtqu/raw/upload', {
+          method: 'POST',
+          body: form
+        });
+      }
       console.log(`[Cloudinary Feed Sync] Successfully synced ${allContent.length} items to ruma_content_feed`);
     } catch (err) {
       console.warn('[Cloudinary Feed Sync Warning]', err);
@@ -1106,6 +1261,12 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Creator Hub Server running on http://0.0.0.0:${PORT}`);
+    // Immediate and periodic synchronization with Cloudinary global content feed
+    db.syncFromCloudinaryFeed().catch(() => {});
+    setInterval(() => {
+      db.syncFromCloudinaryFeed().catch(() => {});
+    }, 3 * 60 * 1000);
+
     // Periodic background reconciliation for any transient Cloudinary retries (every 10 minutes)
     setInterval(() => {
       reconcileCloudinaryRetryQueue().catch(err => {
